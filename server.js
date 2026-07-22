@@ -55,9 +55,12 @@ res.setHeader(
     path: sasPath,
     method: req.method,
     headers: {
-      ...req.headers,
-      host: 'sas.jt.iq'
-    }
+  ...req.headers,
+  host: 'sas.jt.iq',
+  origin: 'https://sas.jt.iq',
+  referer: 'https://sas.jt.iq/admin/',
+  'user-agent': req.headers['user-agent'] || 'Mozilla/5.0'
+}
   };
 
   delete options.headers['x-sas-target'];
