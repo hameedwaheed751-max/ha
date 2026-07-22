@@ -1,99 +1,107 @@
 const http = require('http');
 const https = require('https');
 
-const PORT = process.env.PORT || 3000;
+// Temporary workaround for invalid SAS certificate.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
+const PORT = Number(process.env.PORT) || 3000;
 const SAS_ORIGIN = 'https://sas.jt.iq';
+const sasUrl = new URL(SAS_ORIGIN);
 
-const server = http.createServer((req, res) => {
-
-  // CORS
+function applyCors(req, res) {
+  const requestedHeaders = req.headers['access-control-request-headers'];
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, x-sas-target'
+    requestedHeaders || 'Content-Type, Authorization, Allow-Cache-Y, X-SAS-Target'
   );
-  const requestedHeaders = req.headers['access-control-request-headers'];
+}
 
-res.setHeader(
-  'Access-Control-Allow-Headers',
-  requestedHeaders || 'Content-Type, Authorization, x-sas-target'
-);
+const server = http.createServer((req, res) => {
+  applyCors(req, res);
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     return res.end();
   }
 
-  // فحص السيرفر
-  if (req.url === '/' || req.url === '/health') {
-    res.writeHead(200, {
-      'Content-Type': 'application/json'
-    });
-
-    return res.end(JSON.stringify({
-      ok: true,
-      service: 'NetAgent SAS Proxy'
-    }));
+  if (req.url === '/' || req.url === '/health' || req.url === '/healthz') {
+    res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8'});
+    return res.end(JSON.stringify({ok: true, service: 'NetAgent SAS Proxy'}));
   }
 
-  // فقط طلبات /sas/
-  if (!req.url.startsWith('/sas/')) {
-    res.writeHead(404, {
-      'Content-Type': 'application/json'
-    });
-
-    return res.end(JSON.stringify({
-      error: 'Not Found'
-    }));
+  if (!req.url || !req.url.startsWith('/sas/')) {
+    res.writeHead(404, {'Content-Type': 'application/json; charset=utf-8'});
+    return res.end(JSON.stringify({error: 'Not Found'}));
   }
 
   const sasPath = req.url.substring(4);
 
-  const options = {
-    hostname: 'sas.jt.iq',
-    port: 443,
-    path: sasPath,
-    method: req.method,
-    headers: {
-  ...req.headers,
-  host: 'sas.jt.iq',
-  origin: 'https://sas.jt.iq',
-  referer: 'https://sas.jt.iq/admin/',
-  'user-agent': req.headers['user-agent'] || 'Mozilla/5.0'
-}
-  };
+  const headers = {...req.headers};
+  delete headers.host;
+  delete headers.origin;
+  delete headers.referer;
+  delete headers['x-sas-target'];
 
-  delete options.headers['x-sas-target'];
+  headers.host = sasUrl.host;
+  headers.origin = sasUrl.origin;
+  headers.referer = `${sasUrl.origin}/admin/`;
+  headers['user-agent'] = req.headers['user-agent'] || 'Mozilla/5.0';
 
-  const proxyReq = https.request(options, proxyRes => {
+  const upstream = https.request(
+    {
+      protocol: 'https:',
+      hostname: sasUrl.hostname,
+      port: sasUrl.port || 443,
+      path: sasPath,
+      method: req.method,
+      headers,
+      timeout: 30000,
+    },
+    (upstreamRes) => {
+      const responseHeaders = {...upstreamRes.headers};
+      delete responseHeaders['access-control-allow-origin'];
+      delete responseHeaders['access-control-allow-credentials'];
 
-    const responseHeaders = { ...proxyRes.headers };
+      Object.entries(responseHeaders).forEach(([key, value]) => {
+        if (value !== undefined) {
+          try {
+            res.setHeader(key, value);
+          } catch (_) {
+            // Ignore invalid upstream header values.
+          }
+        }
+      });
 
-delete responseHeaders['access-control-allow-origin'];
-delete responseHeaders['access-control-allow-credentials'];
+      applyCors(req, res);
+      res.writeHead(upstreamRes.statusCode || 502);
+      upstreamRes.pipe(res);
+    }
+  );
 
-responseHeaders['access-control-allow-origin'] = '*';
-
-res.writeHead(
-  proxyRes.statusCode || 500,
-  responseHeaders
-);
-
-proxyRes.pipe(res);
+  upstream.on('timeout', () => {
+    upstream.destroy(new Error('Upstream timeout'));
   });
 
-  proxyReq.on('error', error => {
-    res.writeHead(502, {
-      'Content-Type': 'application/json'
-    });
-
-    res.end(JSON.stringify({
-      error: 'SAS connection failed',
-      message: error.message
-    }));
+  upstream.on('error', (error) => {
+    if (!res.headersSent) {
+      applyCors(req, res);
+      res.writeHead(502, {'Content-Type': 'application/json; charset=utf-8'});
+    }
+    res.end(JSON.stringify({error: 'SAS connection failed', message: error.message}));
   });
 
-  req.pipe(proxyReq);
+  req.pipe(upstream);
+});
+
+server.on('error', (error) => {
+  if (error && error.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use.`);
+  } else {
+    console.error(error);
+  }
+  process.exit(1);
 });
 
 server.listen(PORT, '0.0.0.0', () => {
