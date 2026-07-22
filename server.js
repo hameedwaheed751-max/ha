@@ -12,10 +12,12 @@ const server = http.createServer((req, res) => {
     'Access-Control-Allow-Headers',
     'Content-Type, Authorization, x-sas-target'
   );
-  res.setHeader(
-    'Access-Control-Allow-Methods',
-    'GET, POST, PUT, DELETE, OPTIONS'
-  );
+  const requestedHeaders = req.headers['access-control-request-headers'];
+
+res.setHeader(
+  'Access-Control-Allow-Headers',
+  requestedHeaders || 'Content-Type, Authorization, x-sas-target'
+);
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
