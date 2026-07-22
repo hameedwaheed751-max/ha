@@ -1,12 +1,11 @@
 const http = require('http');
 const https = require('https');
 
-// Temporary workaround for invalid SAS certificate.
+// WARNING: هذا يتجاوز فحص شهادة SSL (مطلوب فقط إذا شهادات SAS غير موثوقة).
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const PORT = Number(process.env.PORT) || 3000;
-const SAS_ORIGIN = 'https://sas.jt.iq';
-const sasUrl = new URL(SAS_ORIGIN);
+const DEFAULT_SAS_ORIGIN = 'https://sas.speednet-iq.com';
 
 function applyCors(req, res) {
   const requestedHeaders = req.headers['access-control-request-headers'];
@@ -18,6 +17,22 @@ function applyCors(req, res) {
   );
 }
 
+function sendJson(res, statusCode, payload, req) {
+  applyCors(req, res);
+  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(payload));
+}
+
+function resolveTargetUrl(req, sasPathWithQuery) {
+  const targetOriginRaw = String(req.headers['x-sas-target'] || DEFAULT_SAS_ORIGIN).trim();
+  const targetOrigin = targetOriginRaw.replace(/\/+$/, '');
+
+  const base = new URL(targetOrigin);
+  const full = new URL(base.origin + sasPathWithQuery);
+
+  return { base, full };
+}
+
 const server = http.createServer((req, res) => {
   applyCors(req, res);
 
@@ -27,52 +42,57 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.url === '/' || req.url === '/health' || req.url === '/healthz') {
-    res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8'});
-    return res.end(JSON.stringify({ok: true, service: 'NetAgent SAS Proxy'}));
+    return sendJson(res, 200, { ok: true, service: 'NetAgent SAS Proxy' }, req);
   }
 
   if (!req.url || !req.url.startsWith('/sas/')) {
-    res.writeHead(404, {'Content-Type': 'application/json; charset=utf-8'});
-    return res.end(JSON.stringify({error: 'Not Found'}));
+    return sendJson(res, 404, { error: 'Not Found' }, req);
   }
 
-  const sasPath = req.url.substring(4);
+  const sasPathWithQuery = req.url.substring(4); // remove /sas
 
-  const headers = {...req.headers};
+  let target;
+  try {
+    target = resolveTargetUrl(req, sasPathWithQuery);
+  } catch (_) {
+    return sendJson(res, 400, { error: 'Invalid X-SAS-Target' }, req);
+  }
+
+  const headers = { ...req.headers };
   delete headers.host;
   delete headers.origin;
   delete headers.referer;
   delete headers['x-sas-target'];
 
-  headers.host = sasUrl.host;
-  headers.origin = sasUrl.origin;
-  headers.referer = `${sasUrl.origin}/admin/`;
+  headers.host = target.base.host;
+  headers.origin = target.base.origin;
+  headers.referer = `${target.base.origin}/admin/`;
   headers['user-agent'] = req.headers['user-agent'] || 'Mozilla/5.0';
 
-  const upstream = https.request(
+  const upstreamClient = target.full.protocol === 'https:' ? https : http;
+
+  const upstream = upstreamClient.request(
     {
-      protocol: 'https:',
-      hostname: sasUrl.hostname,
-      port: sasUrl.port || 443,
-      path: sasPath,
+      protocol: target.full.protocol,
+      hostname: target.full.hostname,
+      port: target.full.port || (target.full.protocol === 'https:' ? 443 : 80),
+      path: target.full.pathname + target.full.search,
       method: req.method,
       headers,
       timeout: 30000,
     },
     (upstreamRes) => {
-      const responseHeaders = {...upstreamRes.headers};
+      const responseHeaders = { ...upstreamRes.headers };
       delete responseHeaders['access-control-allow-origin'];
       delete responseHeaders['access-control-allow-credentials'];
 
-      Object.entries(responseHeaders).forEach(([key, value]) => {
+      for (const [key, value] of Object.entries(responseHeaders)) {
         if (value !== undefined) {
           try {
             res.setHeader(key, value);
-          } catch (_) {
-            // Ignore invalid upstream header values.
-          }
+          } catch (_) {}
         }
-      });
+      }
 
       applyCors(req, res);
       res.writeHead(upstreamRes.statusCode || 502);
@@ -86,10 +106,11 @@ const server = http.createServer((req, res) => {
 
   upstream.on('error', (error) => {
     if (!res.headersSent) {
-      applyCors(req, res);
-      res.writeHead(502, {'Content-Type': 'application/json; charset=utf-8'});
+      return sendJson(res, 502, { error: 'SAS connection failed', message: error.message }, req);
     }
-    res.end(JSON.stringify({error: 'SAS connection failed', message: error.message}));
+    try {
+      res.end(JSON.stringify({ error: 'SAS connection failed', message: error.message }));
+    } catch (_) {}
   });
 
   req.pipe(upstream);
