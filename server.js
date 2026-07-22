@@ -5,10 +5,6 @@ const https = require('https');
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const PORT = Number(process.env.PORT) || 3000;
-const SAS_ORIGIN = 'https://sas.speednet-iq.com';
-const SAS_BASE_PATH = '/admin/api/index.php/api/';
-
-const sasBaseUrl = new URL(SAS_ORIGIN);
 
 function applyCors(req, res) {
   const requestedHeaders = req.headers['access-control-request-headers'];
@@ -16,7 +12,7 @@ function applyCors(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    requestedHeaders || 'Content-Type, Authorization, Allow-Cache-Y'
+    requestedHeaders || 'Content-Type, Authorization, Allow-Cache-Y, X-SAS-Target'
   );
 }
 
@@ -38,7 +34,23 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({error: 'Not Found'}));
   }
 
-  const sasPath = SAS_BASE_PATH + req.url.substring(4).replace(/^\//, '');
+  const sasPath = req.url.substring(4);
+
+  const targetOriginRaw = String(req.headers['x-sas-target'] || '').trim();
+  if (!targetOriginRaw) {
+    res.writeHead(400, {'Content-Type': 'application/json; charset=utf-8'});
+    return res.end(JSON.stringify({error: 'Missing X-SAS-Target'}));
+  }
+
+  const targetOrigin = targetOriginRaw.replace(/\/+$/, '');
+
+  let targetBaseUrl;
+  try {
+    targetBaseUrl = new URL(targetOrigin);
+  } catch (_) {
+    res.writeHead(400, {'Content-Type': 'application/json; charset=utf-8'});
+    return res.end(JSON.stringify({error: 'Invalid X-SAS-Target'}));
+  }
 
   const headers = {...req.headers};
   delete headers.host;
@@ -46,18 +58,18 @@ const server = http.createServer((req, res) => {
   delete headers.referer;
   delete headers['x-sas-target'];
 
-  headers.host = sasBaseUrl.host;
-  headers.origin = sasBaseUrl.origin;
-  headers.referer = `${sasBaseUrl.origin}/admin/`;
+  headers.host = targetBaseUrl.host;
+  headers.origin = targetBaseUrl.origin;
+  headers.referer = `${targetBaseUrl.origin}/admin/`;
   headers['user-agent'] = req.headers['user-agent'] || 'Mozilla/5.0';
 
-  const upstreamClient = sasBaseUrl.protocol === 'https:' ? https : http;
+  const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
 
   const upstream = upstreamClient.request(
     {
-      protocol: sasBaseUrl.protocol,
-      hostname: sasBaseUrl.hostname,
-      port: sasBaseUrl.port || (sasBaseUrl.protocol === 'https:' ? 443 : 80),
+      protocol: targetBaseUrl.protocol,
+      hostname: targetBaseUrl.hostname,
+      port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
       path: sasPath,
       method: req.method,
       headers,
