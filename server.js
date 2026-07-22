@@ -61,7 +61,6 @@ res.setHeader(
   };
 
   delete options.headers['x-sas-target'];
-  delete options.headers['content-length'];
 
   const proxyReq = https.request(options, proxyRes => {
 
