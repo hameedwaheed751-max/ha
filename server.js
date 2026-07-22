@@ -78,8 +78,6 @@ res.writeHead(
 );
 
 proxyRes.pipe(res);
-
-    proxyRes.pipe(res);
   });
 
   proxyReq.on('error', error => {
