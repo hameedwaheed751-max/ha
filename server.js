@@ -63,10 +63,19 @@ const server = http.createServer((req, res) => {
 
   const proxyReq = https.request(options, proxyRes => {
 
-    res.writeHead(
-      proxyRes.statusCode || 500,
-      proxyRes.headers
-    );
+    const responseHeaders = { ...proxyRes.headers };
+
+delete responseHeaders['access-control-allow-origin'];
+delete responseHeaders['access-control-allow-credentials'];
+
+responseHeaders['access-control-allow-origin'] = '*';
+
+res.writeHead(
+  proxyRes.statusCode || 500,
+  responseHeaders
+);
+
+proxyRes.pipe(res);
 
     proxyRes.pipe(res);
   });
