@@ -5,18 +5,26 @@ const net = require('net');
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
-const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS === '1';
-const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS === '1';
+// Compatibility default: keep old behavior (skip TLS cert verification)
+// unless explicitly disabled with ALLOW_INSECURE_TLS=0.
+const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS !== '0';
+// Compatibility default: allow private targets unless explicitly disabled.
+const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS !== '0';
 const TARGET_ALLOWLIST = String(process.env.SAS_TARGET_ALLOWLIST || '')
   .split(',')
   .map((item) => item.trim().toLowerCase())
   .filter(Boolean);
+const ALLOW_ANY_PUBLIC_TARGETS = TARGET_ALLOWLIST.length === 0;
 
 if (ALLOW_INSECURE_TLS) {
   // Use only when SAS uses self-signed or invalid certificates.
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   console.warn('WARNING: TLS certificate verification is disabled (ALLOW_INSECURE_TLS=1).');
 }
+
+const INSECURE_HTTPS_AGENT = new https.Agent({
+  rejectUnauthorized: !ALLOW_INSECURE_TLS,
+});
 
 if (TARGET_ALLOWLIST.length === 0) {
   console.warn('WARNING: SAS_TARGET_ALLOWLIST is empty. Any public target host is allowed.');
@@ -108,7 +116,7 @@ function validateTarget(targetBaseUrl) {
     return 'Private IP targets are not allowed';
   }
 
-  if (!hostAllowedByAllowlist(hostname)) {
+  if (!ALLOW_ANY_PUBLIC_TARGETS && !hostAllowedByAllowlist(hostname)) {
     return 'Target host is not in SAS_TARGET_ALLOWLIST';
   }
 
@@ -116,38 +124,18 @@ function validateTarget(targetBaseUrl) {
 }
 
 function buildUpstreamHeaders(req) {
-  const allowedRequestHeaders = [
-    'accept',
-    'accept-language',
-    'authorization',
-    'content-type',
-    'allow-cache-y',
-    'user-agent',
-    'cookie',
-    'referer',
-    'origin',
-  ];
-
-  const headers = {};
-  for (const key of allowedRequestHeaders) {
-    if (req.headers[key] !== undefined) {
-      headers[key] = req.headers[key];
-    }
-  }
+  // Compatibility mode: forward most incoming headers.
+  const headers = {...req.headers};
+  delete headers.host;
+  delete headers.origin;
+  delete headers.referer;
+  delete headers['x-sas-target'];
+  delete headers['x-proxy-token'];
 
   if (!headers['user-agent']) {
     headers['user-agent'] = 'NetAgent-SAS-Proxy/1.0';
   }
-const targetRaw = String(req.headers['x-sas-target'] || '').trim();
 
-try {
-  const target = new URL(targetRaw);
-
-  headers['origin'] = target.origin;
-  headers['referer'] = `${target.origin}/admin/`;
-} catch (_) {
-  // إذا الرابط غير صالح، التحقق الرئيسي يعالجه لاحقاً
-}
   return headers;
 }
 
@@ -237,6 +225,8 @@ function handleRequest(req, res) {
     return;
   }
 
+  console.debug('Proxy request to SAS target:', targetOriginRaw, 'path:', sasPath);
+
   const targetOrigin = targetOriginRaw.replace(/\/+$/, '');
   let targetBaseUrl;
   try {
@@ -248,7 +238,10 @@ function handleRequest(req, res) {
 
   const targetError = validateTarget(targetBaseUrl);
   if (targetError) {
-    sendJson(req, res, 403, {error: targetError});
+    const allowlistInfo = ALLOW_ANY_PUBLIC_TARGETS
+      ? 'ALLOW_ANY_PUBLIC_TARGETS=true: any public host مسموح'
+      : `SAS_TARGET_ALLOWLIST contains: ${TARGET_ALLOWLIST.join(', ')}`;
+    sendJson(req, res, 403, {error: targetError, debug: allowlistInfo});
     return;
   }
 
@@ -264,6 +257,7 @@ function handleRequest(req, res) {
       method: req.method,
       headers: upstreamHeaders,
       timeout: 30000,
+      agent: targetBaseUrl.protocol === 'https:' ? INSECURE_HTTPS_AGENT : undefined,
     },
     (upstreamRes) => {
       res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
