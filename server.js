@@ -123,6 +123,9 @@ function buildUpstreamHeaders(req) {
     'content-type',
     'allow-cache-y',
     'user-agent',
+    'cookie',
+    'referer',
+    'origin',
   ];
 
   const headers = {};
