@@ -248,18 +248,28 @@ function handleRequest(req, res) {
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
 
-  const upstream = upstreamClient.request(
-    {
-      protocol: targetBaseUrl.protocol,
-      hostname: targetBaseUrl.hostname,
-      port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
-      path: sasPath,
-      method: req.method,
-      headers: upstreamHeaders,
-      timeout: 30000,
-      agent: targetBaseUrl.protocol === 'https:' ? INSECURE_HTTPS_AGENT : undefined,
-    },
-    (upstreamRes) => {
+  const upstreamOptions = {
+    protocol: targetBaseUrl.protocol,
+    hostname: targetBaseUrl.hostname,
+    port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
+    path: sasPath,
+    method: req.method,
+    headers: upstreamHeaders,
+    timeout: 30000,
+    agent: targetBaseUrl.protocol === 'https:' ? INSECURE_HTTPS_AGENT : undefined,
+  };
+
+  console.debug('Upstream request options', {
+    target: targetBaseUrl.origin,
+    path: sasPath,
+    method: req.method,
+    hostname: upstreamOptions.hostname,
+    port: upstreamOptions.port,
+  });
+
+  let upstream;
+  try {
+    upstream = upstreamClient.request(upstreamOptions, (upstreamRes) => {
       res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
       res.setHeader('X-Proxy-Path', sasPath);
 
@@ -282,16 +292,42 @@ function handleRequest(req, res) {
 
       res.writeHead(upstreamRes.statusCode || 502);
       upstreamRes.pipe(res);
-    }
-  );
+    });
+  } catch (err) {
+    console.error('Upstream request error (sync)', {
+      target: targetBaseUrl.origin,
+      path: sasPath,
+      message: err && err.message,
+      stack: err && err.stack,
+    });
+    sendJson(req, res, 502, {
+      error: 'SAS connection failed',
+      message: err && err.message,
+      target: targetBaseUrl.origin,
+      path: sasPath,
+    });
+    return;
+  }
 
   upstream.on('timeout', () => {
+    console.error('Upstream timeout', {target: targetBaseUrl.origin, path: sasPath});
     upstream.destroy(new Error('Upstream timeout'));
   });
 
   upstream.on('error', (error) => {
+    console.error('Upstream error', {
+      target: targetBaseUrl.origin,
+      path: sasPath,
+      message: error && error.message,
+      stack: error && error.stack,
+    });
     if (!res.headersSent) {
-      sendJson(req, res, 502, {error: 'SAS connection failed', message: error.message});
+      sendJson(req, res, 502, {
+        error: 'SAS connection failed',
+        message: error && error.message,
+        target: targetBaseUrl.origin,
+        path: sasPath,
+      });
       return;
     }
     try {
