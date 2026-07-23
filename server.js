@@ -1,69 +1,256 @@
 const http = require('http');
 const https = require('https');
-
-// Temporary workaround for invalid SAS certificate.
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+const net = require('net');
 
 const PORT = Number(process.env.PORT) || 3000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
+const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS === '1';
+const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS === '1';
+const TARGET_ALLOWLIST = String(process.env.SAS_TARGET_ALLOWLIST || '')
+  .split(',')
+  .map((item) => item.trim().toLowerCase())
+  .filter(Boolean);
+
+if (ALLOW_INSECURE_TLS) {
+  // Use only when SAS uses self-signed or invalid certificates.
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  console.warn('WARNING: TLS certificate verification is disabled (ALLOW_INSECURE_TLS=1).');
+}
+
+if (TARGET_ALLOWLIST.length === 0) {
+  console.warn('WARNING: SAS_TARGET_ALLOWLIST is empty. Any public target host is allowed.');
+}
 
 function applyCors(req, res) {
   const requestedHeaders = req.headers['access-control-request-headers'];
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const allowOrigin = process.env.CORS_ALLOW_ORIGIN || '*';
+  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    requestedHeaders || 'Content-Type, Authorization, Allow-Cache-Y, X-SAS-Target'
+    requestedHeaders || 'Content-Type, Authorization, Allow-Cache-Y, X-SAS-Target, X-Proxy-Token'
   );
+  res.setHeader('Access-Control-Max-Age', '86400');
 }
 
-const server = http.createServer((req, res) => {
+function sendJson(req, res, status, payload) {
+  applyCors(req, res);
+  res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8'});
+  res.end(JSON.stringify(payload));
+}
+
+function hasValidProxyToken(req) {
+  if (!PROXY_TOKEN) {
+    return true;
+  }
+  const xToken = String(req.headers['x-proxy-token'] || '').trim();
+  const auth = String(req.headers.authorization || '').trim();
+  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  return xToken === PROXY_TOKEN || bearer === PROXY_TOKEN;
+}
+
+function isPrivateIp(ip) {
+  if (!ip) return true;
+  if (net.isIPv4(ip)) {
+    const parts = ip.split('.').map(Number);
+    if (parts[0] === 10) return true;
+    if (parts[0] === 127) return true;
+    if (parts[0] === 0) return true;
+    if (parts[0] === 169 && parts[1] === 254) return true;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    return false;
+  }
+  if (net.isIPv6(ip)) {
+    const normalized = ip.toLowerCase();
+    if (normalized === '::1') return true;
+    if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+    if (normalized.startsWith('fe80')) return true;
+    return false;
+  }
+  return true;
+}
+
+function isLocalHostname(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  return host === 'localhost' || host.endsWith('.localhost');
+}
+
+function hostAllowedByAllowlist(hostname) {
+  if (TARGET_ALLOWLIST.length === 0) return true;
+  const host = String(hostname || '').toLowerCase();
+  return TARGET_ALLOWLIST.some((rule) => {
+    if (rule.startsWith('*.')) {
+      const suffix = rule.slice(1); // keep leading dot
+      return host.endsWith(suffix);
+    }
+    return host === rule;
+  });
+}
+
+function validateTarget(targetBaseUrl) {
+  if (!['http:', 'https:'].includes(targetBaseUrl.protocol)) {
+    return 'Only http/https targets are allowed';
+  }
+
+  const hostname = targetBaseUrl.hostname;
+  if (!hostname) {
+    return 'Target host is required';
+  }
+
+  if (isLocalHostname(hostname)) {
+    return 'Localhost targets are not allowed';
+  }
+
+  const parsedIp = net.isIP(hostname) ? hostname : null;
+  if (!ALLOW_PRIVATE_TARGETS && parsedIp && isPrivateIp(parsedIp)) {
+    return 'Private IP targets are not allowed';
+  }
+
+  if (!hostAllowedByAllowlist(hostname)) {
+    return 'Target host is not in SAS_TARGET_ALLOWLIST';
+  }
+
+  return null;
+}
+
+function buildUpstreamHeaders(req) {
+  const allowedRequestHeaders = [
+    'accept',
+    'accept-language',
+    'authorization',
+    'content-type',
+    'allow-cache-y',
+    'user-agent',
+  ];
+
+  const headers = {};
+  for (const key of allowedRequestHeaders) {
+    if (req.headers[key] !== undefined) {
+      headers[key] = req.headers[key];
+    }
+  }
+
+  if (!headers['user-agent']) {
+    headers['user-agent'] = 'NetAgent-SAS-Proxy/1.0';
+  }
+const targetRaw = String(req.headers['x-sas-target'] || '').trim();
+
+try {
+  const target = new URL(targetRaw);
+
+  headers['origin'] = target.origin;
+  headers['referer'] = `${target.origin}/admin/`;
+} catch (_) {
+  // إذا الرابط غير صالح، التحقق الرئيسي يعالجه لاحقاً
+}
+  return headers;
+}
+
+function filterResponseHeaders(upstreamHeaders) {
+  const hopByHop = new Set([
+    'connection',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailers',
+    'transfer-encoding',
+    'upgrade',
+    'access-control-allow-origin',
+    'access-control-allow-credentials',
+  ]);
+
+  const out = {};
+  for (const [key, value] of Object.entries(upstreamHeaders || {})) {
+    if (!hopByHop.has(String(key).toLowerCase()) && value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath) {
+  const MAX_CAPTURE_BYTES = 256 * 1024;
+  const chunks = [];
+  let total = 0;
+
+  upstreamRes.on('data', (chunk) => {
+    total += chunk.length;
+    if (total <= MAX_CAPTURE_BYTES) {
+      chunks.push(chunk);
+    }
+  });
+
+  upstreamRes.on('end', () => {
+    const raw = Buffer.concat(chunks).toString('utf8');
+    sendJson(req, res, upstreamRes.statusCode || 502, {
+      error: 'SAS upstream returned HTML error',
+      status: upstreamRes.statusCode || 502,
+      target: targetBaseUrl.origin,
+      path: sasPath,
+      body: raw.substring(0, 400),
+      truncated: total > MAX_CAPTURE_BYTES,
+    });
+  });
+}
+
+function handleRequest(req, res) {
   applyCors(req, res);
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
-    return res.end();
+    res.end();
+    return;
   }
 
   if (req.url === '/' || req.url === '/health' || req.url === '/healthz') {
-    res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8'});
-    return res.end(JSON.stringify({ok: true, service: 'NetAgent SAS Proxy'}));
+    sendJson(req, res, 200, {
+      ok: true,
+      service: 'NetAgent SAS Proxy',
+      env: NODE_ENV,
+      allowInsecureTls: ALLOW_INSECURE_TLS,
+      hasTokenAuth: Boolean(PROXY_TOKEN),
+      hasAllowlist: TARGET_ALLOWLIST.length > 0,
+    });
+    return;
+  }
+
+  if (!hasValidProxyToken(req)) {
+    sendJson(req, res, 401, {error: 'Unauthorized'});
+    return;
   }
 
   if (!req.url || !req.url.startsWith('/sas/')) {
-    res.writeHead(404, {'Content-Type': 'application/json; charset=utf-8'});
-    return res.end(JSON.stringify({error: 'Not Found'}));
+    sendJson(req, res, 404, {error: 'Not Found'});
+    return;
   }
 
   const sasPath = req.url.substring(4);
-
   const targetOriginRaw = String(req.headers['x-sas-target'] || '').trim();
   if (!targetOriginRaw) {
-    res.writeHead(400, {'Content-Type': 'application/json; charset=utf-8'});
-    return res.end(JSON.stringify({error: 'Missing X-SAS-Target'}));
+    sendJson(req, res, 400, {error: 'Missing X-SAS-Target'});
+    return;
   }
 
   const targetOrigin = targetOriginRaw.replace(/\/+$/, '');
-
   let targetBaseUrl;
   try {
     targetBaseUrl = new URL(targetOrigin);
   } catch (_) {
-    res.writeHead(400, {'Content-Type': 'application/json; charset=utf-8'});
-    return res.end(JSON.stringify({error: 'Invalid X-SAS-Target'}));
+    sendJson(req, res, 400, {error: 'Invalid X-SAS-Target'});
+    return;
   }
 
-  const headers = {...req.headers};
-  delete headers.host;
-  delete headers.origin;
-  delete headers.referer;
-  delete headers['x-sas-target'];
-
-  headers.host = targetBaseUrl.host;
-  headers.origin = targetBaseUrl.origin;
-  headers.referer = `${targetBaseUrl.origin}/admin/`;
-  headers['user-agent'] = req.headers['user-agent'] || 'Mozilla/5.0';
+  const targetError = validateTarget(targetBaseUrl);
+  if (targetError) {
+    sendJson(req, res, 403, {error: targetError});
+    return;
+  }
 
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
+  const upstreamHeaders = buildUpstreamHeaders(req);
 
   const upstream = upstreamClient.request(
     {
@@ -72,25 +259,30 @@ const server = http.createServer((req, res) => {
       port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
       path: sasPath,
       method: req.method,
-      headers,
+      headers: upstreamHeaders,
       timeout: 30000,
     },
     (upstreamRes) => {
-      const responseHeaders = {...upstreamRes.headers};
-      delete responseHeaders['access-control-allow-origin'];
-      delete responseHeaders['access-control-allow-credentials'];
+      res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
+      res.setHeader('X-Proxy-Path', sasPath);
 
-      Object.entries(responseHeaders).forEach(([key, value]) => {
-        if (value !== undefined) {
-          try {
-            res.setHeader(key, value);
-          } catch (_) {
-            // Ignore invalid upstream header values.
-          }
+      const responseHeaders = filterResponseHeaders(upstreamRes.headers);
+      for (const [key, value] of Object.entries(responseHeaders)) {
+        try {
+          res.setHeader(key, value);
+        } catch (_) {
+          // Ignore invalid upstream header values.
         }
-      });
+      }
 
       applyCors(req, res);
+
+      const contentType = String(responseHeaders['content-type'] || '').toLowerCase();
+      if ((upstreamRes.statusCode || 0) >= 400 && contentType.includes('text/html')) {
+        handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath);
+        return;
+      }
+
       res.writeHead(upstreamRes.statusCode || 502);
       upstreamRes.pipe(res);
     }
@@ -102,14 +294,20 @@ const server = http.createServer((req, res) => {
 
   upstream.on('error', (error) => {
     if (!res.headersSent) {
-      applyCors(req, res);
-      res.writeHead(502, {'Content-Type': 'application/json; charset=utf-8'});
+      sendJson(req, res, 502, {error: 'SAS connection failed', message: error.message});
+      return;
     }
-    res.end(JSON.stringify({error: 'SAS connection failed', message: error.message}));
+    try {
+      res.end();
+    } catch (_) {
+      // Ignore write errors if response is already closed.
+    }
   });
 
   req.pipe(upstream);
-});
+}
+
+const server = http.createServer(handleRequest);
 
 server.on('error', (error) => {
   if (error && error.code === 'EADDRINUSE') {
