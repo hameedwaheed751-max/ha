@@ -5,26 +5,18 @@ const net = require('net');
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
-// Compatibility default: keep old behavior (skip TLS cert verification)
-// unless explicitly disabled with ALLOW_INSECURE_TLS=0.
-const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS !== '0';
-// Compatibility default: allow private targets unless explicitly disabled.
-const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS !== '0';
+const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS === '1';
+const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS === '1';
 const TARGET_ALLOWLIST = String(process.env.SAS_TARGET_ALLOWLIST || '')
   .split(',')
   .map((item) => item.trim().toLowerCase())
   .filter(Boolean);
-const ALLOW_ANY_PUBLIC_TARGETS = TARGET_ALLOWLIST.length === 0;
 
 if (ALLOW_INSECURE_TLS) {
   // Use only when SAS uses self-signed or invalid certificates.
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   console.warn('WARNING: TLS certificate verification is disabled (ALLOW_INSECURE_TLS=1).');
 }
-
-const INSECURE_HTTPS_AGENT = new https.Agent({
-  rejectUnauthorized: !ALLOW_INSECURE_TLS,
-});
 
 if (TARGET_ALLOWLIST.length === 0) {
   console.warn('WARNING: SAS_TARGET_ALLOWLIST is empty. Any public target host is allowed.');
@@ -116,7 +108,7 @@ function validateTarget(targetBaseUrl) {
     return 'Private IP targets are not allowed';
   }
 
-  if (!ALLOW_ANY_PUBLIC_TARGETS && !hostAllowedByAllowlist(hostname)) {
+  if (!hostAllowedByAllowlist(hostname)) {
     return 'Target host is not in SAS_TARGET_ALLOWLIST';
   }
 
@@ -124,13 +116,21 @@ function validateTarget(targetBaseUrl) {
 }
 
 function buildUpstreamHeaders(req) {
-  // Compatibility mode: forward most incoming headers.
-  const headers = {...req.headers};
-  delete headers.host;
-  delete headers.origin;
-  delete headers.referer;
-  delete headers['x-sas-target'];
-  delete headers['x-proxy-token'];
+  const allowedRequestHeaders = [
+    'accept',
+    'accept-language',
+    'authorization',
+    'content-type',
+    'allow-cache-y',
+    'user-agent',
+  ];
+
+  const headers = {};
+  for (const key of allowedRequestHeaders) {
+    if (req.headers[key] !== undefined) {
+      headers[key] = req.headers[key];
+    }
+  }
 
   if (!headers['user-agent']) {
     headers['user-agent'] = 'NetAgent-SAS-Proxy/1.0';
@@ -225,8 +225,6 @@ function handleRequest(req, res) {
     return;
   }
 
-  console.debug('Proxy request to SAS target:', targetOriginRaw, 'path:', sasPath);
-
   const targetOrigin = targetOriginRaw.replace(/\/+$/, '');
   let targetBaseUrl;
   try {
@@ -238,38 +236,24 @@ function handleRequest(req, res) {
 
   const targetError = validateTarget(targetBaseUrl);
   if (targetError) {
-    const allowlistInfo = ALLOW_ANY_PUBLIC_TARGETS
-      ? 'ALLOW_ANY_PUBLIC_TARGETS=true: any public host مسموح'
-      : `SAS_TARGET_ALLOWLIST contains: ${TARGET_ALLOWLIST.join(', ')}`;
-    sendJson(req, res, 403, {error: targetError, debug: allowlistInfo});
+    sendJson(req, res, 403, {error: targetError});
     return;
   }
 
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
 
-  const upstreamOptions = {
-    protocol: targetBaseUrl.protocol,
-    hostname: targetBaseUrl.hostname,
-    port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
-    path: sasPath,
-    method: req.method,
-    headers: upstreamHeaders,
-    timeout: 30000,
-    agent: targetBaseUrl.protocol === 'https:' ? INSECURE_HTTPS_AGENT : undefined,
-  };
-
-  console.debug('Upstream request options', {
-    target: targetBaseUrl.origin,
-    path: sasPath,
-    method: req.method,
-    hostname: upstreamOptions.hostname,
-    port: upstreamOptions.port,
-  });
-
-  let upstream;
-  try {
-    upstream = upstreamClient.request(upstreamOptions, (upstreamRes) => {
+  const upstream = upstreamClient.request(
+    {
+      protocol: targetBaseUrl.protocol,
+      hostname: targetBaseUrl.hostname,
+      port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
+      path: sasPath,
+      method: req.method,
+      headers: upstreamHeaders,
+      timeout: 30000,
+    },
+    (upstreamRes) => {
       res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
       res.setHeader('X-Proxy-Path', sasPath);
 
@@ -292,42 +276,16 @@ function handleRequest(req, res) {
 
       res.writeHead(upstreamRes.statusCode || 502);
       upstreamRes.pipe(res);
-    });
-  } catch (err) {
-    console.error('Upstream request error (sync)', {
-      target: targetBaseUrl.origin,
-      path: sasPath,
-      message: err && err.message,
-      stack: err && err.stack,
-    });
-    sendJson(req, res, 502, {
-      error: 'SAS connection failed',
-      message: err && err.message,
-      target: targetBaseUrl.origin,
-      path: sasPath,
-    });
-    return;
-  }
+    }
+  );
 
   upstream.on('timeout', () => {
-    console.error('Upstream timeout', {target: targetBaseUrl.origin, path: sasPath});
     upstream.destroy(new Error('Upstream timeout'));
   });
 
   upstream.on('error', (error) => {
-    console.error('Upstream error', {
-      target: targetBaseUrl.origin,
-      path: sasPath,
-      message: error && error.message,
-      stack: error && error.stack,
-    });
     if (!res.headersSent) {
-      sendJson(req, res, 502, {
-        error: 'SAS connection failed',
-        message: error && error.message,
-        target: targetBaseUrl.origin,
-        path: sasPath,
-      });
+      sendJson(req, res, 502, {error: 'SAS connection failed', message: error.message});
       return;
     }
     try {
