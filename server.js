@@ -139,6 +139,30 @@ function buildUpstreamHeaders(req) {
   return headers;
 }
 
+function preserveBrowserContextHeaders(req, upstreamHeaders) {
+  if (!req || !req.headers || !upstreamHeaders) return;
+
+  const browserHeaders = [
+    'origin',
+    'referer',
+    'cookie',
+    'accept-language',
+    'sec-fetch-site',
+    'sec-fetch-mode',
+    'sec-fetch-dest',
+    'sec-fetch-user',
+    'sec-ch-ua',
+    'sec-ch-ua-mobile',
+    'sec-ch-ua-platform',
+  ];
+
+  for (const headerName of browserHeaders) {
+    if (req.headers[headerName]) {
+      upstreamHeaders[headerName] = req.headers[headerName];
+    }
+  }
+}
+
 function filterResponseHeaders(upstreamHeaders) {
   const hopByHop = new Set([
     'connection',
@@ -340,14 +364,8 @@ function handleRequest(req, res) {
   // better chance to succeed. This is diagnostic/fix-only and limited
   // to the exact host+path to avoid changing global proxy behaviour.
   try {
-    if (
-      String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq' &&
-      sasPath === '/admin/api/index.php/api/login' &&
-      String(req.method || '').toUpperCase() === 'POST'
-    ) {
-      if (req.headers && req.headers.origin) upstreamHeaders.origin = req.headers.origin;
-      if (req.headers && req.headers.referer) upstreamHeaders.referer = req.headers.referer;
-      if (req.headers && req.headers.cookie) upstreamHeaders.cookie = req.headers.cookie;
+    if (String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq') {
+      preserveBrowserContextHeaders(req, upstreamHeaders);
     }
   } catch (_) {}
 
