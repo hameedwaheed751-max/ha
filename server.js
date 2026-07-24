@@ -332,7 +332,24 @@ function handleRequest(req, res) {
 
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
-  // No target-specific header forwarding here; keep proxy behavior unchanged.
+  // No target-specific header forwarding here by default; keep proxy behavior unchanged.
+
+  // Minimal, targeted exception: for sas.jt.iq login POST, preserve
+  // Origin, Referer and Cookie headers from the incoming request so
+  // Cloudflare JS/cookie challenges that expect browser context have a
+  // better chance to succeed. This is diagnostic/fix-only and limited
+  // to the exact host+path to avoid changing global proxy behaviour.
+  try {
+    if (
+      String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq' &&
+      sasPath === '/admin/api/index.php/api/login' &&
+      String(req.method || '').toUpperCase() === 'POST'
+    ) {
+      if (req.headers && req.headers.origin) upstreamHeaders.origin = req.headers.origin;
+      if (req.headers && req.headers.referer) upstreamHeaders.referer = req.headers.referer;
+      if (req.headers && req.headers.cookie) upstreamHeaders.cookie = req.headers.cookie;
+    }
+  } catch (_) {}
 
   // Ensure upstream Host and a realistic User-Agent are set; some SAS hosts
   // block requests with missing/strange Host or UA (WAF). Also prefer JSON
