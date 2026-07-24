@@ -308,8 +308,10 @@ function handleRequest(req, res) {
 
       applyCors(req, res);
       const diagEnabled = String(req.headers['x-sas-diag'] || '') === '1';
+      const shouldLogBlocked = String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq' && upstreamRes.statusCode === 403;
+      const logResponse = diagEnabled || shouldLogBlocked;
 
-      if (diagEnabled) {
+      if (logResponse) {
         const chunks = [];
         upstreamRes.on('data', (chunk) => {
           try {
