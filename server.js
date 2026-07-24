@@ -1,6 +1,7 @@
 const http = require('http');
 const https = require('https');
 const net = require('net');
+const zlib = require('zlib');
 
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -174,6 +175,40 @@ function redactSensitiveText(value) {
     .replace(/\b(bearer)\s+([a-z0-9\-_\.]+)/gi, '$1 [REDACTED]');
 }
 
+function normalizeContentEncoding(value) {
+  if (!value) return '';
+  return String(value)
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+}
+
+function decompressResponseBody(buffer, contentEncoding) {
+  const encoding = normalizeContentEncoding(contentEncoding);
+  try {
+    if (encoding === 'gzip') {
+      return zlib.gunzipSync(buffer);
+    }
+    if (encoding === 'deflate') {
+      return zlib.inflateSync(buffer);
+    }
+    if (encoding === 'br' && typeof zlib.brotliDecompressSync === 'function') {
+      return zlib.brotliDecompressSync(buffer);
+    }
+  } catch (_) {
+    // ignore decompression failure and fall back to raw bytes
+  }
+  return buffer;
+}
+
+function maybeDecodeResponseBody(buffer, contentEncoding) {
+  if (!Buffer.isBuffer(buffer)) {
+    buffer = Buffer.from(String(buffer ?? ''), 'utf8');
+  }
+  const decoded = decompressResponseBody(buffer, contentEncoding);
+  return decoded.toString('utf8');
+}
+
 function sanitizeResponseHeaders(headers) {
   const sensitiveKeys = new Set([
     'authorization',
@@ -200,15 +235,18 @@ function sanitizeResponseHeaders(headers) {
   return out;
 }
 
-function logSasResponse(targetBaseUrl, sasPath, statusCode, headers, body) {
+function logSasResponse(targetBaseUrl, sasPath, statusCode, headers, contentEncoding, body) {
   const targetUrl = `${targetBaseUrl.origin}${sasPath}`;
   const safeHeaders = sanitizeResponseHeaders(headers);
-  const safeBody = redactSensitiveText(body ?? '');
+  const safeBody = redactSensitiveText(String(body ?? ''));
+  const snippet = safeBody.substring(0, 2000);
 
   console.warn(`[SAS-DEBUG] target=${targetUrl}`);
+  console.warn(`[SAS-DEBUG] path=${sasPath}`);
   console.warn(`[SAS-DEBUG] status=${statusCode}`);
+  console.warn(`[SAS-DEBUG] content-encoding=${contentEncoding || 'identity'}`);
   console.warn(`[SAS-DEBUG] headers=${JSON.stringify(safeHeaders)}`);
-  console.warn(`[SAS-DEBUG] body=${safeBody}`);
+  console.warn(`[SAS-DEBUG] body=${snippet}`);
 }
 
 function handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath) {
@@ -224,14 +262,16 @@ function handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath) {
   });
 
   upstreamRes.on('end', () => {
-    const raw = Buffer.concat(chunks).toString('utf8');
-    logSasResponse(targetBaseUrl, sasPath, upstreamRes.statusCode || 502, upstreamRes.headers || {}, raw);
+    const rawBuffer = Buffer.concat(chunks);
+    const contentEncoding = String(upstreamRes.headers['content-encoding'] || '').toLowerCase();
+    const decoded = maybeDecodeResponseBody(rawBuffer, contentEncoding);
+    logSasResponse(targetBaseUrl, sasPath, upstreamRes.statusCode || 502, upstreamRes.headers || {}, contentEncoding, decoded);
     sendJson(req, res, upstreamRes.statusCode || 502, {
       error: 'SAS upstream returned HTML error',
       status: upstreamRes.statusCode || 502,
       target: targetBaseUrl.origin,
       path: sasPath,
-      body: raw.substring(0, 400),
+      body: decoded.substring(0, 400),
       truncated: total > MAX_CAPTURE_BYTES,
     });
   });
@@ -344,11 +384,14 @@ function handleRequest(req, res) {
         chunks.push(chunk);
       });
       upstreamRes.on('end', () => {
-        const body = Buffer.concat(chunks).toString('utf8');
-        logSasResponse(targetBaseUrl, sasPath, upstreamRes.statusCode || 502, upstreamRes.headers || {}, body);
-        res.writeHead(upstreamRes.statusCode || 502);
-        res.end(body);
+        const rawBuffer = Buffer.concat(chunks);
+        const contentEncoding = String(upstreamRes.headers['content-encoding'] || '').toLowerCase();
+        const decoded = maybeDecodeResponseBody(rawBuffer, contentEncoding);
+        logSasResponse(targetBaseUrl, sasPath, upstreamRes.statusCode || 502, upstreamRes.headers || {}, contentEncoding, decoded);
       });
+
+      res.writeHead(upstreamRes.statusCode || 502);
+      upstreamRes.pipe(res);
     }
   );
 
