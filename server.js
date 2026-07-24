@@ -1,7 +1,6 @@
 const http = require('http');
 const https = require('https');
 const net = require('net');
-const zlib = require('zlib');
 
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -19,7 +18,6 @@ const TARGET_ALLOWLIST = String(process.env.SAS_TARGET_ALLOWLIST || '')
 if (ALLOW_INSECURE_TLS) {
   // Use only when SAS uses self-signed or invalid certificates.
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  console.warn('WARNING: TLS certificate verification is disabled (ALLOW_INSECURE_TLS=1).');
 }
 
 const INSECURE_HTTPS_AGENT = new https.Agent({
@@ -139,30 +137,6 @@ function buildUpstreamHeaders(req) {
   return headers;
 }
 
-function preserveBrowserContextHeaders(req, upstreamHeaders) {
-  if (!req || !req.headers || !upstreamHeaders) return;
-
-  const browserHeaders = [
-    'origin',
-    'referer',
-    'cookie',
-    'accept-language',
-    'sec-fetch-site',
-    'sec-fetch-mode',
-    'sec-fetch-dest',
-    'sec-fetch-user',
-    'sec-ch-ua',
-    'sec-ch-ua-mobile',
-    'sec-ch-ua-platform',
-  ];
-
-  for (const headerName of browserHeaders) {
-    if (req.headers[headerName]) {
-      upstreamHeaders[headerName] = req.headers[headerName];
-    }
-  }
-}
-
 function filterResponseHeaders(upstreamHeaders) {
   const hopByHop = new Set([
     'connection',
@@ -184,120 +158,6 @@ function filterResponseHeaders(upstreamHeaders) {
     }
   }
   return out;
-}
-
-function redactSensitiveText(value) {
-  const text = String(value ?? '');
-  return text
-    .replace(/(authorization\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(cookie\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(set-cookie\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(x-proxy-token\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(token\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(password\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(username\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/\b(bearer)\s+([a-z0-9\-_\.]+)/gi, '$1 [REDACTED]');
-}
-
-function normalizeContentEncoding(value) {
-  if (!value) return '';
-  return String(value)
-    .split(',')[0]
-    .trim()
-    .toLowerCase();
-}
-
-function decompressResponseBody(buffer, contentEncoding) {
-  const encoding = normalizeContentEncoding(contentEncoding);
-  try {
-    if (encoding === 'gzip') {
-      return zlib.gunzipSync(buffer);
-    }
-    if (encoding === 'deflate') {
-      return zlib.inflateSync(buffer);
-    }
-    if (encoding === 'br' && typeof zlib.brotliDecompressSync === 'function') {
-      return zlib.brotliDecompressSync(buffer);
-    }
-  } catch (_) {
-    // ignore decompression failure and fall back to raw bytes
-  }
-  return buffer;
-}
-
-function maybeDecodeResponseBody(buffer, contentEncoding) {
-  if (!Buffer.isBuffer(buffer)) {
-    buffer = Buffer.from(String(buffer ?? ''), 'utf8');
-  }
-  const decoded = decompressResponseBody(buffer, contentEncoding);
-  return decoded.toString('utf8');
-}
-
-function sanitizeResponseHeaders(headers) {
-  const sensitiveKeys = new Set([
-    'authorization',
-    'proxy-authorization',
-    'cookie',
-    'set-cookie',
-    'x-proxy-token',
-    'x-api-key',
-    'api-key',
-    'token',
-    'access-token',
-    'refresh-token',
-  ]);
-
-  const out = {};
-  for (const [key, value] of Object.entries(headers || {})) {
-    const lower = String(key).toLowerCase();
-    if (sensitiveKeys.has(lower)) {
-      out[key] = '[REDACTED]';
-    } else if (value !== undefined) {
-      out[key] = value;
-    }
-  }
-  return out;
-}
-
-function logSasResponse(targetBaseUrl, sasPath, statusCode, headers, contentEncoding, body) {
-  const targetUrl = `${targetBaseUrl.origin}${sasPath}`;
-  const safeHeaders = sanitizeResponseHeaders(headers);
-  const safeBody = redactSensitiveText(String(body ?? ''));
-  const snippet = safeBody.substring(0, 2000);
-
-  console.warn(`[SAS-DEBUG] target=${targetUrl}`);
-  console.warn(`[SAS-DEBUG] path=${sasPath}`);
-  console.warn(`[SAS-DEBUG] status=${statusCode}`);
-  console.warn(`[SAS-DEBUG] content-encoding=${contentEncoding || 'identity'}`);
-  console.warn(`[SAS-DEBUG] headers=${JSON.stringify(safeHeaders)}`);
-  console.warn(`[SAS-DEBUG] body=${snippet}`);
-}
-
-function handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath) {
-  const MAX_CAPTURE_BYTES = 256 * 1024;
-  const chunks = [];
-  let total = 0;
-
-  upstreamRes.on('data', (chunk) => {
-    total += chunk.length;
-    if (total <= MAX_CAPTURE_BYTES) {
-      chunks.push(chunk);
-    }
-  });
-
-  upstreamRes.on('end', () => {
-    const rawBuffer = Buffer.concat(chunks);
-    const contentEncoding = String(upstreamRes.headers['content-encoding'] || '').toLowerCase();
-    const decoded = maybeDecodeResponseBody(rawBuffer, contentEncoding);
-    sendJson(req, res, upstreamRes.statusCode || 502, {
-      error: 'SAS upstream returned HTML error',
-      status: upstreamRes.statusCode || 502,
-      target: targetBaseUrl.origin,
-      path: sasPath,
-      body: decoded.substring(0, 400),
-      truncated: total > MAX_CAPTURE_BYTES,
-    });
-  });
 }
 
 function handleRequest(req, res) {
@@ -356,18 +216,6 @@ function handleRequest(req, res) {
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
   // No target-specific header forwarding here by default; keep proxy behavior unchanged.
-
-  // Minimal, targeted exception: for sas.jt.iq login POST, preserve
-  // Origin, Referer and Cookie headers from the incoming request so
-  // Cloudflare JS/cookie challenges that expect browser context have a
-  // better chance to succeed. This is diagnostic/fix-only and limited
-  // to the exact host+path to avoid changing global proxy behaviour.
-  try {
-    if (String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq') {
-      preserveBrowserContextHeaders(req, upstreamHeaders);
-    }
-  } catch (_) {}
-
   // Ensure upstream Host and a realistic User-Agent are set; some SAS hosts
   // block requests with missing/strange Host or UA (WAF). Also prefer JSON
   // Accept when absent to hint the API response format.
@@ -407,24 +255,6 @@ function handleRequest(req, res) {
       }
 
       applyCors(req, res);
-
-      const contentType = String(responseHeaders['content-type'] || '').toLowerCase();
-      if ((upstreamRes.statusCode || 0) >= 400 && contentType.includes('text/html')) {
-        handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath);
-        return;
-      }
-
-      const chunks = [];
-      upstreamRes.on('data', (chunk) => {
-        chunks.push(chunk);
-      });
-      upstreamRes.on('end', () => {
-        const rawBuffer = Buffer.concat(chunks);
-        const contentEncoding = String(upstreamRes.headers['content-encoding'] || '').toLowerCase();
-        const decoded = maybeDecodeResponseBody(rawBuffer, contentEncoding);
-        logSasResponse(targetBaseUrl, sasPath, upstreamRes.statusCode || 502, upstreamRes.headers || {}, contentEncoding, decoded);
-      });
-
       res.writeHead(upstreamRes.statusCode || 502);
       upstreamRes.pipe(res);
     }
