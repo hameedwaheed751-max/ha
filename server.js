@@ -123,11 +123,10 @@ function validateTarget(targetBaseUrl) {
 }
 
 function buildUpstreamHeaders(req) {
-  // Forward browser-origin headers only, but strip proxy/internal metadata.
+  // Forward browser-origin headers while stripping proxy/internal metadata.
+  // Preserve Origin/Referer so upstream SAS hosts retain browser context.
   const headers = {...req.headers};
   delete headers.host;
-  delete headers.origin;
-  delete headers.referer;
   delete headers['x-sas-target'];
   delete headers['x-proxy-token'];
 
