@@ -235,16 +235,20 @@ function handleRequest(req, res) {
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
   // No target-specific header forwarding here by default; keep proxy behavior unchanged.
-  // Preserve browser-origin headers only for sas.jt.iq login POST when needed.
+  // Preserve browser-origin headers for all sas.jt.iq requests to reduce Cloudflare challenge triggers.
   try {
-    if (
-      String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq' &&
-      sasPath === '/admin/api/index.php/api/login' &&
-      String(req.method || '').toUpperCase() === 'POST'
-    ) {
+    if (String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq') {
       if (req.headers.origin) upstreamHeaders.origin = req.headers.origin;
       if (req.headers.referer) upstreamHeaders.referer = req.headers.referer;
       if (req.headers.cookie) upstreamHeaders.cookie = req.headers.cookie;
+      if (req.headers['accept-language']) upstreamHeaders['accept-language'] = req.headers['accept-language'];
+      if (req.headers['sec-fetch-site']) upstreamHeaders['sec-fetch-site'] = req.headers['sec-fetch-site'];
+      if (req.headers['sec-fetch-mode']) upstreamHeaders['sec-fetch-mode'] = req.headers['sec-fetch-mode'];
+      if (req.headers['sec-fetch-dest']) upstreamHeaders['sec-fetch-dest'] = req.headers['sec-fetch-dest'];
+      if (req.headers['sec-fetch-user']) upstreamHeaders['sec-fetch-user'] = req.headers['sec-fetch-user'];
+      if (req.headers['sec-ch-ua']) upstreamHeaders['sec-ch-ua'] = req.headers['sec-ch-ua'];
+      if (req.headers['sec-ch-ua-mobile']) upstreamHeaders['sec-ch-ua-mobile'] = req.headers['sec-ch-ua-mobile'];
+      if (req.headers['sec-ch-ua-platform']) upstreamHeaders['sec-ch-ua-platform'] = req.headers['sec-ch-ua-platform'];
     }
   } catch (_) {}
 
@@ -287,6 +291,27 @@ function handleRequest(req, res) {
       }
 
       applyCors(req, res);
+      const diagEnabled = String(req.headers['x-sas-diag'] || '') === '1';
+
+      if (diagEnabled) {
+        const chunks = [];
+        upstreamRes.on('data', (chunk) => {
+          try {
+            chunks.push(Buffer.from(chunk));
+          } catch (_) {}
+        });
+        upstreamRes.on('end', () => {
+          try {
+            const raw = Buffer.concat(chunks || []);
+            const snippet = raw.slice(0, 1024).toString('utf8');
+            console.error('[SAS-DIAG] outbound-headers=', JSON.stringify(upstreamHeaders));
+            console.error('[SAS-DIAG] upstream-status=', upstreamRes.statusCode);
+            console.error('[SAS-DIAG] upstream-headers=', JSON.stringify(filterResponseHeaders(upstreamRes.headers)));
+            console.error('[SAS-DIAG] upstream-body-snippet=', snippet.replace(/[\r\n]+/g, ' '));
+          } catch (_) {}
+        });
+      }
+
       res.writeHead(upstreamRes.statusCode || 502);
       upstreamRes.pipe(res);
     }
