@@ -206,7 +206,8 @@ function handleRequest(req, res) {
     return;
   }
 
-  const sasPath = req.url.substring(4);
+  const reqUrl = new URL(req.url, 'http://localhost');
+  const sasPath = reqUrl.pathname.substring(4) + reqUrl.search;
   const targetOriginRaw = String(req.headers['x-sas-target'] || '').trim();
   if (!targetOriginRaw) {
     sendJson(req, res, 400, {error: 'Missing X-SAS-Target'});
@@ -230,23 +231,28 @@ function handleRequest(req, res) {
 
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
-  // No target-specific header forwarding here by default; keep proxy behavior unchanged.
-  // Preserve browser-origin headers for all sas.jt.iq requests to reduce Cloudflare challenge triggers.
-  try {
-    if (String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq') {
-      if (req.headers.origin) upstreamHeaders.origin = req.headers.origin;
-      if (req.headers.referer) upstreamHeaders.referer = req.headers.referer;
-      if (req.headers.cookie) upstreamHeaders.cookie = req.headers.cookie;
-      if (req.headers['accept-language']) upstreamHeaders['accept-language'] = req.headers['accept-language'];
-      if (req.headers['sec-fetch-site']) upstreamHeaders['sec-fetch-site'] = req.headers['sec-fetch-site'];
-      if (req.headers['sec-fetch-mode']) upstreamHeaders['sec-fetch-mode'] = req.headers['sec-fetch-mode'];
-      if (req.headers['sec-fetch-dest']) upstreamHeaders['sec-fetch-dest'] = req.headers['sec-fetch-dest'];
-      if (req.headers['sec-fetch-user']) upstreamHeaders['sec-fetch-user'] = req.headers['sec-fetch-user'];
-      if (req.headers['sec-ch-ua']) upstreamHeaders['sec-ch-ua'] = req.headers['sec-ch-ua'];
-      if (req.headers['sec-ch-ua-mobile']) upstreamHeaders['sec-ch-ua-mobile'] = req.headers['sec-ch-ua-mobile'];
-      if (req.headers['sec-ch-ua-platform']) upstreamHeaders['sec-ch-ua-platform'] = req.headers['sec-ch-ua-platform'];
+
+  // Preserve browser-origin headers for sas.jt.iq to match expected Cloudflare/WAF behavior.
+  if (String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq') {
+    const browserHeaders = [
+      'origin',
+      'referer',
+      'cookie',
+      'accept-language',
+      'sec-fetch-site',
+      'sec-fetch-mode',
+      'sec-fetch-dest',
+      'sec-fetch-user',
+      'sec-ch-ua',
+      'sec-ch-ua-mobile',
+      'sec-ch-ua-platform',
+    ];
+    for (const headerName of browserHeaders) {
+      if (req.headers[headerName]) {
+        upstreamHeaders[headerName] = req.headers[headerName];
+      }
     }
-  } catch (_) {}
+  }
 
   // Ensure upstream Host and a realistic User-Agent are set; some SAS hosts
   // block requests with missing/strange Host or UA (WAF). Also prefer JSON
