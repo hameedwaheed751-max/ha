@@ -314,6 +314,7 @@ function handleRequest(req, res) {
 
       if (String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq') {
         upstreamHeaders.origin = 'https://sas.jt.iq';
+        upstreamHeaders.referer = 'https://sas.jt.iq/';
         upstreamHeaders['sec-fetch-site'] = 'same-origin';
       }
 
