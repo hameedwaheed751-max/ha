@@ -351,6 +351,15 @@ function handleRequest(req, res) {
     }
   } catch (_) {}
 
+  if (
+    String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq' &&
+    sasPath === '/admin/api/index.php/api/login' &&
+    String(req.method || '').toUpperCase() === 'POST'
+  ) {
+    const loggedHeaders = sanitizeResponseHeaders(upstreamHeaders);
+    console.warn('[SAS-DEBUG] outbound-headers=', JSON.stringify(loggedHeaders));
+  }
+
   // Ensure upstream Host and a realistic User-Agent are set; some SAS hosts
   // block requests with missing/strange Host or UA (WAF). Also prefer JSON
   // Accept when absent to hint the API response format.
