@@ -254,6 +254,11 @@ function handleRequest(req, res) {
       timeout: 30000,
     },
     (upstreamRes) => {
+console.log('=== SAS RESPONSE ===');
+console.log('Target:', targetBaseUrl.origin);
+console.log('Path:', sasPath);
+console.log('Status:', upstreamRes.statusCode);
+console.log('Response Headers:', JSON.stringify(upstreamRes.headers));
       res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
       res.setHeader('X-Proxy-Path', sasPath);
 
