@@ -1,7 +1,6 @@
 const http = require('http');
 const https = require('https');
 const net = require('net');
-const zlib = require('zlib');
 
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -88,7 +87,6 @@ function isLocalHostname(hostname) {
 function hostAllowedByAllowlist(hostname) {
   if (TARGET_ALLOWLIST.length === 0) return true;
   const host = String(hostname || '').toLowerCase();
-  if (host === 'sas.jt.iq') return true;
   return TARGET_ALLOWLIST.some((rule) => {
     if (rule.startsWith('*.')) {
       const suffix = rule.slice(1); // keep leading dot
@@ -239,39 +237,9 @@ function handleRequest(req, res) {
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
 
-  // Preserve browser-origin headers for sas.jt.iq and fill missing values
-  // with the same origin defaults from the HAR login request.
-  if (String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq') {
-    const targetOrigin = targetBaseUrl.origin;
-    const defaultBrowserHeaders = {
-      origin: targetOrigin,
-      referer: `${targetOrigin}/`,
-      'accept': 'application/json, text/plain, */*',
-      'accept-language': 'ar,en-US;q=0.9,en;q=0.8',
-      'accept-encoding': 'gzip, deflate, br, zstd',
-      'allow-cache-y': 'yes',
-      'sec-fetch-site': 'same-origin',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-dest': 'empty',
-      'sec-fetch-user': '?0',
-      'sec-ch-ua': '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      priority: 'u=1, i',
-    };
-
-    for (const [headerName, defaultValue] of Object.entries(defaultBrowserHeaders)) {
-      upstreamHeaders[headerName] = req.headers[headerName] || defaultValue;
-    }
-
-    if (req.headers.cookie) {
-      upstreamHeaders.cookie = req.headers.cookie;
-    }
-  }
-
-  // Ensure upstream Host and a realistic User-Agent are set; some SAS hosts
-  // block requests with missing/strange Host or UA (WAF). Also prefer JSON
-  // Accept when absent to hint the API response format.
+  // Preserve browser-origin headers where appropriate and ensure the
+  // upstream request has a valid Host header. Use a default User-Agent and
+  // Accept header only when the browser did not provide them.
   try {
     upstreamHeaders.host = targetBaseUrl.host;
   } catch (_) {}
@@ -309,16 +277,8 @@ function handleRequest(req, res) {
 
       applyCors(req, res);
       const diagEnabled = String(req.headers['x-sas-diag'] || '') === '1';
-      const shouldLogBlocked = String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq' && upstreamRes.statusCode === 403;
-      const logResponse = diagEnabled || shouldLogBlocked;
 
-      if (String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq') {
-        upstreamHeaders.origin = 'https://sas.jt.iq';
-        upstreamHeaders.referer = 'https://sas.jt.iq/';
-        upstreamHeaders['sec-fetch-site'] = 'same-origin';
-      }
-
-      if (logResponse) {
+      if (diagEnabled) {
         const chunks = [];
         upstreamRes.on('data', (chunk) => {
           try {
@@ -328,16 +288,7 @@ function handleRequest(req, res) {
         upstreamRes.on('end', () => {
           try {
             const raw = Buffer.concat(chunks || []);
-            const encoding = String(upstreamRes.headers['content-encoding'] || '').toLowerCase();
-            let snippet = raw;
-            if (encoding === 'br') {
-              snippet = zlib.brotliDecompressSync(raw);
-            } else if (encoding === 'gzip') {
-              snippet = zlib.gunzipSync(raw);
-            } else if (encoding === 'deflate') {
-              snippet = zlib.inflateSync(raw);
-            }
-            const text = String(snippet).toString('utf8').slice(0, 1024).replace(/[\r\n]+/g, ' ');
+            const text = String(raw.slice(0, 1024)).replace(/[\r\n]+/g, ' ');
             console.error('[SAS-DIAG] outbound-headers=', JSON.stringify(upstreamHeaders));
             console.error('[SAS-DIAG] upstream-status=', upstreamRes.statusCode);
             console.error('[SAS-DIAG] upstream-headers=', JSON.stringify(filterResponseHeaders(upstreamRes.headers)));
