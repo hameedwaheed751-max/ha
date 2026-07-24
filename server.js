@@ -122,13 +122,32 @@ function validateTarget(targetBaseUrl) {
 }
 
 function buildUpstreamHeaders(req) {
-  // Compatibility mode: forward most incoming headers.
+  // Forward browser-origin headers only, but strip proxy/internal metadata.
   const headers = {...req.headers};
   delete headers.host;
   delete headers.origin;
   delete headers.referer;
   delete headers['x-sas-target'];
   delete headers['x-proxy-token'];
+
+  const proxyHeaders = [
+    'x-forwarded-for',
+    'x-forwarded-host',
+    'x-forwarded-proto',
+    'x-real-ip',
+    'x-request-start',
+    'x-railway-edge',
+    'x-railway-request-id',
+    'x-proxy-via',
+    'via',
+    'forwarded',
+    'cf-connecting-ip',
+    'cf-ray',
+    'cf-ipcountry',
+  ];
+  for (const headerName of proxyHeaders) {
+    delete headers[headerName];
+  }
 
   if (!headers['user-agent']) {
     headers['user-agent'] = 'NetAgent-SAS-Proxy/1.0';
@@ -216,6 +235,19 @@ function handleRequest(req, res) {
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
   // No target-specific header forwarding here by default; keep proxy behavior unchanged.
+  // Preserve browser-origin headers only for sas.jt.iq login POST when needed.
+  try {
+    if (
+      String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq' &&
+      sasPath === '/admin/api/index.php/api/login' &&
+      String(req.method || '').toUpperCase() === 'POST'
+    ) {
+      if (req.headers.origin) upstreamHeaders.origin = req.headers.origin;
+      if (req.headers.referer) upstreamHeaders.referer = req.headers.referer;
+      if (req.headers.cookie) upstreamHeaders.cookie = req.headers.cookie;
+    }
+  } catch (_) {}
+
   // Ensure upstream Host and a realistic User-Agent are set; some SAS hosts
   // block requests with missing/strange Host or UA (WAF). Also prefer JSON
   // Accept when absent to hint the API response format.
