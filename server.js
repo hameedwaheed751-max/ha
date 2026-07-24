@@ -328,15 +328,15 @@ function handleRequest(req, res) {
           try {
             const raw = Buffer.concat(chunks || []);
             const encoding = String(upstreamRes.headers['content-encoding'] || '').toLowerCase();
-            let snippet = raw.slice(0, 1024);
+            let snippet = raw;
             if (encoding === 'br') {
-              snippet = zlib.brotliDecompressSync(snippet);
+              snippet = zlib.brotliDecompressSync(raw);
             } else if (encoding === 'gzip') {
-              snippet = zlib.gunzipSync(snippet);
+              snippet = zlib.gunzipSync(raw);
             } else if (encoding === 'deflate') {
-              snippet = zlib.inflateSync(snippet);
+              snippet = zlib.inflateSync(raw);
             }
-            const text = String(snippet).toString('utf8').replace(/[\r\n]+/g, ' ');
+            const text = String(snippet).toString('utf8').slice(0, 1024).replace(/[\r\n]+/g, ' ');
             console.error('[SAS-DIAG] outbound-headers=', JSON.stringify(upstreamHeaders));
             console.error('[SAS-DIAG] upstream-status=', upstreamRes.statusCode);
             console.error('[SAS-DIAG] upstream-headers=', JSON.stringify(filterResponseHeaders(upstreamRes.headers)));
