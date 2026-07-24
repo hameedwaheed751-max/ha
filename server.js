@@ -237,30 +237,33 @@ function handleRequest(req, res) {
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
 
-  // Preserve browser-origin headers for sas.jt.iq to match expected Cloudflare/WAF behavior.
+  // Preserve browser-origin headers for sas.jt.iq and fill missing values
+  // with the same origin defaults from the HAR login request.
   if (String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq') {
-    const browserHeaders = [
-      'origin',
-      'referer',
-      'cookie',
-      'accept',
-      'accept-language',
-      'accept-encoding',
-      'content-type',
-      'allow-cache-y',
-      'sec-fetch-site',
-      'sec-fetch-mode',
-      'sec-fetch-dest',
-      'sec-fetch-user',
-      'sec-ch-ua',
-      'sec-ch-ua-mobile',
-      'sec-ch-ua-platform',
-      'priority',
-    ];
-    for (const headerName of browserHeaders) {
-      if (req.headers[headerName]) {
-        upstreamHeaders[headerName] = req.headers[headerName];
-      }
+    const targetOrigin = targetBaseUrl.origin;
+    const defaultBrowserHeaders = {
+      origin: targetOrigin,
+      referer: `${targetOrigin}/`,
+      'accept': 'application/json, text/plain, */*',
+      'accept-language': 'ar,en-US;q=0.9,en;q=0.8',
+      'accept-encoding': 'gzip, deflate, br, zstd',
+      'allow-cache-y': 'yes',
+      'sec-fetch-site': 'same-origin',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-user': '?0',
+      'sec-ch-ua': '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+      priority: 'u=1, i',
+    };
+
+    for (const [headerName, defaultValue] of Object.entries(defaultBrowserHeaders)) {
+      upstreamHeaders[headerName] = req.headers[headerName] || defaultValue;
+    }
+
+    if (req.headers.cookie) {
+      upstreamHeaders.cookie = req.headers.cookie;
     }
   }
 
