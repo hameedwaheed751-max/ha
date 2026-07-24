@@ -5,8 +5,11 @@ const net = require('net');
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
-const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS === '1';
-const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS === '1';
+// Compatibility default: keep old behavior (skip TLS cert verification)
+// unless explicitly disabled with ALLOW_INSECURE_TLS=0.
+const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS !== '0';
+// Compatibility default: allow private targets unless explicitly disabled.
+const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS !== '0';
 const TARGET_ALLOWLIST = String(process.env.SAS_TARGET_ALLOWLIST || '')
   .split(',')
   .map((item) => item.trim().toLowerCase())
@@ -17,6 +20,10 @@ if (ALLOW_INSECURE_TLS) {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   console.warn('WARNING: TLS certificate verification is disabled (ALLOW_INSECURE_TLS=1).');
 }
+
+const INSECURE_HTTPS_AGENT = new https.Agent({
+  rejectUnauthorized: !ALLOW_INSECURE_TLS,
+});
 
 if (TARGET_ALLOWLIST.length === 0) {
   console.warn('WARNING: SAS_TARGET_ALLOWLIST is empty. Any public target host is allowed.');
@@ -116,21 +123,13 @@ function validateTarget(targetBaseUrl) {
 }
 
 function buildUpstreamHeaders(req) {
-  const allowedRequestHeaders = [
-    'accept',
-    'accept-language',
-    'authorization',
-    'content-type',
-    'allow-cache-y',
-    'user-agent',
-  ];
-
-  const headers = {};
-  for (const key of allowedRequestHeaders) {
-    if (req.headers[key] !== undefined) {
-      headers[key] = req.headers[key];
-    }
-  }
+  // Compatibility mode: forward most incoming headers.
+  const headers = {...req.headers};
+  delete headers.host;
+  delete headers.origin;
+  delete headers.referer;
+  delete headers['x-sas-target'];
+  delete headers['x-proxy-token'];
 
   if (!headers['user-agent']) {
     headers['user-agent'] = 'NetAgent-SAS-Proxy/1.0';
@@ -162,6 +161,56 @@ function filterResponseHeaders(upstreamHeaders) {
   return out;
 }
 
+function redactSensitiveText(value) {
+  const text = String(value ?? '');
+  return text
+    .replace(/(authorization\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
+    .replace(/(cookie\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
+    .replace(/(set-cookie\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
+    .replace(/(x-proxy-token\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
+    .replace(/(token\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
+    .replace(/(password\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
+    .replace(/(username\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
+    .replace(/\b(bearer)\s+([a-z0-9\-_\.]+)/gi, '$1 [REDACTED]');
+}
+
+function sanitizeResponseHeaders(headers) {
+  const sensitiveKeys = new Set([
+    'authorization',
+    'proxy-authorization',
+    'cookie',
+    'set-cookie',
+    'x-proxy-token',
+    'x-api-key',
+    'api-key',
+    'token',
+    'access-token',
+    'refresh-token',
+  ]);
+
+  const out = {};
+  for (const [key, value] of Object.entries(headers || {})) {
+    const lower = String(key).toLowerCase();
+    if (sensitiveKeys.has(lower)) {
+      out[key] = '[REDACTED]';
+    } else if (value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function logSasResponse(targetBaseUrl, sasPath, statusCode, headers, body) {
+  const targetUrl = `${targetBaseUrl.origin}${sasPath}`;
+  const safeHeaders = sanitizeResponseHeaders(headers);
+  const safeBody = redactSensitiveText(body ?? '');
+
+  console.warn(`[SAS-DEBUG] target=${targetUrl}`);
+  console.warn(`[SAS-DEBUG] status=${statusCode}`);
+  console.warn(`[SAS-DEBUG] headers=${JSON.stringify(safeHeaders)}`);
+  console.warn(`[SAS-DEBUG] body=${safeBody}`);
+}
+
 function handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath) {
   const MAX_CAPTURE_BYTES = 256 * 1024;
   const chunks = [];
@@ -176,6 +225,7 @@ function handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath) {
 
   upstreamRes.on('end', () => {
     const raw = Buffer.concat(chunks).toString('utf8');
+    logSasResponse(targetBaseUrl, sasPath, upstreamRes.statusCode || 502, upstreamRes.headers || {}, raw);
     sendJson(req, res, upstreamRes.statusCode || 502, {
       error: 'SAS upstream returned HTML error',
       status: upstreamRes.statusCode || 502,
@@ -243,6 +293,20 @@ function handleRequest(req, res) {
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
 
+  // Ensure upstream Host and a realistic User-Agent are set; some SAS hosts
+  // block requests with missing/strange Host or UA (WAF). Also prefer JSON
+  // Accept when absent to hint the API response format.
+  try {
+    upstreamHeaders.host = targetBaseUrl.host;
+  } catch (_) {}
+  if (!upstreamHeaders['user-agent'] || String(upstreamHeaders['user-agent']).trim() === '') {
+    upstreamHeaders['user-agent'] =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36';
+  }
+  if (!upstreamHeaders.accept) {
+    upstreamHeaders.accept = 'application/json, text/plain, */*';
+  }
+
   const upstream = upstreamClient.request(
     {
       protocol: targetBaseUrl.protocol,
@@ -252,13 +316,9 @@ function handleRequest(req, res) {
       method: req.method,
       headers: upstreamHeaders,
       timeout: 30000,
+      agent: targetBaseUrl.protocol === 'https:' ? INSECURE_HTTPS_AGENT : undefined,
     },
     (upstreamRes) => {
-console.log('=== SAS RESPONSE ===');
-console.log('Target:', targetBaseUrl.origin);
-console.log('Path:', sasPath);
-console.log('Status:', upstreamRes.statusCode);
-console.log('Response Headers:', JSON.stringify(upstreamRes.headers));
       res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
       res.setHeader('X-Proxy-Path', sasPath);
 
@@ -279,8 +339,16 @@ console.log('Response Headers:', JSON.stringify(upstreamRes.headers));
         return;
       }
 
-      res.writeHead(upstreamRes.statusCode || 502);
-      upstreamRes.pipe(res);
+      const chunks = [];
+      upstreamRes.on('data', (chunk) => {
+        chunks.push(chunk);
+      });
+      upstreamRes.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        logSasResponse(targetBaseUrl, sasPath, upstreamRes.statusCode || 502, upstreamRes.headers || {}, body);
+        res.writeHead(upstreamRes.statusCode || 502);
+        res.end(body);
+      });
     }
   );
 
