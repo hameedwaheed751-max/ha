@@ -17,16 +17,12 @@ const TARGET_ALLOWLIST = String(process.env.SAS_TARGET_ALLOWLIST || '')
 
 if (ALLOW_INSECURE_TLS) {
   // Use only when SAS uses self-signed or invalid certificates.
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  // Insecure TLS is handled by the HTTPS agent rather than a global env variable.
 }
 
 const INSECURE_HTTPS_AGENT = new https.Agent({
   rejectUnauthorized: !ALLOW_INSECURE_TLS,
 });
-
-if (TARGET_ALLOWLIST.length === 0) {
-  console.warn('WARNING: SAS_TARGET_ALLOWLIST is empty. Any public target host is allowed.');
-}
 
 function applyCors(req, res) {
   const requestedHeaders = req.headers['access-control-request-headers'];
