@@ -289,7 +289,6 @@ function handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath) {
     const rawBuffer = Buffer.concat(chunks);
     const contentEncoding = String(upstreamRes.headers['content-encoding'] || '').toLowerCase();
     const decoded = maybeDecodeResponseBody(rawBuffer, contentEncoding);
-    logSasResponse(targetBaseUrl, sasPath, upstreamRes.statusCode || 502, upstreamRes.headers || {}, contentEncoding, decoded);
     sendJson(req, res, upstreamRes.statusCode || 502, {
       error: 'SAS upstream returned HTML error',
       status: upstreamRes.statusCode || 502,
@@ -368,15 +367,6 @@ function handleRequest(req, res) {
       preserveBrowserContextHeaders(req, upstreamHeaders);
     }
   } catch (_) {}
-
-  if (
-    String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq' &&
-    sasPath === '/admin/api/index.php/api/login' &&
-    String(req.method || '').toUpperCase() === 'POST'
-  ) {
-    const loggedHeaders = sanitizeResponseHeaders(upstreamHeaders);
-    console.warn('[SAS-DEBUG] outbound-headers=', JSON.stringify(loggedHeaders));
-  }
 
   // Ensure upstream Host and a realistic User-Agent are set; some SAS hosts
   // block requests with missing/strange Host or UA (WAF). Also prefer JSON
