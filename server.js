@@ -333,6 +333,20 @@ function handleRequest(req, res) {
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
 
+  // Special-case: some SAS JT endpoints require the original Origin/Referer
+  // headers on the login path. Re-add them for that specific target/path
+  // without changing behavior for other targets.
+  try {
+    if (
+      targetBaseUrl.hostname &&
+      String(targetBaseUrl.hostname).toLowerCase() === 'sas.jt.iq' &&
+      sasPath === '/admin/api/index.php/api/login'
+    ) {
+      if (req.headers && req.headers.origin) upstreamHeaders.origin = req.headers.origin;
+      if (req.headers && req.headers.referer) upstreamHeaders.referer = req.headers.referer;
+    }
+  } catch (_) {}
+
   // Ensure upstream Host and a realistic User-Agent are set; some SAS hosts
   // block requests with missing/strange Host or UA (WAF). Also prefer JSON
   // Accept when absent to hint the API response format.
