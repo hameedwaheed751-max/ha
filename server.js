@@ -26,12 +26,17 @@ const INSECURE_HTTPS_AGENT = new https.Agent({
 
 function applyCors(req, res) {
   const requestedHeaders = req.headers['access-control-request-headers'];
-  const allowOrigin = process.env.CORS_ALLOW_ORIGIN || '*';
+  const requestOrigin = String(req.headers.origin || '').trim();
+  const allowOrigin = process.env.CORS_ALLOW_ORIGIN || requestOrigin || '*';
   res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+  if (requestOrigin) {
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    requestedHeaders || 'Content-Type, Authorization, Allow-Cache-Y, X-SAS-Target, X-Proxy-Token'
+    requestedHeaders || 'Content-Type, Authorization, Allow-Cache-Y, X-SAS-Target, X-Proxy-Token, X-Auth-Token, X-XSRF-TOKEN'
   );
   res.setHeader('Access-Control-Max-Age', '86400');
 }
@@ -238,7 +243,11 @@ function handleRequest(req, res) {
       'origin',
       'referer',
       'cookie',
+      'accept',
       'accept-language',
+      'accept-encoding',
+      'content-type',
+      'allow-cache-y',
       'sec-fetch-site',
       'sec-fetch-mode',
       'sec-fetch-dest',
@@ -246,6 +255,7 @@ function handleRequest(req, res) {
       'sec-ch-ua',
       'sec-ch-ua-mobile',
       'sec-ch-ua-platform',
+      'priority',
     ];
     for (const headerName of browserHeaders) {
       if (req.headers[headerName]) {
