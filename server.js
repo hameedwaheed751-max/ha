@@ -1,6 +1,7 @@
 const http = require('http');
 const https = require('https');
 const net = require('net');
+const zlib = require('zlib');
 
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -311,6 +312,11 @@ function handleRequest(req, res) {
       const shouldLogBlocked = String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq' && upstreamRes.statusCode === 403;
       const logResponse = diagEnabled || shouldLogBlocked;
 
+      if (String(targetBaseUrl.hostname || '').toLowerCase() === 'sas.jt.iq') {
+        upstreamHeaders.origin = 'https://sas.jt.iq';
+        upstreamHeaders['sec-fetch-site'] = 'same-origin';
+      }
+
       if (logResponse) {
         const chunks = [];
         upstreamRes.on('data', (chunk) => {
@@ -321,12 +327,23 @@ function handleRequest(req, res) {
         upstreamRes.on('end', () => {
           try {
             const raw = Buffer.concat(chunks || []);
-            const snippet = raw.slice(0, 1024).toString('utf8');
+            const encoding = String(upstreamRes.headers['content-encoding'] || '').toLowerCase();
+            let snippet = raw.slice(0, 1024);
+            if (encoding === 'br') {
+              snippet = zlib.brotliDecompressSync(snippet);
+            } else if (encoding === 'gzip') {
+              snippet = zlib.gunzipSync(snippet);
+            } else if (encoding === 'deflate') {
+              snippet = zlib.inflateSync(snippet);
+            }
+            const text = String(snippet).toString('utf8').replace(/[\r\n]+/g, ' ');
             console.error('[SAS-DIAG] outbound-headers=', JSON.stringify(upstreamHeaders));
             console.error('[SAS-DIAG] upstream-status=', upstreamRes.statusCode);
             console.error('[SAS-DIAG] upstream-headers=', JSON.stringify(filterResponseHeaders(upstreamRes.headers)));
-            console.error('[SAS-DIAG] upstream-body-snippet=', snippet.replace(/[\r\n]+/g, ' '));
-          } catch (_) {}
+            console.error('[SAS-DIAG] upstream-body-snippet=', text);
+          } catch (err) {
+            console.error('[SAS-DIAG] decompress-error=', err.message || err);
+          }
         });
       }
 
