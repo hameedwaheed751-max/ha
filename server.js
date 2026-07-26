@@ -126,6 +126,8 @@ function buildUpstreamHeaders(req) {
   // Forward browser-origin headers while stripping proxy/internal metadata.
   // Preserve Origin/Referer so upstream SAS hosts retain browser context.
   const headers = {...req.headers};
+  delete headers.origin;
+  delete headers.referer;
   delete headers.host;
   delete headers['x-sas-target'];
   delete headers['x-proxy-token'];
