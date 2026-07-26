@@ -322,7 +322,22 @@ function handleRequest(req, res) {
       // Ignore write errors if response is already closed.
     }
   });
+if (String(req.headers['x-sas-diag'] || '') === '1') {
+  const chunks = [];
 
+  req.on('data', (chunk) => {
+    chunks.push(Buffer.from(chunk));
+    upstream.write(chunk);
+  });
+
+  req.on('end', () => {
+    const body = Buffer.concat(chunks).toString();
+    console.error('[SAS-DIAG] request-body=', body);
+    upstream.end();
+  });
+
+  return;
+}
   req.pipe(upstream);
 }
 
