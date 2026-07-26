@@ -133,6 +133,14 @@ function buildUpstreamHeaders(req) {
   delete headers.host;
   delete headers['x-sas-target'];
   delete headers['x-proxy-token'];
+  delete headers['sec-fetch-site'];
+  delete headers['sec-fetch-mode'];
+  delete headers['sec-fetch-dest'];
+  delete headers['sec-ch-ua'];
+  delete headers['sec-ch-ua-mobile'];
+  delete headers['sec-ch-ua-platform'];
+  delete headers['priority'];
+  delete headers['accept-language'];
 
   const proxyHeaders = [
     'x-forwarded-for',
