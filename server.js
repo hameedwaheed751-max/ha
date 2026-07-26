@@ -128,6 +128,8 @@ function buildUpstreamHeaders(req) {
   const headers = {...req.headers};
   delete headers.origin;
   delete headers.referer;
+  delete headers['accept-encoding'];
+  headers['accept-encoding'] = 'identity';
   delete headers.host;
   delete headers['x-sas-target'];
   delete headers['x-proxy-token'];
