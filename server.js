@@ -291,7 +291,7 @@ function handleRequest(req, res) {
         upstreamRes.on('end', () => {
           try {
             const raw = Buffer.concat(chunks || []);
-            const text = String(raw.slice(0, 1024)).replace(/[\r\n]+/g, ' ');
+            const text = String(raw).replace(/[\r\n]+/g, ' ');
             console.error('[SAS-DIAG] outbound-headers=', JSON.stringify(upstreamHeaders));
             console.error('[SAS-DIAG] upstream-status=', upstreamRes.statusCode);
             console.error('[SAS-DIAG] upstream-headers=', JSON.stringify(filterResponseHeaders(upstreamRes.headers)));
