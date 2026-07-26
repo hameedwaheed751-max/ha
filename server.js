@@ -123,47 +123,30 @@ function validateTarget(targetBaseUrl) {
 }
 
 function buildUpstreamHeaders(req) {
-  // Forward browser-origin headers while stripping proxy/internal metadata.
-  // Preserve Origin/Referer so upstream SAS hosts retain browser context.
-  const headers = {...req.headers};
-  delete headers.origin;
-  delete headers.referer;
-  delete headers['accept-encoding'];
+  const headers = {};
+
+  if (req.headers['content-type']) {
+    headers['content-type'] = req.headers['content-type'];
+  }
+
+  if (req.headers['content-length']) {
+    headers['content-length'] = req.headers['content-length'];
+  }
+
+  if (req.headers['authorization']) {
+    headers['authorization'] = req.headers['authorization'];
+  }
+
+  if (req.headers['cookie']) {
+    headers['cookie'] = req.headers['cookie'];
+  }
+
+  headers['accept'] = 'application/json, text/plain, */*';
   headers['accept-encoding'] = 'identity';
-  delete headers.host;
-  delete headers['x-sas-target'];
-  delete headers['x-proxy-token'];
-  delete headers['sec-fetch-site'];
-  delete headers['sec-fetch-mode'];
-  delete headers['sec-fetch-dest'];
-  delete headers['sec-ch-ua'];
-  delete headers['sec-ch-ua-mobile'];
-  delete headers['sec-ch-ua-platform'];
-  delete headers['priority'];
-  delete headers['accept-language'];
+  headers['connection'] = 'close';
 
-  const proxyHeaders = [
-    'x-forwarded-for',
-    'x-forwarded-host',
-    'x-forwarded-proto',
-    'x-real-ip',
-    'x-request-start',
-    'x-railway-edge',
-    'x-railway-request-id',
-    'x-proxy-via',
-    'via',
-    'forwarded',
-    'cf-connecting-ip',
-    'cf-ray',
-    'cf-ipcountry',
-  ];
-  for (const headerName of proxyHeaders) {
-    delete headers[headerName];
-  }
-
-  if (!headers['user-agent']) {
-    headers['user-agent'] = 'NetAgent-SAS-Proxy/1.0';
-  }
+  headers['user-agent'] =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
   return headers;
 }
@@ -266,6 +249,7 @@ function handleRequest(req, res) {
     {
       protocol: targetBaseUrl.protocol,
       hostname: targetBaseUrl.hostname,
+      servername: targetBaseUrl.hostname,
       port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
       path: sasPath,
       method: req.method,
