@@ -7,6 +7,8 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
 const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS !== '0';
 const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS !== '0';
+const REQUEST_TIMEOUT = Number(process.env.REQUEST_TIMEOUT || 45000);
+const MAX_RETRIES = Number(process.env.MAX_RETRIES || 2);
 
 // ✅ قائمة البيضاء الافتراضية تحتوي على SAS المدعومة
 const DEFAULT_ALLOWLIST = [
@@ -111,15 +113,17 @@ function validateTarget(targetBaseUrl) {
     return 'Private IP targets are not allowed';
   }
   if (!hostAllowedByAllowlist(hostname)) {
-    return 'Target host is not in SAS_TARGET_ALLOWLIST';
+    const allowedList = EFFECTIVE_ALLOWLIST.join(', ');
+    return `Target host "${hostname}" is not in allowlist. Allowed: ${allowedList}. Set SAS_TARGET_ALLOWLIST env var to add more.`;
   }
   return null;
 }
 
-// ✅ Headers متصفح حقيقي لخداع Cloudflare
+// ✅ Headers متصفح حقيقي لخداع Cloudflare و SAS
 function buildUpstreamHeaders(req) {
   const headers = {};
 
+  // Forward essential headers
   if (req.headers['content-type']) {
     headers['content-type'] = req.headers['content-type'];
   }
@@ -132,9 +136,11 @@ function buildUpstreamHeaders(req) {
   if (req.headers['cookie']) {
     headers['cookie'] = req.headers['cookie'];
   }
+  if (req.headers['accept']) {
+    headers['accept'] = req.headers['accept'];
+  }
 
   // Headers متصفح حقيقي
-  headers['accept'] = 'application/json, text/plain, */*';
   headers['accept-encoding'] = 'gzip, deflate, br';
   headers['accept-language'] = 'ar-IQ,ar;q=0.9,en;q=0.8';
   headers['connection'] = 'keep-alive';
@@ -147,6 +153,7 @@ function buildUpstreamHeaders(req) {
   headers['sec-fetch-mode'] = 'cors';
   headers['sec-fetch-site'] = 'same-origin';
   headers['cache-control'] = 'no-cache';
+  headers['pragma'] = 'no-cache';
 
   return headers;
 }
@@ -234,67 +241,101 @@ function handleRequest(req, res) {
     upstreamHeaders.accept = 'application/json, text/plain, */*';
   }
 
-  const upstream = upstreamClient.request(
-    {
-      protocol: targetBaseUrl.protocol,
-      hostname: targetBaseUrl.hostname,
-      servername: targetBaseUrl.hostname,
-      port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
-      path: sasPath,
-      method: req.method,
-      headers: upstreamHeaders,
-      timeout: 30000,
-      agent: targetBaseUrl.protocol === 'https:' ? INSECURE_HTTPS_AGENT : undefined,
-    },
-    (upstreamRes) => {
-      res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
-      res.setHeader('X-Proxy-Path', sasPath);
+  console.error(`[PROXY] ${req.method} ${req.url} -> ${targetBaseUrl.origin}${sasPath}`);
 
-      const responseHeaders = filterResponseHeaders(upstreamRes.headers);
-      for (const [key, value] of Object.entries(responseHeaders)) {
-        try {
-          res.setHeader(key, value);
-        } catch (_) {}
-      }
+  // Retry logic for transient errors
+  let attempt = 0;
+  const makeRequest = () => {
+    attempt++;
+    const upstream = upstreamClient.request(
+      {
+        protocol: targetBaseUrl.protocol,
+        hostname: targetBaseUrl.hostname,
+        servername: targetBaseUrl.hostname,
+        port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
+        path: sasPath,
+        method: req.method,
+        headers: upstreamHeaders,
+        timeout: REQUEST_TIMEOUT,
+        agent: targetBaseUrl.protocol === 'https:' ? INSECURE_HTTPS_AGENT : undefined,
+      },
+      (upstreamRes) => {
+        console.error(`[PROXY] Response: ${upstreamRes.statusCode} for ${req.method} ${req.url} (attempt ${attempt})`);
+        
+        res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
+        res.setHeader('X-Proxy-Path', sasPath);
 
-      applyCors(req, res);
-      const diagEnabled = String(req.headers['x-sas-diag'] || '') === '1';
-
-      if (diagEnabled) {
-        const chunks = [];
-        upstreamRes.on('data', (chunk) => {
-          try { chunks.push(Buffer.from(chunk)); } catch (_) {}
-        });
-        upstreamRes.on('end', () => {
+        const responseHeaders = filterResponseHeaders(upstreamRes.headers);
+        for (const [key, value] of Object.entries(responseHeaders)) {
           try {
-            const raw = Buffer.concat(chunks || []);
-            const text = String(raw).replace(/[\r\n]+/g, ' ');
-            console.error('[SAS-DIAG] upstream-status=', upstreamRes.statusCode);
-            console.error('[SAS-DIAG] upstream-body-snippet=', text);
-          } catch (err) {
-            console.error('[SAS-DIAG] decompress-error=', err.message || err);
-          }
-        });
+            res.setHeader(key, value);
+          } catch (_) {}
+        }
+
+        applyCors(req, res);
+        const diagEnabled = String(req.headers['x-sas-diag'] || '') === '1';
+
+        if (diagEnabled) {
+          const chunks = [];
+          upstreamRes.on('data', (chunk) => {
+            try { chunks.push(Buffer.from(chunk)); } catch (_) {}
+          });
+          upstreamRes.on('end', () => {
+            try {
+              const raw = Buffer.concat(chunks || []);
+              const text = String(raw).replace(/[\r\n]+/g, ' ');
+              console.error('[SAS-DIAG] upstream-status=', upstreamRes.statusCode);
+              console.error('[SAS-DIAG] upstream-body-snippet=', text);
+            } catch (err) {
+              console.error('[SAS-DIAG] decompress-error=', err.message || err);
+            }
+          });
+        }
+
+        res.writeHead(upstreamRes.statusCode || 502);
+        upstreamRes.pipe(res);
       }
+    );
 
-      res.writeHead(upstreamRes.statusCode || 502);
-      upstreamRes.pipe(res);
-    }
-  );
+    upstream.on('timeout', () => {
+      console.error(`[PROXY] Timeout for ${req.method} ${req.url} (attempt ${attempt})`);
+      upstream.destroy(new Error('Upstream timeout'));
+    });
 
-  upstream.on('timeout', () => {
-    upstream.destroy(new Error('Upstream timeout'));
-  });
+    upstream.on('error', (error) => {
+      console.error(`[PROXY] Error for ${req.method} ${req.url} (attempt ${attempt}):`, error.message);
+      
+      // Retry on network errors if we haven't exceeded max retries
+      if (attempt < MAX_RETRIES && (
+        error.code === 'ECONNRESET' ||
+        error.code === 'ECONNREFUSED' ||
+        error.code === 'ETIMEDOUT' ||
+        error.message.includes('timeout')
+      )) {
+        console.error(`[PROXY] Retrying... (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        setTimeout(makeRequest, 1000 * attempt);
+        return;
+      }
+      
+      if (!res.headersSent) {
+        sendJson(req, res, 502, { 
+          error: 'SAS connection failed', 
+          message: error.message,
+          target: targetBaseUrl.origin + sasPath,
+          attempts: attempt
+        });
+        return;
+      }
+      try { res.end(); } catch (_) {}
+    });
 
-  upstream.on('error', (error) => {
-    if (!res.headersSent) {
-      sendJson(req, res, 502, {error: 'SAS connection failed', message: error.message});
-      return;
-    }
-    try { res.end(); } catch (_) {}
-  });
+    return upstream;
+  };
+
+  makeRequest();
 
   if (String(req.headers['x-sas-diag'] || '') === '1') {
+    console.error(`[SAS-DIAG] ${req.method} ${req.url}`);
     const chunks = [];
     req.on('data', (chunk) => {
       chunks.push(Buffer.from(chunk));
@@ -311,19 +352,59 @@ function handleRequest(req, res) {
   req.pipe(upstream);
 }
 
+// Error handling middleware
+function logError(err, req, res, next) {
+  console.error('[PROXY] Unhandled error:', err);
+  if (!res.headersSent) {
+    sendJson(req, res, 500, { error: 'Internal proxy error', message: err.message });
+  }
+}
+
 const server = http.createServer(handleRequest);
 
 server.on('error', (error) => {
   if (error && error.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} is already in use.`);
+    console.error(`[PROXY] Port ${PORT} is already in use. Try killing the process or use a different port.`);
+    console.error(`[PROXY] Windows: netstat -ano | findstr :${PORT} && taskkill /F /PID <PID>`);
   } else {
-    console.error(error);
+    console.error('[PROXY] Server error:', error);
   }
   process.exit(1);
 });
 
+server.on('clientError', (err, socket) => {
+  console.error('[PROXY] Client error:', err.message);
+});
+
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`NetAgent SAS Proxy running on port ${PORT}`);
+  console.log('='.repeat(60));
+  console.log('NetAgent SAS Proxy');
+  console.log('='.repeat(60));
+  console.log(`Port: ${PORT}`);
+  console.log(`Environment: ${NODE_ENV}`);
+  console.log(`Allow Insecure TLS: ${ALLOW_INSECURE_TLS}`);
+  console.log(`Request Timeout: ${REQUEST_TIMEOUT}ms`);
   console.log(`Allowlist: ${EFFECTIVE_ALLOWLIST.join(', ')}`);
+  console.log('='.repeat(60));
+  console.log(`Proxy running at: http://localhost:${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log('='.repeat(60));
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n[PROXY] Shutting down gracefully...');
+  server.close(() => {
+    console.log('[PROXY] Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n[PROXY] Received SIGTERM, shutting down...');
+  server.close(() => {
+    console.log('[PROXY] Server closed');
+    process.exit(0);
+  });
 });
 </arg_value></tool_call>
