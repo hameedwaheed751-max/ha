@@ -9,7 +9,6 @@ const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS !== '0';
 const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS !== '0';
 
 // ✅ قائمة البيضاء الافتراضية تحتوي على SAS المدعومة
-// يمكن توسيعها عبر متغيّر البيئة SAS_TARGET_ALLOWLIST
 const DEFAULT_ALLOWLIST = [
   'sas.speednet-iq.com',
   'speednet-iq.com',
@@ -23,12 +22,7 @@ const TARGET_ALLOWLIST = String(process.env.SAS_TARGET_ALLOWLIST || '')
   .map((item) => item.trim().toLowerCase())
   .filter(Boolean);
 
-// دمج القائمة الافتراضية مع القائمة المخصصة
 const EFFECTIVE_ALLOWLIST = [...new Set([...DEFAULT_ALLOWLIST, ...TARGET_ALLOWLIST])];
-
-if (ALLOW_INSECURE_TLS) {
-  // Insecure TLS is handled by the HTTPS agent rather than a global env variable.
-}
 
 const INSECURE_HTTPS_AGENT = new https.Agent({
   rejectUnauthorized: !ALLOW_INSECURE_TLS,
@@ -58,9 +52,7 @@ function sendJson(req, res, status, payload) {
 }
 
 function hasValidProxyToken(req) {
-  if (!PROXY_TOKEN) {
-    return true;
-  }
+  if (!PROXY_TOKEN) return true;
   const xToken = String(req.headers['x-proxy-token'] || '').trim();
   const auth = String(req.headers.authorization || '').trim();
   const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
@@ -95,10 +87,8 @@ function isLocalHostname(hostname) {
 }
 
 function hostAllowedByAllowlist(hostname) {
-  // ✅ دائماً يسمح بـ sas.jt.iq و speednet-iq.com
   const host = String(hostname || '').toLowerCase();
   if (DEFAULT_ALLOWLIST.includes(host)) return true;
-
   if (EFFECTIVE_ALLOWLIST.length === 0) return true;
   return EFFECTIVE_ALLOWLIST.some((rule) => {
     if (rule.startsWith('*.')) {
@@ -113,71 +103,60 @@ function validateTarget(targetBaseUrl) {
   if (!['http:', 'https:'].includes(targetBaseUrl.protocol)) {
     return 'Only http/https targets are allowed';
   }
-
   const hostname = targetBaseUrl.hostname;
-  if (!hostname) {
-    return 'Target host is required';
-  }
-
-  if (isLocalHostname(hostname)) {
-    return 'Localhost targets are not allowed';
-  }
-
+  if (!hostname) return 'Target host is required';
+  if (isLocalHostname(hostname)) return 'Localhost targets are not allowed';
   const parsedIp = net.isIP(hostname) ? hostname : null;
   if (!ALLOW_PRIVATE_TARGETS && parsedIp && isPrivateIp(parsedIp)) {
     return 'Private IP targets are not allowed';
   }
-
   if (!hostAllowedByAllowlist(hostname)) {
     return 'Target host is not in SAS_TARGET_ALLOWLIST';
   }
-
   return null;
 }
 
+// ✅ Headers متصفح حقيقي لخداع Cloudflare
 function buildUpstreamHeaders(req) {
   const headers = {};
 
   if (req.headers['content-type']) {
     headers['content-type'] = req.headers['content-type'];
   }
-
   if (req.headers['content-length']) {
     headers['content-length'] = req.headers['content-length'];
   }
-
   if (req.headers['authorization']) {
     headers['authorization'] = req.headers['authorization'];
   }
-
   if (req.headers['cookie']) {
     headers['cookie'] = req.headers['cookie'];
   }
 
+  // Headers متصفح حقيقي
   headers['accept'] = 'application/json, text/plain, */*';
-  headers['accept-encoding'] = 'identity';
-  headers['connection'] = 'close';
-
+  headers['accept-encoding'] = 'gzip, deflate, br';
+  headers['accept-language'] = 'ar-IQ,ar;q=0.9,en;q=0.8';
+  headers['connection'] = 'keep-alive';
   headers['user-agent'] =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+  headers['sec-ch-ua'] = '"Chromium";v="138", "Google Chrome";v="138", "Not/A)Brand";v="99"';
+  headers['sec-ch-ua-mobile'] = '?0';
+  headers['sec-ch-ua-platform'] = '"Windows"';
+  headers['sec-fetch-dest'] = 'empty';
+  headers['sec-fetch-mode'] = 'cors';
+  headers['sec-fetch-site'] = 'same-origin';
+  headers['cache-control'] = 'no-cache';
 
   return headers;
 }
 
 function filterResponseHeaders(upstreamHeaders) {
   const hopByHop = new Set([
-    'connection',
-    'keep-alive',
-    'proxy-authenticate',
-    'proxy-authorization',
-    'te',
-    'trailers',
-    'transfer-encoding',
-    'upgrade',
-    'access-control-allow-origin',
-    'access-control-allow-credentials',
+    'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+    'te', 'trailers', 'transfer-encoding', 'upgrade',
+    'access-control-allow-origin', 'access-control-allow-credentials',
   ]);
-
   const out = {};
   for (const [key, value] of Object.entries(upstreamHeaders || {})) {
     if (!hopByHop.has(String(key).toLowerCase()) && value !== undefined) {
@@ -275,9 +254,7 @@ function handleRequest(req, res) {
       for (const [key, value] of Object.entries(responseHeaders)) {
         try {
           res.setHeader(key, value);
-        } catch (_) {
-          // Ignore invalid upstream header values.
-        }
+        } catch (_) {}
       }
 
       applyCors(req, res);
@@ -286,17 +263,13 @@ function handleRequest(req, res) {
       if (diagEnabled) {
         const chunks = [];
         upstreamRes.on('data', (chunk) => {
-          try {
-            chunks.push(Buffer.from(chunk));
-          } catch (_) {}
+          try { chunks.push(Buffer.from(chunk)); } catch (_) {}
         });
         upstreamRes.on('end', () => {
           try {
             const raw = Buffer.concat(chunks || []);
             const text = String(raw).replace(/[\r\n]+/g, ' ');
-            console.error('[SAS-DIAG] outbound-headers=', JSON.stringify(upstreamHeaders));
             console.error('[SAS-DIAG] upstream-status=', upstreamRes.statusCode);
-            console.error('[SAS-DIAG] upstream-headers=', JSON.stringify(filterResponseHeaders(upstreamRes.headers)));
             console.error('[SAS-DIAG] upstream-body-snippet=', text);
           } catch (err) {
             console.error('[SAS-DIAG] decompress-error=', err.message || err);
@@ -318,27 +291,20 @@ function handleRequest(req, res) {
       sendJson(req, res, 502, {error: 'SAS connection failed', message: error.message});
       return;
     }
-    try {
-      res.end();
-    } catch (_) {
-      // Ignore write errors if response is already closed.
-    }
+    try { res.end(); } catch (_) {}
   });
 
   if (String(req.headers['x-sas-diag'] || '') === '1') {
     const chunks = [];
-
     req.on('data', (chunk) => {
       chunks.push(Buffer.from(chunk));
       upstream.write(chunk);
     });
-
     req.on('end', () => {
       const body = Buffer.concat(chunks).toString();
       console.error('[SAS-DIAG] request-body=', body);
       upstream.end();
     });
-
     return;
   }
 
@@ -360,5 +326,4 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`NetAgent SAS Proxy running on port ${PORT}`);
   console.log(`Allowlist: ${EFFECTIVE_ALLOWLIST.join(', ')}`);
 });
-</arg_value>
-</write_to_file>
+</arg_value></tool_call>
