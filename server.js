@@ -5,18 +5,28 @@ const net = require('net');
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
-// Compatibility default: keep old behavior (skip TLS cert verification)
-// unless explicitly disabled with ALLOW_INSECURE_TLS=0.
 const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS !== '0';
-// Compatibility default: allow private targets unless explicitly disabled.
 const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS !== '0';
+
+// ✅ قائمة البيضاء الافتراضية تحتوي على SAS المدعومة
+// يمكن توسيعها عبر متغيّر البيئة SAS_TARGET_ALLOWLIST
+const DEFAULT_ALLOWLIST = [
+  'sas.speednet-iq.com',
+  'speednet-iq.com',
+  'sas.jt.iq',
+  'jt-iq.com',
+  'jt.iq',
+];
+
 const TARGET_ALLOWLIST = String(process.env.SAS_TARGET_ALLOWLIST || '')
   .split(',')
   .map((item) => item.trim().toLowerCase())
   .filter(Boolean);
 
+// دمج القائمة الافتراضية مع القائمة المخصصة
+const EFFECTIVE_ALLOWLIST = [...new Set([...DEFAULT_ALLOWLIST, ...TARGET_ALLOWLIST])];
+
 if (ALLOW_INSECURE_TLS) {
-  // Use only when SAS uses self-signed or invalid certificates.
   // Insecure TLS is handled by the HTTPS agent rather than a global env variable.
 }
 
@@ -85,11 +95,14 @@ function isLocalHostname(hostname) {
 }
 
 function hostAllowedByAllowlist(hostname) {
-  if (TARGET_ALLOWLIST.length === 0) return true;
+  // ✅ دائماً يسمح بـ sas.jt.iq و speednet-iq.com
   const host = String(hostname || '').toLowerCase();
-  return TARGET_ALLOWLIST.some((rule) => {
+  if (DEFAULT_ALLOWLIST.includes(host)) return true;
+
+  if (EFFECTIVE_ALLOWLIST.length === 0) return true;
+  return EFFECTIVE_ALLOWLIST.some((rule) => {
     if (rule.startsWith('*.')) {
-      const suffix = rule.slice(1); // keep leading dot
+      const suffix = rule.slice(1);
       return host.endsWith(suffix);
     }
     return host === rule;
@@ -190,7 +203,7 @@ function handleRequest(req, res) {
       env: NODE_ENV,
       allowInsecureTls: ALLOW_INSECURE_TLS,
       hasTokenAuth: Boolean(PROXY_TOKEN),
-      hasAllowlist: TARGET_ALLOWLIST.length > 0,
+      allowlist: EFFECTIVE_ALLOWLIST,
     });
     return;
   }
@@ -224,16 +237,13 @@ function handleRequest(req, res) {
 
   const targetError = validateTarget(targetBaseUrl);
   if (targetError) {
-    sendJson(req, res, 403, {error: targetError});
+    sendJson(req, res, 403, {error: targetError, hostname: targetBaseUrl.hostname});
     return;
   }
 
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
 
-  // Preserve browser-origin headers where appropriate and ensure the
-  // upstream request has a valid Host header. Use a default User-Agent and
-  // Accept header only when the browser did not provide them.
   try {
     upstreamHeaders.host = targetBaseUrl.host;
   } catch (_) {}
@@ -314,22 +324,24 @@ function handleRequest(req, res) {
       // Ignore write errors if response is already closed.
     }
   });
-if (String(req.headers['x-sas-diag'] || '') === '1') {
-  const chunks = [];
 
-  req.on('data', (chunk) => {
-    chunks.push(Buffer.from(chunk));
-    upstream.write(chunk);
-  });
+  if (String(req.headers['x-sas-diag'] || '') === '1') {
+    const chunks = [];
 
-  req.on('end', () => {
-    const body = Buffer.concat(chunks).toString();
-    console.error('[SAS-DIAG] request-body=', body);
-    upstream.end();
-  });
+    req.on('data', (chunk) => {
+      chunks.push(Buffer.from(chunk));
+      upstream.write(chunk);
+    });
 
-  return;
-}
+    req.on('end', () => {
+      const body = Buffer.concat(chunks).toString();
+      console.error('[SAS-DIAG] request-body=', body);
+      upstream.end();
+    });
+
+    return;
+  }
+
   req.pipe(upstream);
 }
 
@@ -346,4 +358,7 @@ server.on('error', (error) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`NetAgent SAS Proxy running on port ${PORT}`);
+  console.log(`Allowlist: ${EFFECTIVE_ALLOWLIST.join(', ')}`);
 });
+</arg_value>
+</write_to_file>
