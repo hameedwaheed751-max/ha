@@ -484,4 +484,3 @@ process.on('SIGTERM', () => {
     process.exit(0);
   });
 });
-</arg_value></tool_call>
