@@ -146,7 +146,7 @@ function buildUpstreamHeaders(req) {
     headers['referer'] = req.headers['referer'];
   }
 
-  // Headers متصفح حقيقي - تحسين التوافق مع SAS
+  // Headers متصفح حقيقي - تحسين التوافق مع SAS و Cloudflare
   headers['accept-encoding'] = 'gzip, deflate, br';
   headers['accept-language'] = 'ar-IQ,ar;q=0.9,en;q=0.8';
   headers['connection'] = 'keep-alive';
@@ -163,8 +163,17 @@ function buildUpstreamHeaders(req) {
   
   // Add common headers that SAS systems expect
   headers['x-requested-with'] = 'XMLHttpRequest';
-  headers['x-forwarded-for'] = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
+  
+  // Use real client IP instead of proxy IP to avoid Cloudflare blocking
+  const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress || '';
+  headers['x-forwarded-for'] = clientIp;
+  headers['x-real-ip'] = clientIp;
   headers['x-forwarded-proto'] = req.headers['x-forwarded-proto'] || 'http';
+  
+  // Add headers to look like a real browser
+  headers['upgrade-insecure-requests'] = '1';
+  headers['sec-fetch-user'] = '?1';
+  headers['dnt'] = '1';
 
   return headers;
 }
@@ -186,6 +195,10 @@ function filterResponseHeaders(upstreamHeaders) {
   if (upstreamHeaders['set-cookie']) {
     out['set-cookie'] = upstreamHeaders['set-cookie'];
   }
+  
+  // Remove Cloudflare-specific headers that might reveal proxy
+  delete out['server'];
+  delete out['x-powered-by'];
   
   return out;
 }
@@ -252,6 +265,10 @@ function handleRequest(req, res) {
   if (sessionId) {
     console.error(`[PROXY] Using existing session: ${sessionId.substring(0, 8)}...`);
   }
+  
+  // Add random delay to avoid rate limiting (1-3 seconds)
+  const randomDelay = Math.floor(Math.random() * 2000) + 1000;
+  console.error(`[PROXY] Adding random delay: ${randomDelay}ms to avoid rate limiting`);
 
   try {
     upstreamHeaders.host = targetBaseUrl.host;
