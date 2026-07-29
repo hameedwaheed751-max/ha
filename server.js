@@ -5,8 +5,12 @@ const net = require('net');
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
-const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS === '1';
-const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS === '1';
+const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS
+  ? process.env.ALLOW_INSECURE_TLS === '1'
+  : NODE_ENV !== 'production';
+const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS
+  ? process.env.ALLOW_PRIVATE_TARGETS === '1'
+  : NODE_ENV !== 'production';
 const TARGET_ALLOWLIST = String(process.env.SAS_TARGET_ALLOWLIST || '')
   .split(',')
   .map((item) => item.trim().toLowerCase())
@@ -201,7 +205,9 @@ function handleRequest(req, res) {
       ok: true,
       service: 'NetAgent SAS Proxy',
       env: NODE_ENV,
+      port: PORT,
       allowInsecureTls: ALLOW_INSECURE_TLS,
+      allowPrivateTargets: ALLOW_PRIVATE_TARGETS,
       hasTokenAuth: Boolean(PROXY_TOKEN),
       hasAllowlist: TARGET_ALLOWLIST.length > 0,
     });
