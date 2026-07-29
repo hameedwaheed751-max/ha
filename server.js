@@ -98,6 +98,10 @@ function validateTarget(targetBaseUrl) {
     return 'Only http/https targets are allowed';
   }
 
+  if (targetBaseUrl.protocol !== 'https:' && NODE_ENV === 'production') {
+    return 'Only https SAS targets are allowed in production';
+  }
+
   const hostname = targetBaseUrl.hostname;
   if (!hostname) {
     return 'Target host is required';
@@ -117,6 +121,35 @@ function validateTarget(targetBaseUrl) {
   }
 
   return null;
+}
+
+function normalizeSasPath(reqUrl) {
+  let parsed;
+  try {
+    parsed = new URL(reqUrl || '/', 'http://netagent.local');
+  } catch (_) {
+    return null;
+  }
+
+  let path;
+  if (parsed.pathname === '/login') {
+    path = '/admin/api/index.php/api/login';
+  } else if (parsed.pathname === '/sas') {
+    path = '/';
+  } else if (parsed.pathname.startsWith('/sas/')) {
+    path = parsed.pathname.substring(4);
+  } else {
+    return null;
+  }
+
+  // Guard against client-side base URL mistakes that create duplicated SAS API
+  // segments such as /api/index.php/api/api/index.php/api/login.
+  path = path
+    .replace(/\/admin\/api\/index\.php\/api\/admin\/api\/index\.php\/api/ig, '/admin/api/index.php/api')
+    .replace(/\/api\/index\.php\/api\/api\/index\.php\/api/ig, '/api/index.php/api')
+    .replace(/\/api\/api\//ig, '/api/');
+
+  return `${path}${parsed.search || ''}`;
 }
 
 function buildUpstreamHeaders(req) {
@@ -200,7 +233,14 @@ function handleRequest(req, res) {
     return;
   }
 
-  if (req.url === '/' || req.url === '/health' || req.url === '/healthz') {
+  let parsedHealthUrl;
+  try {
+    parsedHealthUrl = new URL(req.url || '/', 'http://netagent.local');
+  } catch (_) {
+    parsedHealthUrl = new URL('/', 'http://netagent.local');
+  }
+
+  if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' || parsedHealthUrl.pathname === '/healthz') {
     sendJson(req, res, 200, {
       ok: true,
       service: 'NetAgent SAS Proxy',
@@ -210,6 +250,7 @@ function handleRequest(req, res) {
       allowPrivateTargets: ALLOW_PRIVATE_TARGETS,
       hasTokenAuth: Boolean(PROXY_TOKEN),
       hasAllowlist: TARGET_ALLOWLIST.length > 0,
+      routes: ['/health', '/healthz', '/sas/*', '/login'],
     });
     return;
   }
@@ -219,12 +260,12 @@ function handleRequest(req, res) {
     return;
   }
 
-  if (!req.url || !req.url.startsWith('/sas/')) {
+  const sasPath = normalizeSasPath(req.url);
+  if (!sasPath) {
     sendJson(req, res, 404, {error: 'Not Found'});
     return;
   }
 
-  const sasPath = req.url.substring(4);
   const targetOriginRaw = String(req.headers['x-sas-target'] || '').trim();
   if (!targetOriginRaw) {
     sendJson(req, res, 400, {error: 'Missing X-SAS-Target'});
