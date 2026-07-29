@@ -264,7 +264,17 @@ function buildUpstreamHeaders(req) {
   }
 
   if (!headers['user-agent']) {
-    headers['user-agent'] = 'NetAgent-SAS-Proxy/1.0';
+    headers['user-agent'] =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      + '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+  }
+
+  if (!headers.accept) {
+    headers.accept = 'application/json, text/plain, */*';
+  }
+
+  if (!headers['accept-language']) {
+    headers['accept-language'] = 'en-US,en;q=0.9';
   }
 
   return headers;
