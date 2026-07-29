@@ -5,6 +5,7 @@ const net = require('net');
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
+const DEFAULT_TARGET_URL = String(process.env.SAS_TARGET_URL || '').trim();
 const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS
   ? process.env.ALLOW_INSECURE_TLS === '1'
   : NODE_ENV !== 'production';
@@ -138,8 +139,18 @@ function normalizeSasPath(reqUrl) {
     path = '/';
   } else if (parsed.pathname.startsWith('/sas/')) {
     path = parsed.pathname.substring(4);
+  } else if (
+    parsed.pathname.startsWith('/admin/api/') ||
+    parsed.pathname.startsWith('/api/') ||
+    parsed.pathname.startsWith('/index.php/')
+  ) {
+    path = parsed.pathname;
   } else {
     return null;
+  }
+
+  if (!path.startsWith('/')) {
+    path = `/${path}`;
   }
 
   // Guard against client-side base URL mistakes that create duplicated SAS API
@@ -150,6 +161,17 @@ function normalizeSasPath(reqUrl) {
     .replace(/\/api\/api\//ig, '/api/');
 
   return `${path}${parsed.search || ''}`;
+}
+
+function resolveTargetOrigin(req, parsedRequestUrl) {
+  const headerTarget = String(req.headers['x-sas-target'] || '').trim();
+  if (headerTarget) return headerTarget;
+
+  const queryTarget = String(parsedRequestUrl.searchParams.get('target') || '').trim();
+  if (queryTarget) return queryTarget;
+
+  if (DEFAULT_TARGET_URL) return DEFAULT_TARGET_URL;
+  return '';
 }
 
 function buildUpstreamHeaders(req) {
@@ -246,6 +268,7 @@ function handleRequest(req, res) {
       service: 'NetAgent SAS Proxy',
       env: NODE_ENV,
       port: PORT,
+      hasDefaultTarget: Boolean(DEFAULT_TARGET_URL),
       allowInsecureTls: ALLOW_INSECURE_TLS,
       allowPrivateTargets: ALLOW_PRIVATE_TARGETS,
       hasTokenAuth: Boolean(PROXY_TOKEN),
@@ -266,9 +289,19 @@ function handleRequest(req, res) {
     return;
   }
 
-  const targetOriginRaw = String(req.headers['x-sas-target'] || '').trim();
+  let parsedRequestUrl;
+  try {
+    parsedRequestUrl = new URL(req.url || '/', 'https://netagent.local');
+  } catch (_) {
+    parsedRequestUrl = new URL('/', 'https://netagent.local');
+  }
+
+  const targetOriginRaw = resolveTargetOrigin(req, parsedRequestUrl);
   if (!targetOriginRaw) {
-    sendJson(req, res, 400, {error: 'Missing X-SAS-Target'});
+    sendJson(req, res, 400, {
+      error: 'Missing SAS target',
+      hint: 'Provide X-SAS-Target header, ?target=https://sas-host, or SAS_TARGET_URL env var',
+    });
     return;
   }
 
