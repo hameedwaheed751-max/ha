@@ -6,6 +6,9 @@ const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
 const DEFAULT_TARGET_URL = String(process.env.SAS_TARGET_URL || '').trim();
+const ALLOW_HTTP_TARGETS = process.env.ALLOW_HTTP_TARGETS
+  ? process.env.ALLOW_HTTP_TARGETS === '1'
+  : NODE_ENV !== 'production';
 const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS
   ? process.env.ALLOW_INSECURE_TLS === '1'
   : NODE_ENV !== 'production';
@@ -99,7 +102,7 @@ function validateTarget(targetBaseUrl) {
     return 'Only http/https targets are allowed';
   }
 
-  if (targetBaseUrl.protocol !== 'https:' && NODE_ENV === 'production') {
+  if (targetBaseUrl.protocol !== 'https:' && NODE_ENV === 'production' && !ALLOW_HTTP_TARGETS) {
     return 'Only https SAS targets are allowed in production';
   }
 
@@ -172,6 +175,42 @@ function resolveTargetOrigin(req, parsedRequestUrl) {
 
   if (DEFAULT_TARGET_URL) return DEFAULT_TARGET_URL;
   return '';
+}
+
+function splitPathAndSearch(rawPath) {
+  const idx = rawPath.indexOf('?');
+  if (idx < 0) return {pathOnly: rawPath, search: ''};
+  return {pathOnly: rawPath.slice(0, idx), search: rawPath.slice(idx)};
+}
+
+function buildUpstreamPath(targetBaseUrl, sasPath) {
+  const {pathOnly, search} = splitPathAndSearch(sasPath);
+  const targetPrefix = String(targetBaseUrl.pathname || '/').replace(/\/+$/, '');
+
+  if (!targetPrefix || targetPrefix === '/') {
+    return `${pathOnly}${search}`;
+  }
+
+  const reqLower = pathOnly.toLowerCase();
+  const prefixLower = targetPrefix.toLowerCase();
+
+  // If request already starts with target prefix, do not prepend again.
+  if (reqLower === prefixLower || reqLower.startsWith(`${prefixLower}/`)) {
+    return `${pathOnly}${search}`;
+  }
+
+  const apiBases = ['/admin/api/index.php/api', '/api/index.php/api'];
+  const sharedApiBase = apiBases.find((base) =>
+    prefixLower.endsWith(base) && (reqLower === base || reqLower.startsWith(`${base}/`))
+  );
+
+  if (sharedApiBase) {
+    const suffix = pathOnly.slice(sharedApiBase.length);
+    return `${targetPrefix}${suffix}${search}`;
+  }
+
+  const joined = `${targetPrefix}/${pathOnly.replace(/^\/+/, '')}`.replace(/\/+/g, '/');
+  return `${joined}${search}`;
 }
 
 function buildUpstreamHeaders(req) {
@@ -257,9 +296,9 @@ function handleRequest(req, res) {
 
   let parsedHealthUrl;
   try {
-    parsedHealthUrl = new URL(req.url || '/', 'https://ha-0cs7.onrender.com/login');
+    parsedHealthUrl = new URL(req.url || '/', 'https://netagent.local');
   } catch (_) {
-    parsedHealthUrl = new URL('/', 'https://ha-0cs7.onrender.com/login');
+    parsedHealthUrl = new URL('/', 'https://netagent.local');
   }
 
   if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' || parsedHealthUrl.pathname === '/healthz') {
@@ -269,11 +308,12 @@ function handleRequest(req, res) {
       env: NODE_ENV,
       port: PORT,
       hasDefaultTarget: Boolean(DEFAULT_TARGET_URL),
+      allowHttpTargets: ALLOW_HTTP_TARGETS,
       allowInsecureTls: ALLOW_INSECURE_TLS,
       allowPrivateTargets: ALLOW_PRIVATE_TARGETS,
       hasTokenAuth: Boolean(PROXY_TOKEN),
       hasAllowlist: TARGET_ALLOWLIST.length > 0,
-      routes: ['/health', '/healthz', '/sas/*', '/login'],
+      routes: ['/health', '/healthz', '/sas/*', '/login', '/admin/api/*', '/api/*', '/index.php/*'],
     });
     return;
   }
@@ -310,7 +350,10 @@ function handleRequest(req, res) {
   try {
     targetBaseUrl = new URL(targetOrigin);
   } catch (_) {
-    sendJson(req, res, 400, {error: 'Invalid X-SAS-Target'});
+    sendJson(req, res, 400, {
+      error: 'Invalid SAS target URL',
+      hint: 'Use a full URL like https://sas.example.com or https://sas.example.com/admin/api/index.php/api',
+    });
     return;
   }
 
@@ -322,20 +365,21 @@ function handleRequest(req, res) {
 
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
+  const upstreamPath = buildUpstreamPath(targetBaseUrl, sasPath);
 
   const upstream = upstreamClient.request(
     {
       protocol: targetBaseUrl.protocol,
       hostname: targetBaseUrl.hostname,
       port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
-      path: sasPath,
+      path: upstreamPath,
       method: req.method,
       headers: upstreamHeaders,
       timeout: 30000,
     },
     (upstreamRes) => {
       res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
-      res.setHeader('X-Proxy-Path', sasPath);
+      res.setHeader('X-Proxy-Path', upstreamPath);
 
       const responseHeaders = filterResponseHeaders(upstreamRes.headers);
       for (const [key, value] of Object.entries(responseHeaders)) {
