@@ -235,9 +235,9 @@ function handleRequest(req, res) {
 
   let parsedHealthUrl;
   try {
-    parsedHealthUrl = new URL(req.url || '/', 'https://ha-0cs7.onrender.com/');
+    parsedHealthUrl = new URL(req.url || '/', 'https://ha-0cs7.onrender.com/login');
   } catch (_) {
-    parsedHealthUrl = new URL('/', 'https://ha-0cs7.onrender.com/');
+    parsedHealthUrl = new URL('/', 'https://ha-0cs7.onrender.com/login');
   }
 
   if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' || parsedHealthUrl.pathname === '/healthz') {
