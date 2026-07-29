@@ -6,6 +6,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
 const DEFAULT_TARGET_URL = String(process.env.SAS_TARGET_URL || '').trim();
+const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 5 * 1024 * 1024);
 const ALLOW_HTTP_TARGETS = process.env.ALLOW_HTTP_TARGETS
   ? process.env.ALLOW_HTTP_TARGETS === '1'
   : NODE_ENV !== 'production';
@@ -163,7 +164,10 @@ function normalizeSasPath(reqUrl) {
     .replace(/\/api\/index\.php\/api\/api\/index\.php\/api/ig, '/api/index.php/api')
     .replace(/\/api\/api\//ig, '/api/');
 
-  return `${path}${parsed.search || ''}`;
+  // Remove proxy control params before forwarding to SAS.
+  parsed.searchParams.delete('target');
+  const cleanedSearch = parsed.searchParams.toString();
+  return `${path}${cleanedSearch ? `?${cleanedSearch}` : ''}`;
 }
 
 function resolveTargetOrigin(req, parsedRequestUrl) {
@@ -213,14 +217,43 @@ function buildUpstreamPath(targetBaseUrl, sasPath) {
   return `${joined}${search}`;
 }
 
+function buildPathCandidates(primaryPath) {
+  const variants = ['/admin/api/index.php/api', '/api/index.php/api', '/index.php/api'];
+  const {pathOnly, search} = splitPathAndSearch(primaryPath);
+  const unique = [];
+  const seen = new Set();
+
+  const add = (value) => {
+    const k = String(value || '').trim();
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    unique.push(k);
+  };
+
+  add(`${pathOnly}${search}`);
+
+  for (const fromBase of variants) {
+    if (!pathOnly.startsWith(fromBase)) continue;
+    const suffix = pathOnly.slice(fromBase.length);
+    for (const toBase of variants) {
+      if (toBase === fromBase) continue;
+      add(`${toBase}${suffix}${search}`);
+    }
+  }
+
+  return unique;
+}
+
 function buildUpstreamHeaders(req) {
   const allowedRequestHeaders = [
     'accept',
     'accept-language',
     'authorization',
     'content-type',
+    'content-length',
     'allow-cache-y',
     'user-agent',
+    'x-requested-with',
   ];
 
   const headers = {};
@@ -367,59 +400,122 @@ function handleRequest(req, res) {
   const upstreamHeaders = buildUpstreamHeaders(req);
   const upstreamPath = buildUpstreamPath(targetBaseUrl, sasPath);
 
-  const upstream = upstreamClient.request(
-    {
-      protocol: targetBaseUrl.protocol,
-      hostname: targetBaseUrl.hostname,
-      port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
-      path: upstreamPath,
-      method: req.method,
-      headers: upstreamHeaders,
-      timeout: 30000,
-    },
-    (upstreamRes) => {
-      res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
-      res.setHeader('X-Proxy-Path', upstreamPath);
+  const bodyChunks = [];
+  let bodyBytes = 0;
+  let bodyTooLarge = false;
 
-      const responseHeaders = filterResponseHeaders(upstreamRes.headers);
-      for (const [key, value] of Object.entries(responseHeaders)) {
-        try {
-          res.setHeader(key, value);
-        } catch (_) {
-          // Ignore invalid upstream header values.
-        }
-      }
-
-      applyCors(req, res);
-
-      const contentType = String(responseHeaders['content-type'] || '').toLowerCase();
-      if ((upstreamRes.statusCode || 0) >= 400 && contentType.includes('text/html')) {
-        handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath);
-        return;
-      }
-
-      res.writeHead(upstreamRes.statusCode || 502);
-      upstreamRes.pipe(res);
-    }
-  );
-
-  upstream.on('timeout', () => {
-    upstream.destroy(new Error('Upstream timeout'));
-  });
-
-  upstream.on('error', (error) => {
-    if (!res.headersSent) {
-      sendJson(req, res, 502, {error: 'SAS connection failed', message: error.message});
+  req.on('data', (chunk) => {
+    if (bodyTooLarge) return;
+    bodyBytes += chunk.length;
+    if (bodyBytes > MAX_BODY_BYTES) {
+      bodyTooLarge = true;
+      sendJson(req, res, 413, {
+        error: 'Payload too large',
+        limit: MAX_BODY_BYTES,
+      });
       return;
     }
-    try {
-      res.end();
-    } catch (_) {
-      // Ignore write errors if response is already closed.
+    bodyChunks.push(chunk);
+  });
+
+  req.on('error', (error) => {
+    if (!res.headersSent) {
+      sendJson(req, res, 400, {error: 'Failed to read request body', message: error.message});
     }
   });
 
-  req.pipe(upstream);
+  req.on('end', () => {
+    if (bodyTooLarge || res.headersSent) return;
+
+    const requestBody = bodyChunks.length > 0 ? Buffer.concat(bodyChunks) : Buffer.alloc(0);
+    const pathCandidates = buildPathCandidates(upstreamPath);
+
+    const forwardAttempt = (index) => {
+      const currentPath = pathCandidates[index];
+      const headers = {...upstreamHeaders};
+      if (requestBody.length > 0) {
+        headers['content-length'] = String(requestBody.length);
+      } else {
+        delete headers['content-length'];
+      }
+
+      const upstream = upstreamClient.request(
+        {
+          protocol: targetBaseUrl.protocol,
+          hostname: targetBaseUrl.hostname,
+          port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
+          path: currentPath,
+          method: req.method,
+          headers,
+          timeout: 30000,
+        },
+        (upstreamRes) => {
+          const status = upstreamRes.statusCode || 0;
+          const canRetry = index + 1 < pathCandidates.length;
+
+          // Retry API base variants when upstream route does not exist.
+          if (canRetry && (status === 404 || status === 405)) {
+            upstreamRes.resume();
+            forwardAttempt(index + 1);
+            return;
+          }
+
+          res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
+          res.setHeader('X-Proxy-Path', currentPath);
+          res.setHeader('X-Proxy-Attempt', String(index + 1));
+
+          const responseHeaders = filterResponseHeaders(upstreamRes.headers);
+          for (const [key, value] of Object.entries(responseHeaders)) {
+            try {
+              res.setHeader(key, value);
+            } catch (_) {
+              // Ignore invalid upstream header values.
+            }
+          }
+
+          applyCors(req, res);
+
+          const contentType = String(responseHeaders['content-type'] || '').toLowerCase();
+          if (status >= 400 && contentType.includes('text/html')) {
+            handleHtmlError(req, res, upstreamRes, targetBaseUrl, currentPath);
+            return;
+          }
+
+          res.writeHead(status || 502);
+          upstreamRes.pipe(res);
+        }
+      );
+
+      upstream.on('timeout', () => {
+        upstream.destroy(new Error('Upstream timeout'));
+      });
+
+      upstream.on('error', (error) => {
+        const canRetry = index + 1 < pathCandidates.length;
+        if (canRetry) {
+          forwardAttempt(index + 1);
+          return;
+        }
+
+        if (!res.headersSent) {
+          sendJson(req, res, 502, {error: 'SAS connection failed', message: error.message});
+          return;
+        }
+        try {
+          res.end();
+        } catch (_) {
+          // Ignore write errors if response is already closed.
+        }
+      });
+
+      if (requestBody.length > 0) {
+        upstream.write(requestBody);
+      }
+      upstream.end();
+    };
+
+    forwardAttempt(0);
+  });
 }
 
 const server = http.createServer(handleRequest);
