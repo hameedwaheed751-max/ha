@@ -235,9 +235,9 @@ function handleRequest(req, res) {
 
   let parsedHealthUrl;
   try {
-    parsedHealthUrl = new URL(req.url || '/', 'http://netagent.local');
+    parsedHealthUrl = new URL(req.url || '/', 'https://ha-0cs7.onrender.com/');
   } catch (_) {
-    parsedHealthUrl = new URL('/', 'http://netagent.local');
+    parsedHealthUrl = new URL('/', 'https://ha-0cs7.onrender.com/');
   }
 
   if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' || parsedHealthUrl.pathname === '/healthz') {
