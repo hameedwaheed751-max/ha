@@ -136,19 +136,20 @@ function normalizeSasPath(reqUrl) {
     return null;
   }
 
+  const pathname = String(parsed.pathname || '/');
   let path;
-  if (parsed.pathname === '/login') {
+  if (pathname === '/login' || pathname === '/sas/login') {
     path = '/admin/api/index.php/api/login';
-  } else if (parsed.pathname === '/sas') {
+  } else if (pathname === '/sas' || pathname === '/') {
     path = '/';
-  } else if (parsed.pathname.startsWith('/sas/')) {
-    path = parsed.pathname.substring(4);
+  } else if (pathname.startsWith('/sas/')) {
+    path = pathname.substring(4);
   } else if (
-    parsed.pathname.startsWith('/admin/api/') ||
-    parsed.pathname.startsWith('/api/') ||
-    parsed.pathname.startsWith('/index.php/')
+    pathname.startsWith('/admin/api/') ||
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/index.php/')
   ) {
-    path = parsed.pathname;
+    path = pathname;
   } else {
     return null;
   }
@@ -172,12 +173,12 @@ function normalizeSasPath(reqUrl) {
 
 function resolveTargetOrigin(req, parsedRequestUrl) {
   const headerTarget = String(req.headers['x-sas-target'] || '').trim();
-  if (headerTarget) return headerTarget;
+  if (headerTarget) return normalizeTargetValue(headerTarget);
 
   const queryTarget = String(parsedRequestUrl.searchParams.get('target') || '').trim();
-  if (queryTarget) return queryTarget;
+  if (queryTarget) return normalizeTargetValue(queryTarget);
 
-  if (DEFAULT_TARGET_URL) return DEFAULT_TARGET_URL;
+  if (DEFAULT_TARGET_URL) return normalizeTargetValue(DEFAULT_TARGET_URL);
   return '';
 }
 
@@ -187,15 +188,34 @@ function splitPathAndSearch(rawPath) {
   return {pathOnly: rawPath.slice(0, idx), search: rawPath.slice(idx)};
 }
 
+function normalizeTargetValue(rawValue) {
+  const value = String(rawValue || '').trim();
+  if (!value) return '';
+
+  const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch (_) {
+    return '';
+  }
+
+  const origin = `${parsed.protocol}//${parsed.host}`;
+  const pathname = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/+$/, '') : '';
+  const search = parsed.search || '';
+  return `${origin}${pathname}${search}`;
+}
+
 function buildUpstreamPath(targetBaseUrl, sasPath) {
   const {pathOnly, search} = splitPathAndSearch(sasPath);
   const targetPrefix = String(targetBaseUrl.pathname || '/').replace(/\/+$/, '');
+  const normalizedPath = pathOnly.startsWith('/') ? pathOnly : `/${pathOnly}`;
 
   if (!targetPrefix || targetPrefix === '/') {
-    return `${pathOnly}${search}`;
+    return `${normalizedPath}${search}`;
   }
 
-  const reqLower = pathOnly.toLowerCase();
+  const reqLower = normalizedPath.toLowerCase();
   const prefixLower = targetPrefix.toLowerCase();
 
   // If request already starts with target prefix, do not prepend again.
@@ -203,17 +223,17 @@ function buildUpstreamPath(targetBaseUrl, sasPath) {
     return `${pathOnly}${search}`;
   }
 
-  const apiBases = ['/admin/api/index.php/api', '/api/index.php/api'];
+  const apiBases = ['/admin/api/index.php/api', '/api/index.php/api', '/index.php/api'];
   const sharedApiBase = apiBases.find((base) =>
     prefixLower.endsWith(base) && (reqLower === base || reqLower.startsWith(`${base}/`))
   );
 
   if (sharedApiBase) {
-    const suffix = pathOnly.slice(sharedApiBase.length);
+    const suffix = normalizedPath.slice(sharedApiBase.length);
     return `${targetPrefix}${suffix}${search}`;
   }
 
-  const joined = `${targetPrefix}/${pathOnly.replace(/^\/+/, '')}`.replace(/\/+/g, '/');
+  const joined = `${targetPrefix}/${normalizedPath.replace(/^\/+/, '')}`.replace(/\/+/, '/');
   return `${joined}${search}`;
 }
 
