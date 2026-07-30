@@ -381,6 +381,72 @@ function handleRequest(req, res) {
     return;
   }
 
+  // تشخيص: اختبار الوصول لسيرفر SAS بدون إرسال بيانات
+  if (parsedHealthUrl.pathname === '/ping-target') {
+    const pingTarget = String(
+      parsedHealthUrl.searchParams.get('target') ||
+      req.headers['x-sas-target'] ||
+      DEFAULT_TARGET_URL ||
+      ''
+    ).trim();
+
+    if (!pingTarget) {
+      sendJson(req, res, 400, {error: 'Missing target. Use ?target=https://sas-host or X-SAS-Target header'});
+      return;
+    }
+
+    const normalizedPing = normalizeTargetValue(pingTarget);
+    if (!normalizedPing) {
+      sendJson(req, res, 400, {error: 'Invalid target URL'});
+      return;
+    }
+
+    let pingUrl;
+    try {
+      pingUrl = new URL(normalizedPing);
+    } catch (_) {
+      sendJson(req, res, 400, {error: 'Could not parse target URL'});
+      return;
+    }
+
+    const pingClient = pingUrl.protocol === 'https:' ? https : http;
+    const started = Date.now();
+
+    const pingReq = pingClient.request(
+      {
+        protocol: pingUrl.protocol,
+        hostname: pingUrl.hostname,
+        port: pingUrl.port || (pingUrl.protocol === 'https:' ? 443 : 80),
+        path: '/admin/api/index.php/api/login',
+        method: 'OPTIONS',
+        headers: {'user-agent': 'NetAgent-Proxy-PingTest/1.0'},
+        timeout: 8000,
+      },
+      (pingRes) => {
+        pingRes.resume();
+        sendJson(req, res, 200, {
+          ok: true,
+          target: pingUrl.origin,
+          httpStatus: pingRes.statusCode,
+          latencyMs: Date.now() - started,
+          note: 'OPTIONS request to /admin/api/index.php/api/login',
+        });
+      }
+    );
+
+    pingReq.on('timeout', () => {
+      pingReq.destroy();
+      sendJson(req, res, 504, {ok: false, target: pingUrl.origin, error: 'Timeout after 8s'});
+    });
+
+    pingReq.on('error', (err) => {
+      sendJson(req, res, 502, {ok: false, target: pingUrl.origin, error: err.message, code: err.code});
+    });
+
+    pingReq.end();
+    return;
+  }
+
   if (!hasValidProxyToken(req)) {
     sendJson(req, res, 401, {error: 'Unauthorized'});
     return;
@@ -425,6 +491,8 @@ function handleRequest(req, res) {
     sendJson(req, res, 403, {error: targetError});
     return;
   }
+
+  console.log(`[proxy] ${req.method} ${req.url} → ${targetBaseUrl.origin}`);
 
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
@@ -521,6 +589,7 @@ function handleRequest(req, res) {
       });
 
       upstream.on('error', (error) => {
+        console.error(`[proxy] upstream error → ${targetBaseUrl.origin}${currentPath}: ${error.message}`);
         const canRetry = index + 1 < pathCandidates.length;
         if (canRetry) {
           forwardAttempt(index + 1);
