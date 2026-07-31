@@ -559,17 +559,24 @@ function handleRequest(req, res) {
       const verifyToken = String(parsedHealthUrl.searchParams.get('hub.verify_token') || '').trim();
       const challenge = String(parsedHealthUrl.searchParams.get('hub.challenge') || '').trim();
 
+      console.log(
+        `[webhook] verify request mode=${mode || '-'} tokenPresent=${verifyToken ? 'yes' : 'no'} challengePresent=${challenge ? 'yes' : 'no'}`
+      );
+
       if (mode === 'subscribe' && WHATSAPP_VERIFY_TOKEN && verifyToken === WHATSAPP_VERIFY_TOKEN && challenge) {
         res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'});
         res.end(challenge);
+        console.log('[webhook] verify success');
         return;
       }
 
+      console.log('[webhook] verify failed');
       sendJson(req, res, 403, {error: 'Forbidden'});
       return;
     }
 
     if (req.method === 'POST') {
+      console.log('[webhook] event received');
       res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'});
       res.end('OK');
 
@@ -577,9 +584,10 @@ function handleRequest(req, res) {
         try {
           const rawBody = await readRawBody(req, MAX_BODY_BYTES);
           try {
-            console.log('[webhook] WhatsApp event body:', rawBody ? JSON.parse(rawBody) : {});
+            const parsed = rawBody ? JSON.parse(rawBody) : {};
+            console.log('[webhook] WhatsApp event body JSON:', JSON.stringify(parsed));
           } catch (_) {
-            console.log('[webhook] WhatsApp event body:', rawBody);
+            console.log('[webhook] WhatsApp event body RAW:', rawBody);
           }
         } catch (error) {
           console.error('[webhook] Failed to read body:', error && error.message ? error.message : error);
