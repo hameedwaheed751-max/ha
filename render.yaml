@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: netagent-sas-proxy
+    env: node
+    rootDir: web_proxy
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ALLOW_INSECURE_TLS
+        value: "1"
+      - key: SAS_TARGET_ALLOWLIST
+        value: ""
+      # Required for WhatsApp Cloud API webhook verification
+      # - key: WHATSAPP_VERIFY_TOKEN
+      #   value: your-verify-token
+      # Required for WhatsApp Cloud API sending
+      # - key: WHATSAPP_ACCESS_TOKEN
+      #   value: your-access-token
+      # - key: WHATSAPP_PHONE_NUMBER_ID
+      #   value: your-phone-number-id
+      # Optional
+      # - key: SAS_TARGET_URL
+      #   value: https://sas.speednet-iq.com
+      # - key: PROXY_TOKEN
+      #   value: your-secret-token-here
