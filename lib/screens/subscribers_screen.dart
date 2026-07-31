@@ -6,6 +6,7 @@ import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
 import '../services/auto_notification_service.dart';
+import '../services/render_whatsapp_service.dart';
 import 'add_subscriber_screen.dart';
 import 'receipt_screen.dart';
 import 'subscriber_details_screen.dart';
@@ -990,6 +991,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                         // نجاح التمديد لا يُلغى إذا تعذر تحديث التفاصيل اللحظي.
                       }
                       if (mounted) setState(() {});
+
+                      // Keep renewal success independent from WhatsApp availability.
+                      await _sendRenewalWhatsAppMessage(s);
+
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -1027,6 +1032,24 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         },
       ),
     );
+  }
+
+  Future<void> _sendRenewalWhatsAppMessage(Subscriber s) async {
+    final phone = RenderWhatsAppService.normalizePhone(s.phone);
+    if (phone.isEmpty) return;
+
+    final text = 'مرحباً ${s.name}، تم تجديد اشتراكك بنجاح. '
+        'تاريخ الانتهاء الجديد: ${fmt(s.endDate)}. '
+        'شكراً لك.';
+
+    final result = await RenderWhatsAppService.sendSingleMessage(
+      to: phone,
+      message: text,
+    );
+
+    if (!result.success) {
+      debugPrint('Renewal WhatsApp send failed: ${result.error ?? 'unknown'}');
+    }
   }
 
   Future<void> _changePackage(Subscriber s) async {

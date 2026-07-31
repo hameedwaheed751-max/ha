@@ -7,6 +7,7 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
 const WHATSAPP_ACCESS_TOKEN = String(process.env.WHATSAPP_ACCESS_TOKEN || '').trim();
 const WHATSAPP_TOKEN = String(process.env.WHATSAPP_TOKEN || '').trim();
+const PHONE_NUMBER_ID = String(process.env.PHONE_NUMBER_ID || '').trim();
 const WHATSAPP_PHONE_NUMBER_ID = String(process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
 const WHATSAPP_VERIFY_TOKEN = String(process.env.WHATSAPP_VERIFY_TOKEN || '').trim();
 const WHATSAPP_API_VERSION = String(process.env.WHATSAPP_API_VERSION || 'v22.0').trim();
@@ -434,8 +435,8 @@ async function sendWhatsApp(phone, message) {
     return {ok: false, skipped: true, reason: 'Missing phone or message'};
   }
 
-  if (!(WHATSAPP_ACCESS_TOKEN || WHATSAPP_TOKEN) || !WHATSAPP_PHONE_NUMBER_ID) {
-    return {ok: false, skipped: true, reason: 'Missing WHATSAPP_TOKEN or WHATSAPP_PHONE_NUMBER_ID'};
+  if (!(WHATSAPP_ACCESS_TOKEN || WHATSAPP_TOKEN) || !(WHATSAPP_PHONE_NUMBER_ID || PHONE_NUMBER_ID)) {
+    return {ok: false, skipped: true, reason: 'Missing WHATSAPP_TOKEN or PHONE_NUMBER_ID'};
   }
 
   await sendWhatsAppText(cleanPhone, body);
@@ -444,12 +445,12 @@ async function sendWhatsApp(phone, message) {
 
 async function sendWhatsAppText(to, message) {
   const accessToken = WHATSAPP_ACCESS_TOKEN || WHATSAPP_TOKEN;
-  const phoneNumberId = WHATSAPP_PHONE_NUMBER_ID;
+  const phoneNumberId = WHATSAPP_PHONE_NUMBER_ID || PHONE_NUMBER_ID;
   const cleanTo = String(to || '').replace(/\D/g, '').trim();
   const body = String(message || '').trim();
 
   if (!phoneNumberId || !accessToken) {
-    const err = new Error('Missing WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID');
+    const err = new Error('Missing WHATSAPP_TOKEN or PHONE_NUMBER_ID');
     err.statusCode = 500;
     throw err;
   }
@@ -694,6 +695,47 @@ function handleRequest(req, res) {
       } catch (error) {
         const status = Number(error?.statusCode) || 500;
         const payload = {error: error?.message || 'Internal Server Error'};
+
+        if (error && error.details !== undefined) {
+          payload.details = error.details;
+        }
+
+        sendJson(req, res, status, payload);
+      }
+    })();
+    return;
+  }
+
+  if (parsedHealthUrl.pathname === '/send-message') {
+    if (req.method !== 'POST') {
+      sendJson(req, res, 405, {error: 'Method Not Allowed'});
+      return;
+    }
+
+    (async () => {
+      try {
+        const body = await readJsonBody(req, MAX_BODY_BYTES);
+        const to = String(body.to || '').trim();
+        const message = String(body.message || '').trim();
+
+        if (!to || !message) {
+          sendJson(req, res, 400, {error: 'Both "to" and "message" are required'});
+          return;
+        }
+
+        const apiResult = await sendWhatsAppText(to, message);
+        const messageId = apiResult?.messages?.[0]?.id || apiResult?.message_id || '';
+
+        sendJson(req, res, 200, {
+          success: true,
+          messageId,
+        });
+      } catch (error) {
+        const status = Number(error?.statusCode) || 500;
+        const payload = {
+          success: false,
+          error: error?.message || 'Internal Server Error',
+        };
 
         if (error && error.details !== undefined) {
           payload.details = error.details;

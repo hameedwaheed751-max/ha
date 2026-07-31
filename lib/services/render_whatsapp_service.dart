@@ -19,6 +19,22 @@ class RenderWhatsAppResult {
   final Map<String, dynamic>? raw;
 }
 
+class RenderSingleWhatsAppResult {
+  const RenderSingleWhatsAppResult({
+    required this.success,
+    this.messageId,
+    this.error,
+    this.details,
+    this.statusCode,
+  });
+
+  final bool success;
+  final String? messageId;
+  final String? error;
+  final Map<String, dynamic>? details;
+  final int? statusCode;
+}
+
 class WhatsAppSendLog {
   const WhatsAppSendLog({
     required this.at,
@@ -61,6 +77,7 @@ class WhatsAppSendLog {
 
 class RenderWhatsAppService {
   static const String endpointKey = 'render_whatsapp_endpoint';
+  static const String sendMessageEndpointKey = 'render_send_message_endpoint';
   static const String apiKeyKey = 'render_whatsapp_api_key';
   static const String logsKey = 'render_whatsapp_send_logs';
   static const int maxLogs = 200;
@@ -70,6 +87,23 @@ class RenderWhatsAppService {
     final endpoint = (prefs.getString(endpointKey) ?? '').trim();
     final apiKey = (prefs.getString(apiKeyKey) ?? '').trim();
     return (endpoint, apiKey);
+  }
+
+  static Future<String> loadSendMessageEndpoint() async {
+    final prefs = await SharedPreferences.getInstance();
+    final custom = (prefs.getString(sendMessageEndpointKey) ?? '').trim();
+    if (custom.isNotEmpty) return custom;
+
+    final base = (prefs.getString(endpointKey) ?? '').trim();
+    if (base.isEmpty) return '';
+
+    try {
+      final uri = Uri.parse(base);
+      if (!uri.hasScheme || uri.host.isEmpty) return '';
+      return '${uri.scheme}://${uri.authority}/send-message';
+    } catch (_) {
+      return '';
+    }
   }
 
   static String normalizePhone(String phone) {
@@ -244,6 +278,82 @@ class RenderWhatsAppService {
         ),
       );
       return result;
+    }
+  }
+
+  static Future<RenderSingleWhatsAppResult> sendSingleMessage({
+    required String to,
+    required String message,
+  }) async {
+    final normalizedPhone = normalizePhone(to);
+    final cleanMessage = message.trim();
+    if (normalizedPhone.isEmpty || cleanMessage.isEmpty) {
+      return const RenderSingleWhatsAppResult(
+        success: false,
+        error: 'Both "to" and "message" are required',
+      );
+    }
+
+    final endpoint = await loadSendMessageEndpoint();
+    if (endpoint.isEmpty) {
+      return const RenderSingleWhatsAppResult(
+        success: false,
+        error: 'Render send-message endpoint is not configured',
+      );
+    }
+
+    final config = await loadConfig();
+    final apiKey = config.$2;
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+
+    if (apiKey.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $apiKey';
+      headers['x-api-key'] = apiKey;
+      headers['x-proxy-token'] = apiKey;
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse(endpoint),
+        headers: headers,
+        body: jsonEncode({
+          'to': normalizedPhone,
+          'message': cleanMessage,
+        }),
+      );
+
+      Map<String, dynamic> data = <String, dynamic>{};
+      if (response.body.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map<String, dynamic>) {
+            data = decoded;
+          }
+        } catch (_) {}
+      }
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        return RenderSingleWhatsAppResult(
+          success: data['success'] == true,
+          messageId: (data['messageId'] ?? '').toString(),
+          details: data,
+          statusCode: response.statusCode,
+        );
+      }
+
+      return RenderSingleWhatsAppResult(
+        success: false,
+        error: (data['error'] ?? 'HTTP ${response.statusCode}').toString(),
+        details: data.isNotEmpty ? data : {'body': response.body},
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return RenderSingleWhatsAppResult(
+        success: false,
+        error: e.toString(),
+      );
     }
   }
 }
