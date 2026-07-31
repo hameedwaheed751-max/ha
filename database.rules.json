@@ -1,0 +1,12 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "agents": {
+      "$agentId": {
+        ".read": "auth != null && ($agentId === auth.uid || $agentId.matches('^' + auth.uid + '_.+$') || root.child('agents').child(auth.uid).child('profile').child('currentAgentId').val() === $agentId)",
+        ".write": "auth != null && ($agentId === auth.uid || $agentId.matches('^' + auth.uid + '_.+$') || root.child('agents').child(auth.uid).child('profile').child('currentAgentId').val() === $agentId)"
+      }
+    }
+  }
+}

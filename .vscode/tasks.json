@@ -1,0 +1,53 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Flutter: Build Debug APK",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set JAVA_HOME=C:\\Program Files\\Android\\Android Studio\\jbr && cd ${workspaceFolder}\\android && gradlew.bat assembleDebug --stacktrace"
+			],
+			"problemMatcher": [
+				"$gradle"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"reveal": "always",
+				"panel": "new"
+			}
+		},
+		{
+			"label": "Flutter: Run on Device",
+			"type": "shell",
+			"command": "pwsh",
+			"args": [
+				"-Command",
+				"$env:JAVA_HOME = 'C:\\Program Files\\Android\\Android Studio\\jbr'; cd '${workspaceFolder}'; flutter run"
+			],
+			"problemMatcher": [],
+			"group": {
+				"kind": "test",
+				"isDefault": true
+			},
+			"presentation": {
+				"reveal": "always",
+				"panel": "new"
+			}
+		},
+		{
+			"label": "Flutter: Clean",
+			"type": "shell",
+			"command": "cd '${workspaceFolder}' && flutter clean",
+			"group": "build",
+			"presentation": {
+				"reveal": "silent",
+				"panel": "new"
+			}
+		}
+	]
+}

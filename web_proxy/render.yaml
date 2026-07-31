@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: netagent-sas-proxy
+    env: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # السماح بشهادات TLS غير الموثوقة (SAS servers غالباً تستخدم self-signed certs)
+      - key: ALLOW_INSECURE_TLS
+        value: "1"
+      # السماح بأي هوست SAS (غيّر هذا إلى نطاق SAS الخاص بك لمزيد من الأمان)
+      - key: SAS_TARGET_ALLOWLIST
+        value: ""
+      # اختياري: حدد رابط SAS الافتراضي حتى لا تحتاج لإرساله من التطبيق
+      # - key: SAS_TARGET_URL
+      #   value: https://sas.speednet-iq.com
+      # اختياري: رمز أمان للبروكسي
+      # - key: PROXY_TOKEN
+      #   value: your-secret-token-here

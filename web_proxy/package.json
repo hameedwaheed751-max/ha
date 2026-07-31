@@ -1,0 +1,13 @@
+{
+  "name": "netagent-web-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Simple SAS CORS proxy for NetAgent web",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

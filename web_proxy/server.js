@@ -5,11 +5,21 @@ const net = require('net');
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
-// Compatibility default: keep old behavior (skip TLS cert verification)
-// unless explicitly disabled with ALLOW_INSECURE_TLS=0.
-const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS !== '0';
-// Compatibility default: allow private targets unless explicitly disabled.
-const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS !== '0';
+const WHATSAPP_ACCESS_TOKEN = String(process.env.WHATSAPP_ACCESS_TOKEN || '').trim();
+const WHATSAPP_TOKEN = String(process.env.WHATSAPP_TOKEN || '').trim();
+const WHATSAPP_PHONE_NUMBER_ID = String(process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
+const WHATSAPP_API_VERSION = String(process.env.WHATSAPP_API_VERSION || 'v22.0').trim();
+const DEFAULT_TARGET_URL = String(process.env.SAS_TARGET_URL || '').trim();
+const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 5 * 1024 * 1024);
+const ALLOW_HTTP_TARGETS = process.env.ALLOW_HTTP_TARGETS
+  ? process.env.ALLOW_HTTP_TARGETS === '1'
+  : NODE_ENV !== 'production';
+const ALLOW_INSECURE_TLS = process.env.ALLOW_INSECURE_TLS
+  ? process.env.ALLOW_INSECURE_TLS === '1'
+  : NODE_ENV !== 'production';
+const ALLOW_PRIVATE_TARGETS = process.env.ALLOW_PRIVATE_TARGETS
+  ? process.env.ALLOW_PRIVATE_TARGETS === '1'
+  : NODE_ENV !== 'production';
 const TARGET_ALLOWLIST = String(process.env.SAS_TARGET_ALLOWLIST || '')
   .split(',')
   .map((item) => item.trim().toLowerCase())
@@ -20,10 +30,6 @@ if (ALLOW_INSECURE_TLS) {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   console.warn('WARNING: TLS certificate verification is disabled (ALLOW_INSECURE_TLS=1).');
 }
-
-const INSECURE_HTTPS_AGENT = new https.Agent({
-  rejectUnauthorized: !ALLOW_INSECURE_TLS,
-});
 
 if (TARGET_ALLOWLIST.length === 0) {
   console.warn('WARNING: SAS_TARGET_ALLOWLIST is empty. Any public target host is allowed.');
@@ -36,7 +42,7 @@ function applyCors(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    requestedHeaders || 'Content-Type, Authorization, Allow-Cache-Y, X-SAS-Target, X-Proxy-Token'
+    requestedHeaders || 'Content-Type, Authorization, Allow-Cache-Y, X-SAS-Target, X-Proxy-Token, X-WA-Phone, X-WA-Message-B64'
   );
   res.setHeader('Access-Control-Max-Age', '86400');
 }
@@ -101,6 +107,10 @@ function validateTarget(targetBaseUrl) {
     return 'Only http/https targets are allowed';
   }
 
+  if (targetBaseUrl.protocol !== 'https:' && NODE_ENV === 'production' && !ALLOW_HTTP_TARGETS) {
+    return 'Only https SAS targets are allowed in production';
+  }
+
   const hostname = targetBaseUrl.hostname;
   if (!hostname) {
     return 'Target host is required';
@@ -122,17 +132,173 @@ function validateTarget(targetBaseUrl) {
   return null;
 }
 
+function normalizeSasPath(reqUrl) {
+  let parsed;
+  try {
+    parsed = new URL(reqUrl || '/', 'http://netagent.local');
+  } catch (_) {
+    return null;
+  }
+
+  const pathname = String(parsed.pathname || '/');
+  let path;
+  if (pathname === '/login' || pathname === '/sas/login') {
+    path = '/admin/api/index.php/api/login';
+  } else if (pathname === '/sas' || pathname === '/') {
+    path = '/';
+  } else if (pathname.startsWith('/sas/')) {
+    path = pathname.substring(4);
+  } else if (
+    pathname.startsWith('/admin/api/') ||
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/index.php/')
+  ) {
+    path = pathname;
+  } else {
+    return null;
+  }
+
+  if (!path.startsWith('/')) {
+    path = `/${path}`;
+  }
+
+  // Guard against client-side base URL mistakes that create duplicated SAS API
+  // segments such as /api/index.php/api/api/index.php/api/login.
+  path = path
+    .replace(/\/admin\/api\/index\.php\/api\/admin\/api\/index\.php\/api/ig, '/admin/api/index.php/api')
+    .replace(/\/api\/index\.php\/api\/api\/index\.php\/api/ig, '/api/index.php/api')
+    .replace(/\/api\/api\//ig, '/api/');
+
+  // Remove proxy control params before forwarding to SAS.
+  parsed.searchParams.delete('target');
+  const cleanedSearch = parsed.searchParams.toString();
+  return `${path}${cleanedSearch ? `?${cleanedSearch}` : ''}`;
+}
+
+function resolveTargetOrigin(req, parsedRequestUrl) {
+  const headerTarget = String(req.headers['x-sas-target'] || '').trim();
+  if (headerTarget) return normalizeTargetValue(headerTarget);
+
+  const queryTarget = String(parsedRequestUrl.searchParams.get('target') || '').trim();
+  if (queryTarget) return normalizeTargetValue(queryTarget);
+
+  if (DEFAULT_TARGET_URL) return normalizeTargetValue(DEFAULT_TARGET_URL);
+  return '';
+}
+
+function splitPathAndSearch(rawPath) {
+  const idx = rawPath.indexOf('?');
+  if (idx < 0) return {pathOnly: rawPath, search: ''};
+  return {pathOnly: rawPath.slice(0, idx), search: rawPath.slice(idx)};
+}
+
+function normalizeTargetValue(rawValue) {
+  const value = String(rawValue || '').trim();
+  if (!value) return '';
+
+  const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch (_) {
+    return '';
+  }
+
+  const origin = `${parsed.protocol}//${parsed.host}`;
+  const pathname = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/+$/, '') : '';
+  const search = parsed.search || '';
+  return `${origin}${pathname}${search}`;
+}
+
+function buildUpstreamPath(targetBaseUrl, sasPath) {
+  const {pathOnly, search} = splitPathAndSearch(sasPath);
+  const targetPrefix = String(targetBaseUrl.pathname || '/').replace(/\/+$/, '');
+  const normalizedPath = pathOnly.startsWith('/') ? pathOnly : `/${pathOnly}`;
+
+  if (!targetPrefix || targetPrefix === '/') {
+    return `${normalizedPath}${search}`;
+  }
+
+  const reqLower = normalizedPath.toLowerCase();
+  const prefixLower = targetPrefix.toLowerCase();
+
+  // If request already starts with target prefix, do not prepend again.
+  if (reqLower === prefixLower || reqLower.startsWith(`${prefixLower}/`)) {
+    return `${pathOnly}${search}`;
+  }
+
+  const apiBases = ['/admin/api/index.php/api', '/api/index.php/api', '/index.php/api'];
+  const sharedApiBase = apiBases.find((base) =>
+    prefixLower.endsWith(base) && (reqLower === base || reqLower.startsWith(`${base}/`))
+  );
+
+  if (sharedApiBase) {
+    const suffix = normalizedPath.slice(sharedApiBase.length);
+    return `${targetPrefix}${suffix}${search}`;
+  }
+
+  const joined = `${targetPrefix}/${normalizedPath.replace(/^\/+/, '')}`.replace(/\/+/, '/');
+  return `${joined}${search}`;
+}
+
+function buildPathCandidates(primaryPath) {
+  const variants = ['/admin/api/index.php/api', '/api/index.php/api', '/index.php/api'];
+  const {pathOnly, search} = splitPathAndSearch(primaryPath);
+  const unique = [];
+  const seen = new Set();
+
+  const add = (value) => {
+    const k = String(value || '').trim();
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    unique.push(k);
+  };
+
+  add(`${pathOnly}${search}`);
+
+  for (const fromBase of variants) {
+    if (!pathOnly.startsWith(fromBase)) continue;
+    const suffix = pathOnly.slice(fromBase.length);
+    for (const toBase of variants) {
+      if (toBase === fromBase) continue;
+      add(`${toBase}${suffix}${search}`);
+    }
+  }
+
+  return unique;
+}
+
 function buildUpstreamHeaders(req) {
-  // Compatibility mode: forward most incoming headers.
-  const headers = {...req.headers};
-  delete headers.host;
-  delete headers.origin;
-  delete headers.referer;
-  delete headers['x-sas-target'];
-  delete headers['x-proxy-token'];
+  const allowedRequestHeaders = [
+    'accept',
+    'accept-language',
+    'authorization',
+    'content-type',
+    'content-length',
+    'allow-cache-y',
+    'user-agent',
+    'x-requested-with',
+  ];
+
+  const headers = {};
+  for (const key of allowedRequestHeaders) {
+    if (req.headers[key] !== undefined) {
+      headers[key] = req.headers[key];
+    }
+  }
 
   if (!headers['user-agent']) {
-    headers['user-agent'] = 'NetAgent-SAS-Proxy/1.0';
+    headers['user-agent'] =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      + '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+  }
+
+  if (!headers.accept) {
+    headers.accept = 'application/json, text/plain, */*';
+  }
+
+  if (!headers['accept-language']) {
+    headers['accept-language'] = 'en-US,en;q=0.9';
   }
 
   return headers;
@@ -161,54 +327,146 @@ function filterResponseHeaders(upstreamHeaders) {
   return out;
 }
 
-function redactSensitiveText(value) {
-  const text = String(value ?? '');
-  return text
-    .replace(/(authorization\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(cookie\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(set-cookie\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(x-proxy-token\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(token\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(password\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/(username\s*[:=]\s*)([^,\s;]+)/gi, '$1[REDACTED]')
-    .replace(/\b(bearer)\s+([a-z0-9\-_\.]+)/gi, '$1 [REDACTED]');
-}
-
-function sanitizeResponseHeaders(headers) {
-  const sensitiveKeys = new Set([
-    'authorization',
-    'proxy-authorization',
-    'cookie',
-    'set-cookie',
-    'x-proxy-token',
-    'x-api-key',
-    'api-key',
-    'token',
-    'access-token',
-    'refresh-token',
-  ]);
-
-  const out = {};
-  for (const [key, value] of Object.entries(headers || {})) {
-    const lower = String(key).toLowerCase();
-    if (sensitiveKeys.has(lower)) {
-      out[key] = '[REDACTED]';
-    } else if (value !== undefined) {
-      out[key] = value;
-    }
+function decodeBase64Utf8(value) {
+  try {
+    if (!value) return '';
+    return Buffer.from(String(value), 'base64').toString('utf8').trim();
+  } catch (_) {
+    return '';
   }
-  return out;
 }
 
-function logSasResponse(targetBaseUrl, sasPath, statusCode, headers, body) {
-  const targetUrl = `${targetBaseUrl.origin}${sasPath}`;
-  const safeHeaders = sanitizeResponseHeaders(headers);
-  const safeBody = redactSensitiveText(body ?? '');
+function readJsonBody(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
 
-  console.warn(`[SAS-DEBUG] target=${targetUrl}`);
-  console.warn(`[SAS-DEBUG] status=${statusCode}`);
-  console.warn(`[SAS-DEBUG] headers=${JSON.stringify(safeHeaders)}`);
-  console.warn(`[SAS-DEBUG] body=${safeBody}`);
+    req.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        reject({statusCode: 413, message: 'Payload too large'});
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on('error', (error) => {
+      reject({statusCode: 400, message: `Failed to read request body: ${error.message}`});
+    });
+
+    req.on('end', () => {
+      const raw = chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : '';
+      if (!raw.trim()) {
+        resolve({});
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(raw));
+      } catch (_) {
+        reject({statusCode: 400, message: 'Invalid JSON body'});
+      }
+    });
+  });
+}
+
+function isActivationPath(pathname) {
+  const p = String(pathname || '').toLowerCase();
+  return p.includes('/user/activate');
+}
+
+function activationSucceeded(statusCode, responseText) {
+  if (!(statusCode >= 200 && statusCode < 300)) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(responseText || '{}');
+    if (!parsed || typeof parsed !== 'object') return true;
+
+    const status = parsed.status;
+    const success = parsed.success;
+    const msg = String(parsed.message || parsed.msg || parsed.error || '').toLowerCase();
+
+    if (success === false || status === false) return false;
+    if (status === -1 || status === '-1' || status === 0 || status === '0') return false;
+    if (typeof status === 'number' && status >= 400) return false;
+    if (msg.includes('error') || msg.includes('fail')) return false;
+    return true;
+  } catch (_) {
+    // Non-JSON success response from upstream should still be considered success by HTTP status.
+    return true;
+  }
+}
+
+async function sendWhatsApp(phone, message) {
+  const cleanPhone = String(phone || '').replace(/\D/g, '').trim();
+  const body = String(message || '').trim();
+
+  if (!cleanPhone || !body) {
+    return {ok: false, skipped: true, reason: 'Missing phone or message'};
+  }
+
+  if (!(WHATSAPP_ACCESS_TOKEN || WHATSAPP_TOKEN) || !WHATSAPP_PHONE_NUMBER_ID) {
+    return {ok: false, skipped: true, reason: 'Missing WHATSAPP_TOKEN or WHATSAPP_PHONE_NUMBER_ID'};
+  }
+
+  await sendWhatsAppText(cleanPhone, body);
+  return {ok: true};
+}
+
+async function sendWhatsAppText(to, message) {
+  const accessToken = WHATSAPP_ACCESS_TOKEN || WHATSAPP_TOKEN;
+  const phoneNumberId = WHATSAPP_PHONE_NUMBER_ID;
+  const cleanTo = String(to || '').replace(/\D/g, '').trim();
+  const body = String(message || '').trim();
+
+  if (!phoneNumberId || !accessToken) {
+    const err = new Error('Missing WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID');
+    err.statusCode = 500;
+    throw err;
+  }
+
+  if (!cleanTo || !body) {
+    const err = new Error('Both "to" and "message" are required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const endpoint = `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: cleanTo,
+      type: 'text',
+      text: {
+        body,
+      },
+    }),
+  });
+
+  const raw = await response.text();
+  let parsed;
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    parsed = {raw};
+  }
+
+  if (!response.ok) {
+    const err = new Error('WhatsApp API request failed');
+    err.statusCode = response.status;
+    err.details = parsed;
+    throw err;
+  }
+
+  return parsed;
 }
 
 function handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath) {
@@ -225,7 +483,6 @@ function handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath) {
 
   upstreamRes.on('end', () => {
     const raw = Buffer.concat(chunks).toString('utf8');
-    logSasResponse(targetBaseUrl, sasPath, upstreamRes.statusCode || 502, upstreamRes.headers || {}, raw);
     sendJson(req, res, upstreamRes.statusCode || 502, {
       error: 'SAS upstream returned HTML error',
       status: upstreamRes.statusCode || 502,
@@ -246,15 +503,93 @@ function handleRequest(req, res) {
     return;
   }
 
-  if (req.url === '/' || req.url === '/health' || req.url === '/healthz') {
+  let parsedHealthUrl;
+  try {
+    parsedHealthUrl = new URL(req.url || '/', 'https://netagent.local');
+  } catch (_) {
+    parsedHealthUrl = new URL('/', 'https://netagent.local');
+  }
+
+  if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' || parsedHealthUrl.pathname === '/healthz') {
     sendJson(req, res, 200, {
       ok: true,
       service: 'NetAgent SAS Proxy',
       env: NODE_ENV,
+      port: PORT,
+      hasDefaultTarget: Boolean(DEFAULT_TARGET_URL),
+      allowHttpTargets: ALLOW_HTTP_TARGETS,
       allowInsecureTls: ALLOW_INSECURE_TLS,
+      allowPrivateTargets: ALLOW_PRIVATE_TARGETS,
       hasTokenAuth: Boolean(PROXY_TOKEN),
       hasAllowlist: TARGET_ALLOWLIST.length > 0,
+      routes: ['/health', '/healthz', '/ping-target', '/whatsapp/send', '/sas/*', '/login', '/admin/api/*', '/api/*', '/index.php/*'],
     });
+    return;
+  }
+
+  // تشخيص: اختبار الوصول لسيرفر SAS بدون إرسال بيانات
+  if (parsedHealthUrl.pathname === '/ping-target') {
+    const pingTarget = String(
+      parsedHealthUrl.searchParams.get('target') ||
+      req.headers['x-sas-target'] ||
+      DEFAULT_TARGET_URL ||
+      ''
+    ).trim();
+
+    if (!pingTarget) {
+      sendJson(req, res, 400, {error: 'Missing target. Use ?target=https://sas-host or X-SAS-Target header'});
+      return;
+    }
+
+    const normalizedPing = normalizeTargetValue(pingTarget);
+    if (!normalizedPing) {
+      sendJson(req, res, 400, {error: 'Invalid target URL'});
+      return;
+    }
+
+    let pingUrl;
+    try {
+      pingUrl = new URL(normalizedPing);
+    } catch (_) {
+      sendJson(req, res, 400, {error: 'Could not parse target URL'});
+      return;
+    }
+
+    const pingClient = pingUrl.protocol === 'https:' ? https : http;
+    const started = Date.now();
+
+    const pingReq = pingClient.request(
+      {
+        protocol: pingUrl.protocol,
+        hostname: pingUrl.hostname,
+        port: pingUrl.port || (pingUrl.protocol === 'https:' ? 443 : 80),
+        path: '/admin/api/index.php/api/login',
+        method: 'OPTIONS',
+        headers: {'user-agent': 'NetAgent-Proxy-PingTest/1.0'},
+        timeout: 8000,
+      },
+      (pingRes) => {
+        pingRes.resume();
+        sendJson(req, res, 200, {
+          ok: true,
+          target: pingUrl.origin,
+          httpStatus: pingRes.statusCode,
+          latencyMs: Date.now() - started,
+          note: 'OPTIONS request to /admin/api/index.php/api/login',
+        });
+      }
+    );
+
+    pingReq.on('timeout', () => {
+      pingReq.destroy();
+      sendJson(req, res, 504, {ok: false, target: pingUrl.origin, error: 'Timeout after 8s'});
+    });
+
+    pingReq.on('error', (err) => {
+      sendJson(req, res, 502, {ok: false, target: pingUrl.origin, error: err.message, code: err.code});
+    });
+
+    pingReq.end();
     return;
   }
 
@@ -263,15 +598,58 @@ function handleRequest(req, res) {
     return;
   }
 
-  if (!req.url || !req.url.startsWith('/sas/')) {
+  if (parsedHealthUrl.pathname === '/whatsapp/send') {
+    if (req.method !== 'POST') {
+      sendJson(req, res, 405, {error: 'Method Not Allowed'});
+      return;
+    }
+
+    (async () => {
+      try {
+        const body = await readJsonBody(req, MAX_BODY_BYTES);
+        const to = String(body.to || '').trim();
+        const message = String(body.message || '').trim();
+
+        if (!to || !message) {
+          sendJson(req, res, 400, {error: 'Both "to" and "message" are required'});
+          return;
+        }
+
+        const apiResult = await sendWhatsAppText(to, message);
+        sendJson(req, res, 200, apiResult);
+      } catch (error) {
+        const status = Number(error?.statusCode) || 500;
+        const payload = {error: error?.message || 'Internal Server Error'};
+
+        if (error && error.details !== undefined) {
+          payload.details = error.details;
+        }
+
+        sendJson(req, res, status, payload);
+      }
+    })();
+    return;
+  }
+
+  const sasPath = normalizeSasPath(req.url);
+  if (!sasPath) {
     sendJson(req, res, 404, {error: 'Not Found'});
     return;
   }
 
-  const sasPath = req.url.substring(4);
-  const targetOriginRaw = String(req.headers['x-sas-target'] || '').trim();
+  let parsedRequestUrl;
+  try {
+    parsedRequestUrl = new URL(req.url || '/', 'https://netagent.local');
+  } catch (_) {
+    parsedRequestUrl = new URL('/', 'https://netagent.local');
+  }
+
+  const targetOriginRaw = resolveTargetOrigin(req, parsedRequestUrl);
   if (!targetOriginRaw) {
-    sendJson(req, res, 400, {error: 'Missing X-SAS-Target'});
+    sendJson(req, res, 400, {
+      error: 'Missing SAS target',
+      hint: 'Provide X-SAS-Target header, ?target=https://sas-host, or SAS_TARGET_URL env var',
+    });
     return;
   }
 
@@ -280,7 +658,10 @@ function handleRequest(req, res) {
   try {
     targetBaseUrl = new URL(targetOrigin);
   } catch (_) {
-    sendJson(req, res, 400, {error: 'Invalid X-SAS-Target'});
+    sendJson(req, res, 400, {
+      error: 'Invalid SAS target URL',
+      hint: 'Use a full URL like https://sas.example.com or https://sas.example.com/admin/api/index.php/api',
+    });
     return;
   }
 
@@ -290,85 +671,161 @@ function handleRequest(req, res) {
     return;
   }
 
+  console.log(`[proxy] ${req.method} ${req.url} → ${targetBaseUrl.origin}`);
+
   const upstreamClient = targetBaseUrl.protocol === 'https:' ? https : http;
   const upstreamHeaders = buildUpstreamHeaders(req);
+  const upstreamPath = buildUpstreamPath(targetBaseUrl, sasPath);
 
-  // Ensure upstream Host and a realistic User-Agent are set; some SAS hosts
-  // block requests with missing/strange Host or UA (WAF). Also prefer JSON
-  // Accept when absent to hint the API response format.
-  try {
-    upstreamHeaders.host = targetBaseUrl.host;
-  } catch (_) {}
-  if (!upstreamHeaders['user-agent'] || String(upstreamHeaders['user-agent']).trim() === '') {
-    upstreamHeaders['user-agent'] =
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36';
-  }
-  if (!upstreamHeaders.accept) {
-    upstreamHeaders.accept = 'application/json, text/plain, */*';
-  }
+  const bodyChunks = [];
+  let bodyBytes = 0;
+  let bodyTooLarge = false;
 
-  const upstream = upstreamClient.request(
-    {
-      protocol: targetBaseUrl.protocol,
-      hostname: targetBaseUrl.hostname,
-      port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
-      path: sasPath,
-      method: req.method,
-      headers: upstreamHeaders,
-      timeout: 30000,
-      agent: targetBaseUrl.protocol === 'https:' ? INSECURE_HTTPS_AGENT : undefined,
-    },
-    (upstreamRes) => {
-      res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
-      res.setHeader('X-Proxy-Path', sasPath);
-
-      const responseHeaders = filterResponseHeaders(upstreamRes.headers);
-      for (const [key, value] of Object.entries(responseHeaders)) {
-        try {
-          res.setHeader(key, value);
-        } catch (_) {
-          // Ignore invalid upstream header values.
-        }
-      }
-
-      applyCors(req, res);
-
-      const contentType = String(responseHeaders['content-type'] || '').toLowerCase();
-      if ((upstreamRes.statusCode || 0) >= 400 && contentType.includes('text/html')) {
-        handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath);
-        return;
-      }
-
-      const chunks = [];
-      upstreamRes.on('data', (chunk) => {
-        chunks.push(chunk);
+  req.on('data', (chunk) => {
+    if (bodyTooLarge) return;
+    bodyBytes += chunk.length;
+    if (bodyBytes > MAX_BODY_BYTES) {
+      bodyTooLarge = true;
+      sendJson(req, res, 413, {
+        error: 'Payload too large',
+        limit: MAX_BODY_BYTES,
       });
-      upstreamRes.on('end', () => {
-        const body = Buffer.concat(chunks).toString('utf8');
-        logSasResponse(targetBaseUrl, sasPath, upstreamRes.statusCode || 502, upstreamRes.headers || {}, body);
-        res.writeHead(upstreamRes.statusCode || 502);
-        res.end(body);
-      });
-    }
-  );
-
-  upstream.on('timeout', () => {
-    upstream.destroy(new Error('Upstream timeout'));
-  });
-
-  upstream.on('error', (error) => {
-    if (!res.headersSent) {
-      sendJson(req, res, 502, {error: 'SAS connection failed', message: error.message});
       return;
     }
-    try {
-      res.end();
-    } catch (_) {
-      // Ignore write errors if response is already closed.
+    bodyChunks.push(chunk);
+  });
+
+  req.on('error', (error) => {
+    if (!res.headersSent) {
+      sendJson(req, res, 400, {error: 'Failed to read request body', message: error.message});
     }
   });
 
-  req.pipe(upstream);
+  req.on('end', () => {
+    if (bodyTooLarge || res.headersSent) return;
+
+    const requestBody = bodyChunks.length > 0 ? Buffer.concat(bodyChunks) : Buffer.alloc(0);
+    const pathCandidates = buildPathCandidates(upstreamPath);
+    const waPhoneHeader = String(req.headers['x-wa-phone'] || '').replace(/\D/g, '').trim();
+    const waMessage = decodeBase64Utf8(req.headers['x-wa-message-b64']);
+
+    const forwardAttempt = (index) => {
+      const currentPath = pathCandidates[index];
+      const headers = {...upstreamHeaders};
+      if (requestBody.length > 0) {
+        headers['content-length'] = String(requestBody.length);
+      } else {
+        delete headers['content-length'];
+      }
+
+      const upstream = upstreamClient.request(
+        {
+          protocol: targetBaseUrl.protocol,
+          hostname: targetBaseUrl.hostname,
+          port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
+          path: currentPath,
+          method: req.method,
+          headers,
+          timeout: 30000,
+        },
+        (upstreamRes) => {
+          const status = upstreamRes.statusCode || 0;
+          const canRetry = index + 1 < pathCandidates.length;
+
+          // Retry API base variants when upstream route does not exist.
+          if (canRetry && (status === 404 || status === 405)) {
+            upstreamRes.resume();
+            forwardAttempt(index + 1);
+            return;
+          }
+
+          res.setHeader('X-Proxy-Target', targetBaseUrl.origin);
+          res.setHeader('X-Proxy-Path', currentPath);
+          res.setHeader('X-Proxy-Attempt', String(index + 1));
+
+          const responseHeaders = filterResponseHeaders(upstreamRes.headers);
+          for (const [key, value] of Object.entries(responseHeaders)) {
+            try {
+              res.setHeader(key, value);
+            } catch (_) {
+              // Ignore invalid upstream header values.
+            }
+          }
+
+          applyCors(req, res);
+
+          const contentType = String(responseHeaders['content-type'] || '').toLowerCase();
+          if (status >= 400 && contentType.includes('text/html')) {
+            handleHtmlError(req, res, upstreamRes, targetBaseUrl, currentPath);
+            return;
+          }
+
+          const shouldSendActivationWhatsapp =
+            isActivationPath(currentPath) &&
+            req.method === 'POST' &&
+            waPhoneHeader.length > 0 &&
+            waMessage.length > 0;
+
+          if (shouldSendActivationWhatsapp) {
+            const chunks = [];
+            upstreamRes.on('data', (chunk) => chunks.push(chunk));
+            upstreamRes.on('end', async () => {
+              const bodyBuffer = Buffer.concat(chunks);
+              const bodyText = bodyBuffer.toString('utf8');
+
+              res.writeHead(status || 502);
+              res.end(bodyBuffer);
+
+              if (!activationSucceeded(status, bodyText)) {
+                return;
+              }
+
+              try {
+                await sendWhatsApp(waPhoneHeader, waMessage);
+                console.log(`[proxy] activation WhatsApp sent to ${waPhoneHeader}`);
+              } catch (err) {
+                console.error(`[proxy] activation WhatsApp failed for ${waPhoneHeader}: ${err.message}`);
+              }
+            });
+            return;
+          }
+
+          res.writeHead(status || 502);
+          upstreamRes.pipe(res);
+        }
+      );
+
+      upstream.on('timeout', () => {
+        upstream.destroy(new Error('Upstream timeout'));
+      });
+
+      upstream.on('error', (error) => {
+        console.error(`[proxy] upstream error → ${targetBaseUrl.origin}${currentPath}: ${error.message}`);
+        const canRetry = index + 1 < pathCandidates.length;
+        if (canRetry) {
+          forwardAttempt(index + 1);
+          return;
+        }
+
+        if (!res.headersSent) {
+          sendJson(req, res, 502, {error: 'SAS connection failed', message: error.message});
+          return;
+        }
+        try {
+          res.end();
+        } catch (_) {
+          // Ignore write errors if response is already closed.
+        }
+      });
+
+      if (requestBody.length > 0) {
+        upstream.write(requestBody);
+      }
+      upstream.end();
+    };
+
+    forwardAttempt(0);
+  });
 }
 
 const server = http.createServer(handleRequest);
