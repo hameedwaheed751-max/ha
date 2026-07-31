@@ -962,21 +962,9 @@ class SasApiService {
       payload['units'] = units;
     }
 
-    final activationHeaders = <String, String>{};
-    if (notifyPhone != null && notifyPhone.trim().isNotEmpty) {
-      final phoneDigits = notifyPhone.replaceAll(RegExp(r'[^0-9]'), '').trim();
-      if (phoneDigits.isNotEmpty) {
-        activationHeaders['X-WA-Phone'] = phoneDigits;
-      }
-    }
-    if (notifyMessage != null && notifyMessage.trim().isNotEmpty) {
-      activationHeaders['X-WA-Message-B64'] = base64Encode(utf8.encode(notifyMessage.trim()));
-    }
-
     final response = await _post(
       'user/activate',
       payload,
-      extraHeaders: activationHeaders.isEmpty ? null : activationHeaders,
     );
 
     if (response is Map) {

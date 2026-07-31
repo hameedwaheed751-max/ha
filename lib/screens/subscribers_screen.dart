@@ -300,7 +300,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   }
 
   Future<void> whatsapp(Subscriber s, {String? message}) async {
-    final n = normalizePhone(s.phone);
+    final n = RenderWhatsAppService.normalizePhone(s.phone);
     if (n.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -309,14 +309,23 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       }
       return;
     }
-    final text = Uri.encodeComponent(
-      message ??
-          'مرحباً ${s.name}، تحية من ${AppStore.officeName}. تاريخ انتهاء اشتراكك ${fmt(s.endDate)}.',
+
+    final defaultMessage =
+        'مرحباً ${s.name}، تحية من ${AppStore.officeName}. تاريخ انتهاء اشتراكك ${fmt(s.endDate)}.';
+    final result = await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
+      s,
+      message: (message ?? defaultMessage).trim(),
+      template: '{message}',
     );
-    final u = Uri.parse('https://wa.me/$n?text=$text');
-    if (!await launchUrl(u, mode: LaunchMode.externalApplication) && mounted) {
+
+    if (!mounted) return;
+    if (result.success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تعذر فتح واتساب')),
+        const SnackBar(content: Text('تم إرسال الرسالة عبر واتساب بنجاح')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('فشل إرسال واتساب: ${result.error ?? 'خطأ غير معروف'}')),
       );
     }
   }
@@ -384,7 +393,18 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     title: Text(entry.value),
                     onTap: () {
                       Navigator.pop(ctx);
-                      whatsapp(s, message: _renderTemplate(template, s));
+                      RenderWhatsAppService.dispatchInBackground(
+                        RenderWhatsAppService.notifyGeneralMessageToSubscriber(
+                          s,
+                          message: '',
+                          template: template,
+                        ),
+                      );
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('تمت جدولة إرسال الرسالة عبر واتساب')),
+                        );
+                      }
                     },
                   );
                 }),
@@ -993,7 +1013,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       if (mounted) setState(() {});
 
                       // Keep renewal success independent from WhatsApp availability.
-                      await _sendRenewalWhatsAppMessage(s);
+                      RenderWhatsAppService.dispatchInBackground(
+                        _sendRenewalWhatsAppMessage(s),
+                      );
 
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -1035,16 +1057,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   }
 
   Future<void> _sendRenewalWhatsAppMessage(Subscriber s) async {
-    final phone = RenderWhatsAppService.normalizePhone(s.phone);
-    if (phone.isEmpty) return;
-
-    final text = 'مرحباً ${s.name}، تم تجديد اشتراكك بنجاح. '
-        'تاريخ الانتهاء الجديد: ${fmt(s.endDate)}. '
-        'شكراً لك.';
-
-    final result = await RenderWhatsAppService.sendSingleMessage(
-      to: phone,
-      message: text,
+    final result = await RenderWhatsAppService.notifySubscriptionRenewed(
+      s,
+      template: AppStore.messageTemplates['extension'],
     );
 
     if (!result.success) {

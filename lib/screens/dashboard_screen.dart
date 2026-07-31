@@ -5,11 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:excel/excel.dart' as xls;
 import 'package:file_saver/file_saver.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
 import '../services/auto_notification_service.dart';
+import '../services/render_whatsapp_service.dart';
 import 'subscribers_screen.dart';
 import 'settings_screen.dart';
 import 'alerts_screen.dart';
@@ -1046,7 +1046,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
   }
 
   Future<void> _sendReminder(Subscriber s) async {
-    final n = _normalizePhone(s.phone);
+    final n = RenderWhatsAppService.normalizePhone(s.phone);
     if (n.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1056,18 +1056,23 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       return;
     }
 
-    final text = Uri.encodeComponent(
-      'مرحباً ${s.name}، نذكرك أن المبلغ المتبقي عليك لدى '
-      '${AppStore.officeName} هو ${s.remaining.toStringAsFixed(0)}. '
-      'يرجى التسديد، شكراً لكم.',
+    final result = await RenderWhatsAppService.notifyDebtAdded(
+      s,
+      amountAdded: 0,
+      remainingBalance: s.remaining,
     );
-    final uri = Uri.parse('https://wa.me/$n?text=$text');
 
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) && mounted) {
+    if (!mounted) return;
+    if (!result.success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تعذر فتح واتساب')),
+        SnackBar(content: Text('فشل إرسال واتساب: ${result.error ?? 'خطأ غير معروف'}')),
       );
+      return;
     }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('تم إرسال تذكير الدين عبر واتساب')),
+    );
   }
 
   Future<void> _exportDebtExcel(List<Subscriber> debts) async {

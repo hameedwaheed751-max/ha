@@ -60,7 +60,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                 controller: endpointController,
                 decoration: const InputDecoration(
                   labelText: 'Render Endpoint URL',
-                  hintText: 'https://your-service.onrender.com/send-whatsapp-campaign',
+                  hintText: 'https://ha-0cs7.onrender.com/send-message',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -89,6 +89,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
     _renderEndpoint = endpointController.text.trim();
     _renderApiKey = tokenController.text.trim();
     await prefs.setString(_renderEndpointKey, _renderEndpoint);
+    await prefs.setString(RenderWhatsAppService.sendMessageEndpointKey, _renderEndpoint);
     await prefs.setString(_renderApiKeyKey, _renderApiKey);
 
     if (!mounted) return;
@@ -151,6 +152,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
   }
 
   Future<void> _sendAutomaticCampaign(
+    String type,
     List<Subscriber> recipients,
     String template,
     {
@@ -167,21 +169,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
       if (_renderEndpoint.isEmpty) return;
     }
 
-    final payload = recipients
-        .map((s) => {
-              'phone': normalizePhone(s.phone),
-              'message': _applyTemplate(template, s),
-              'name': s.name,
-              'user': s.user,
-            })
-        .where((row) => (row['phone'] ?? '').toString().isNotEmpty)
-        .map((row) => <String, String>{
-              'phone': (row['phone'] ?? '').toString(),
-              'message': (row['message'] ?? '').toString(),
-            })
-        .toList();
-
-    if (payload.isEmpty) {
+    final valid = recipients.where((s) => normalizePhone(s.phone).isNotEmpty).toList();
+    if (valid.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('لا توجد أرقام هاتف صالحة للإرسال التلقائي')),
@@ -194,11 +183,61 @@ class _AlertsScreenState extends State<AlertsScreen> {
     }
 
     try {
-      final result = await RenderWhatsAppService.sendCampaign(
-        payload,
-        eventType: eventType,
-        note: note,
-      );
+      RenderWhatsAppResult result;
+      if (type == 'all') {
+        result = await RenderWhatsAppService.sendBroadcastMessage(
+          subscribers: valid,
+          template: template,
+          eventType: eventType,
+          note: note,
+        );
+      } else {
+        var sent = 0;
+        var failed = 0;
+        for (final s in valid) {
+          final rendered = _applyTemplate(template, s);
+          late final RenderSingleWhatsAppResult single;
+          if (type == 'threeDays') {
+            single = await RenderWhatsAppService.notifySubscriptionExpiresIn3Days(
+              s,
+              template: rendered,
+            );
+          } else if (type == 'debt') {
+            single = await RenderWhatsAppService.notifyDebtAdded(
+              s,
+              amountAdded: 0,
+              remainingBalance: s.remaining,
+              template: rendered,
+            );
+          } else if (type == 'activated') {
+            single = await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
+              s,
+              message: rendered,
+              template: '{message}',
+            );
+          } else {
+            single = await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
+              s,
+              message: rendered,
+              template: '{message}',
+            );
+          }
+
+          if (single.success) {
+            sent += 1;
+          } else {
+            failed += 1;
+          }
+        }
+
+        result = RenderWhatsAppResult(
+          ok: failed == 0,
+          total: valid.length,
+          sent: sent,
+          failed: failed,
+          raw: {'eventType': eventType, 'note': note},
+        );
+      }
 
       if (!mounted) return;
       final sent = result.sent.toString();
@@ -357,18 +396,9 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
     if (confirmed != true) return;
 
-    final valid = recipients.where((s) => normalizePhone(s.phone).isNotEmpty).toList();
-    if (valid.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('لا توجد أرقام هاتف صالحة ضمن هذه المجموعة')),
-        );
-      }
-      return;
-    }
-
     await _sendAutomaticCampaign(
-      valid,
+      type,
+      recipients,
       c.text,
       eventType: 'manual_$type',
       note: 'Manual campaign: $title',
