@@ -530,22 +530,29 @@ class AppStore {
       }
       final p = await SharedPreferences.getInstance();
 
+      int remoteRevision = 0;
       if (agentData['settings'] is Map) {
         final settings = Map<String, dynamic>.from(agentData['settings']);
-        if (settings['officeName'] != null) { officeName = settings['officeName'].toString(); await p.setString('officeName', officeName); }
-        if (settings['officePhone'] != null) { officePhone = settings['officePhone'].toString(); await p.setString('officePhone', officePhone); }
-        if (settings['officeAddress'] != null) { officeAddress = settings['officeAddress'].toString(); await p.setString('officeAddress', officeAddress); }
-        if (settings['officeLogoBase64'] != null) { officeLogoBase64 = settings['officeLogoBase64'].toString(); await p.setString('officeLogoBase64', officeLogoBase64); }
-        if (settings['receiptFooter'] != null) { receiptFooter = settings['receiptFooter'].toString(); await p.setString('receiptFooter', receiptFooter); }
-        if (settings['balance'] != null) { balance = (settings['balance'] as num).toDouble(); await p.setDouble('balance', balance); }
-        if (settings['nextReceiptNumber'] != null) { nextReceiptNumber = (settings['nextReceiptNumber'] as num).toInt(); await p.setInt('nextReceiptNumber', nextReceiptNumber); }
-        if (settings['lastSasSync'] != null) { lastSasSync = DateTime.tryParse(settings['lastSasSync'].toString()); if (lastSasSync != null) await p.setString('lastSasSync', lastSasSync!.toIso8601String()); }
-        if (settings[subscribersRevisionKey] != null) {
-          final parsedRevision = int.tryParse(settings[subscribersRevisionKey].toString()) ?? 0;
-          if (parsedRevision > subscribersRevision) {
-            subscribersRevision = parsedRevision;
-            await p.setInt(subscribersRevisionKey, subscribersRevision);
-          }
+        remoteRevision = int.tryParse((settings[subscribersRevisionKey] ?? 0).toString()) ?? 0;
+        final allowBootstrap = subscribersRevision == 0 && subscribers.isEmpty;
+        final shouldApplyRemoteSettings = remoteRevision >= subscribersRevision || allowBootstrap;
+
+        if (shouldApplyRemoteSettings) {
+          if (settings['officeName'] != null) { officeName = settings['officeName'].toString(); await p.setString('officeName', officeName); }
+          if (settings['officePhone'] != null) { officePhone = settings['officePhone'].toString(); await p.setString('officePhone', officePhone); }
+          if (settings['officeAddress'] != null) { officeAddress = settings['officeAddress'].toString(); await p.setString('officeAddress', officeAddress); }
+          if (settings['officeLogoBase64'] != null) { officeLogoBase64 = settings['officeLogoBase64'].toString(); await p.setString('officeLogoBase64', officeLogoBase64); }
+          if (settings['receiptFooter'] != null) { receiptFooter = settings['receiptFooter'].toString(); await p.setString('receiptFooter', receiptFooter); }
+          if (settings['balance'] != null) { balance = (settings['balance'] as num).toDouble(); await p.setDouble('balance', balance); }
+          if (settings['nextReceiptNumber'] != null) { nextReceiptNumber = (settings['nextReceiptNumber'] as num).toInt(); await p.setInt('nextReceiptNumber', nextReceiptNumber); }
+          if (settings['lastSasSync'] != null) { lastSasSync = DateTime.tryParse(settings['lastSasSync'].toString()); if (lastSasSync != null) await p.setString('lastSasSync', lastSasSync!.toIso8601String()); }
+        } else {
+          debugPrint('Skip stale Firebase settings snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision');
+        }
+
+        if (remoteRevision > subscribersRevision) {
+          subscribersRevision = remoteRevision;
+          await p.setInt(subscribersRevisionKey, subscribersRevision);
         }
       }
 
@@ -592,11 +599,6 @@ class AppStore {
       }
 
       if (agentData['subscribers'] != null) {
-        int remoteRevision = 0;
-        if (agentData['settings'] is Map) {
-          final settings = Map<String, dynamic>.from(agentData['settings']);
-          remoteRevision = int.tryParse((settings[subscribersRevisionKey] ?? 0).toString()) ?? 0;
-        }
         final allowBootstrap = subscribersRevision == 0 && subscribers.isEmpty;
         if (remoteRevision > subscribersRevision || allowBootstrap) {
           final rawJson = jsonEncode(agentData['subscribers']);
@@ -746,22 +748,29 @@ class AppStore {
           final agentData = Map<String, dynamic>.from(data as Map);
           final p = await SharedPreferences.getInstance();
 
+          int remoteRevision = 0;
           if (agentData['settings'] is Map) {
             final settings = Map<String, dynamic>.from(agentData['settings']);
-            if (settings['officeName'] != null) { officeName = settings['officeName'].toString(); await p.setString('officeName', officeName); }
-            if (settings['officePhone'] != null) { officePhone = settings['officePhone'].toString(); await p.setString('officePhone', officePhone); }
-            if (settings['officeAddress'] != null) { officeAddress = settings['officeAddress'].toString(); await p.setString('officeAddress', officeAddress); }
-            if (settings['officeLogoBase64'] != null) { officeLogoBase64 = settings['officeLogoBase64'].toString(); }
-            if (settings['receiptFooter'] != null) { receiptFooter = settings['receiptFooter'].toString(); }
-            if (settings['balance'] != null) { balance = (settings['balance'] as num).toDouble(); }
-            if (settings['nextReceiptNumber'] != null) { nextReceiptNumber = (settings['nextReceiptNumber'] as num).toInt(); }
-            if (settings['lastSasSync'] != null) { lastSasSync = DateTime.tryParse(settings['lastSasSync'].toString()); }
-            if (settings[subscribersRevisionKey] != null) {
-              final parsedRevision = int.tryParse(settings[subscribersRevisionKey].toString()) ?? 0;
-              if (parsedRevision > subscribersRevision) {
-                subscribersRevision = parsedRevision;
-                await p.setInt(subscribersRevisionKey, subscribersRevision);
-              }
+            remoteRevision = int.tryParse((settings[subscribersRevisionKey] ?? 0).toString()) ?? 0;
+            final allowBootstrap = subscribersRevision == 0 && subscribers.isEmpty;
+            final shouldApplyRemoteSettings = remoteRevision >= subscribersRevision || allowBootstrap;
+
+            if (shouldApplyRemoteSettings) {
+              if (settings['officeName'] != null) { officeName = settings['officeName'].toString(); await p.setString('officeName', officeName); }
+              if (settings['officePhone'] != null) { officePhone = settings['officePhone'].toString(); await p.setString('officePhone', officePhone); }
+              if (settings['officeAddress'] != null) { officeAddress = settings['officeAddress'].toString(); await p.setString('officeAddress', officeAddress); }
+              if (settings['officeLogoBase64'] != null) { officeLogoBase64 = settings['officeLogoBase64'].toString(); await p.setString('officeLogoBase64', officeLogoBase64); }
+              if (settings['receiptFooter'] != null) { receiptFooter = settings['receiptFooter'].toString(); await p.setString('receiptFooter', receiptFooter); }
+              if (settings['balance'] != null) { balance = (settings['balance'] as num).toDouble(); await p.setDouble('balance', balance); }
+              if (settings['nextReceiptNumber'] != null) { nextReceiptNumber = (settings['nextReceiptNumber'] as num).toInt(); await p.setInt('nextReceiptNumber', nextReceiptNumber); }
+              if (settings['lastSasSync'] != null) { lastSasSync = DateTime.tryParse(settings['lastSasSync'].toString()); if (lastSasSync != null) await p.setString('lastSasSync', lastSasSync!.toIso8601String()); }
+            } else {
+              debugPrint('Realtime: ignored stale settings snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision');
+            }
+
+            if (remoteRevision > subscribersRevision) {
+              subscribersRevision = remoteRevision;
+              await p.setInt(subscribersRevisionKey, subscribersRevision);
             }
           }
           if (agentData['packages'] is Map) {
@@ -782,11 +791,6 @@ class AppStore {
             if (profile['sasUsername'] != null) sasUsername = profile['sasUsername'].toString();
           }
           if (agentData['subscribers'] != null) {
-            int remoteRevision = 0;
-            if (agentData['settings'] is Map) {
-              final settings = Map<String, dynamic>.from(agentData['settings']);
-              remoteRevision = int.tryParse((settings[subscribersRevisionKey] ?? 0).toString()) ?? 0;
-            }
             final allowBootstrap = subscribersRevision == 0 && subscribers.isEmpty;
             if (remoteRevision > subscribersRevision || allowBootstrap) {
               final rawJson = jsonEncode(agentData['subscribers']);
