@@ -8,6 +8,7 @@ const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
 const WHATSAPP_ACCESS_TOKEN = String(process.env.WHATSAPP_ACCESS_TOKEN || '').trim();
 const WHATSAPP_TOKEN = String(process.env.WHATSAPP_TOKEN || '').trim();
 const WHATSAPP_PHONE_NUMBER_ID = String(process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
+const WHATSAPP_VERIFY_TOKEN = String(process.env.WHATSAPP_VERIFY_TOKEN || '').trim();
 const WHATSAPP_API_VERSION = String(process.env.WHATSAPP_API_VERSION || 'v22.0').trim();
 const DEFAULT_TARGET_URL = String(process.env.SAS_TARGET_URL || '').trim();
 const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 5 * 1024 * 1024);
@@ -371,6 +372,31 @@ function readJsonBody(req, maxBytes) {
   });
 }
 
+function readRawBody(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+
+    req.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        reject({statusCode: 413, message: 'Payload too large'});
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on('error', (error) => {
+      reject({statusCode: 400, message: `Failed to read request body: ${error.message}`});
+    });
+
+    req.on('end', () => {
+      resolve(chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : '');
+    });
+  });
+}
+
 function isActivationPath(pathname) {
   const p = String(pathname || '').toLowerCase();
   return p.includes('/user/activate');
@@ -524,6 +550,41 @@ function handleRequest(req, res) {
       hasAllowlist: TARGET_ALLOWLIST.length > 0,
       routes: ['/health', '/healthz', '/ping-target', '/whatsapp/send', '/sas/*', '/login', '/admin/api/*', '/api/*', '/index.php/*'],
     });
+    return;
+  }
+
+  if (parsedHealthUrl.pathname === '/webhook') {
+    if (req.method === 'GET') {
+      const verifyToken = String(parsedHealthUrl.searchParams.get('hub.verify_token') || '').trim();
+      const challenge = String(parsedHealthUrl.searchParams.get('hub.challenge') || '').trim();
+
+      if (WHATSAPP_VERIFY_TOKEN && verifyToken === WHATSAPP_VERIFY_TOKEN && challenge) {
+        res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'});
+        res.end(challenge);
+        return;
+      }
+
+      sendJson(req, res, 403, {error: 'Forbidden'});
+      return;
+    }
+
+    if (req.method === 'POST') {
+      res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'});
+      res.end('OK');
+
+      (async () => {
+        try {
+          const rawBody = await readRawBody(req, MAX_BODY_BYTES);
+          console.log('[webhook] WhatsApp event body:', rawBody);
+        } catch (error) {
+          console.error('[webhook] Failed to read body:', error && error.message ? error.message : error);
+        }
+      })();
+
+      return;
+    }
+
+    sendJson(req, res, 405, {error: 'Method Not Allowed'});
     return;
   }
 
