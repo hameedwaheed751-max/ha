@@ -14,6 +14,7 @@ const WHATSAPP_VERIFY_TOKEN = String(process.env.WHATSAPP_VERIFY_TOKEN || '').tr
 const WHATSAPP_API_VERSION = String(process.env.WHATSAPP_API_VERSION || 'v22.0').trim();
 const DEFAULT_TARGET_URL = String(process.env.SAS_TARGET_URL || '').trim();
 const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 5 * 1024 * 1024);
+const DISABLE_PROXY_AUTH = process.env.DISABLE_PROXY_AUTH === '1' || process.env.ALLOW_UNAUTHENTICATED_PROXY === '1';
 const CONFIGURED_PROXY_TOKENS = Array.from(
   new Set(
     [PROXY_TOKEN, SAS_PROXY_TOKEN, String(process.env.SAS_PROXY_TOKENS || '').trim()]
@@ -563,6 +564,7 @@ function handleRequest(req, res) {
       allowInsecureTls: ALLOW_INSECURE_TLS,
       allowPrivateTargets: ALLOW_PRIVATE_TARGETS,
       hasTokenAuth: CONFIGURED_PROXY_TOKENS.length > 0,
+      proxyAuthBypassed: DISABLE_PROXY_AUTH,
       hasAllowlist: TARGET_ALLOWLIST.length > 0,
       routes: ['/health', '/healthz', '/ping-target', '/whatsapp/send', '/sas/*', '/login', '/admin/api/*', '/api/*', '/index.php/*'],
     });
@@ -724,7 +726,7 @@ function handleRequest(req, res) {
     return;
   }
 
-  if (!hasValidProxyToken(req)) {
+  if (!DISABLE_PROXY_AUTH && !hasValidProxyToken(req)) {
     sendJson(req, res, 401, {error: 'Unauthorized'});
     return;
   }
