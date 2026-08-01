@@ -307,6 +307,10 @@ class SasApiService {
     'SAS_PROXY_TOKEN',
     defaultValue: '',
   );
+  static const String _legacyProxyToken = String.fromEnvironment(
+    'PROXY_TOKEN',
+    defaultValue: '',
+  );
   static final Map<int, List<Map<String, dynamic>>> _extensionCache = {};
   static final Map<int, DateTime> _extensionCacheAt = {};
 
@@ -461,8 +465,12 @@ class SasApiService {
   void _addProxyTarget(Map<String, String> headers) {
     if (kIsWeb && !useDirectConnection && !_directFallback) {
       headers['X-SAS-Target'] = _sasOrigin.isNotEmpty ? _sasOrigin : _sasInputNormalized;
-      if (_proxyToken.trim().isNotEmpty) {
-        headers['X-Proxy-Token'] = _proxyToken.trim();
+      final effectiveProxyToken = _proxyToken.trim().isNotEmpty
+          ? _proxyToken.trim()
+          : _legacyProxyToken.trim();
+      if (effectiveProxyToken.isNotEmpty) {
+        headers['X-Proxy-Token'] = effectiveProxyToken;
+        headers['X-SAS-Proxy-Token'] = effectiveProxyToken;
       }
     }
   }

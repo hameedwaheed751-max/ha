@@ -5,6 +5,7 @@ const net = require('net');
 const PORT = Number(process.env.PORT) || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PROXY_TOKEN = String(process.env.PROXY_TOKEN || '').trim();
+const SAS_PROXY_TOKEN = String(process.env.SAS_PROXY_TOKEN || '').trim();
 const WHATSAPP_ACCESS_TOKEN = String(process.env.WHATSAPP_ACCESS_TOKEN || '').trim();
 const WHATSAPP_TOKEN = String(process.env.WHATSAPP_TOKEN || '').trim();
 const PHONE_NUMBER_ID = String(process.env.PHONE_NUMBER_ID || '').trim();
@@ -13,6 +14,14 @@ const WHATSAPP_VERIFY_TOKEN = String(process.env.WHATSAPP_VERIFY_TOKEN || '').tr
 const WHATSAPP_API_VERSION = String(process.env.WHATSAPP_API_VERSION || 'v22.0').trim();
 const DEFAULT_TARGET_URL = String(process.env.SAS_TARGET_URL || '').trim();
 const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 5 * 1024 * 1024);
+const CONFIGURED_PROXY_TOKENS = Array.from(
+  new Set(
+    [PROXY_TOKEN, SAS_PROXY_TOKEN, String(process.env.SAS_PROXY_TOKENS || '').trim()]
+      .flatMap((value) => String(value || '').split(','))
+      .map((item) => item.trim())
+      .filter(Boolean)
+  )
+);
 const ALLOW_HTTP_TARGETS = process.env.ALLOW_HTTP_TARGETS
   ? process.env.ALLOW_HTTP_TARGETS === '1'
   : NODE_ENV !== 'production';
@@ -56,13 +65,19 @@ function sendJson(req, res, status, payload) {
 }
 
 function hasValidProxyToken(req) {
-  if (!PROXY_TOKEN) {
+  if (CONFIGURED_PROXY_TOKENS.length === 0) {
     return true;
   }
+
   const xToken = String(req.headers['x-proxy-token'] || '').trim();
+  const altToken = String(req.headers['x-sas-proxy-token'] || '').trim();
+  const apiKey = String(req.headers['x-api-key'] || '').trim();
   const auth = String(req.headers.authorization || '').trim();
   const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
-  return xToken === PROXY_TOKEN || bearer === PROXY_TOKEN;
+
+  return [xToken, altToken, apiKey, bearer].some((candidate) =>
+    candidate && CONFIGURED_PROXY_TOKENS.includes(candidate)
+  );
 }
 
 function isPrivateIp(ip) {
@@ -547,7 +562,7 @@ function handleRequest(req, res) {
       allowHttpTargets: ALLOW_HTTP_TARGETS,
       allowInsecureTls: ALLOW_INSECURE_TLS,
       allowPrivateTargets: ALLOW_PRIVATE_TARGETS,
-      hasTokenAuth: Boolean(PROXY_TOKEN),
+      hasTokenAuth: CONFIGURED_PROXY_TOKENS.length > 0,
       hasAllowlist: TARGET_ALLOWLIST.length > 0,
       routes: ['/health', '/healthz', '/ping-target', '/whatsapp/send', '/sas/*', '/login', '/admin/api/*', '/api/*', '/index.php/*'],
     });
@@ -668,44 +683,6 @@ function handleRequest(req, res) {
     return;
   }
 
-  if (!hasValidProxyToken(req)) {
-    sendJson(req, res, 401, {error: 'Unauthorized'});
-    return;
-  }
-
-  if (parsedHealthUrl.pathname === '/whatsapp/send') {
-    if (req.method !== 'POST') {
-      sendJson(req, res, 405, {error: 'Method Not Allowed'});
-      return;
-    }
-
-    (async () => {
-      try {
-        const body = await readJsonBody(req, MAX_BODY_BYTES);
-        const to = String(body.to || '').trim();
-        const message = String(body.message || '').trim();
-
-        if (!to || !message) {
-          sendJson(req, res, 400, {error: 'Both "to" and "message" are required'});
-          return;
-        }
-
-        const apiResult = await sendWhatsAppText(to, message);
-        sendJson(req, res, 200, apiResult);
-      } catch (error) {
-        const status = Number(error?.statusCode) || 500;
-        const payload = {error: error?.message || 'Internal Server Error'};
-
-        if (error && error.details !== undefined) {
-          payload.details = error.details;
-        }
-
-        sendJson(req, res, status, payload);
-      }
-    })();
-    return;
-  }
-
   if (parsedHealthUrl.pathname === '/send-message') {
     if (req.method !== 'POST') {
       sendJson(req, res, 405, {error: 'Method Not Allowed'});
@@ -736,6 +713,44 @@ function handleRequest(req, res) {
           success: false,
           error: error?.message || 'Internal Server Error',
         };
+
+        if (error && error.details !== undefined) {
+          payload.details = error.details;
+        }
+
+        sendJson(req, res, status, payload);
+      }
+    })();
+    return;
+  }
+
+  if (!hasValidProxyToken(req)) {
+    sendJson(req, res, 401, {error: 'Unauthorized'});
+    return;
+  }
+
+  if (parsedHealthUrl.pathname === '/whatsapp/send') {
+    if (req.method !== 'POST') {
+      sendJson(req, res, 405, {error: 'Method Not Allowed'});
+      return;
+    }
+
+    (async () => {
+      try {
+        const body = await readJsonBody(req, MAX_BODY_BYTES);
+        const to = String(body.to || '').trim();
+        const message = String(body.message || '').trim();
+
+        if (!to || !message) {
+          sendJson(req, res, 400, {error: 'Both "to" and "message" are required'});
+          return;
+        }
+
+        const apiResult = await sendWhatsAppText(to, message);
+        sendJson(req, res, 200, apiResult);
+      } catch (error) {
+        const status = Number(error?.statusCode) || 500;
+        const payload = {error: error?.message || 'Internal Server Error'};
 
         if (error && error.details !== undefined) {
           payload.details = error.details;
