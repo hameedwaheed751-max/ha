@@ -144,6 +144,7 @@ class RenderWhatsAppService {
   static const String logsKey = 'render_whatsapp_send_logs';
   static const int maxLogs = 200;
   static const String _defaultSendEndpoint = 'https://ha-0cs7.onrender.com/send-message';
+  static const String _embeddedApiKey = '';
   static const int _maxAttempts = 3;
 
   static String _fmt(DateTime d) =>
@@ -214,30 +215,11 @@ class RenderWhatsAppService {
   }
 
   static Future<(String endpoint, String apiKey)> loadConfig() async {
-    final prefs = await SharedPreferences.getInstance();
-    final endpoint = (prefs.getString(endpointKey) ?? '').trim();
-    final apiKey = (prefs.getString(apiKeyKey) ?? '').trim();
-    return (endpoint, apiKey);
+    return (_defaultSendEndpoint, _embeddedApiKey);
   }
 
   static Future<String> loadSendMessageEndpoint() async {
-    final prefs = await SharedPreferences.getInstance();
-    final custom = (prefs.getString(sendMessageEndpointKey) ?? '').trim();
-    if (custom.isNotEmpty) return custom;
-
-    final base = (prefs.getString(endpointKey) ?? '').trim();
-    if (base.isEmpty) return _defaultSendEndpoint;
-
-    try {
-      final uri = Uri.parse(base);
-      if (!uri.hasScheme || uri.host.isEmpty) return _defaultSendEndpoint;
-      if (uri.path.toLowerCase().contains('/send-message')) {
-        return '${uri.scheme}://${uri.authority}${uri.path}';
-      }
-      return '${uri.scheme}://${uri.authority}/send-message';
-    } catch (_) {
-      return _defaultSendEndpoint;
-    }
+    return _defaultSendEndpoint;
   }
 
   static String normalizePhone(String phone) {

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models.dart';
 import '../services/notification_export_service.dart';
 import '../services/render_whatsapp_service.dart';
@@ -13,18 +12,12 @@ class AlertsScreen extends StatefulWidget {
 }
 
 class _AlertsScreenState extends State<AlertsScreen> {
-  static const String _renderEndpointKey = 'render_whatsapp_endpoint';
-  static const String _renderApiKeyKey = 'render_whatsapp_api_key';
-
   bool _sendingAutomatic = false;
-  String _renderEndpoint = '';
-  String _renderApiKey = '';
   List<WhatsAppSendLog> _logs = const [];
 
   @override
   void initState() {
     super.initState();
-    _loadRenderConfig();
     _loadLogs();
   }
 
@@ -32,71 +25,6 @@ class _AlertsScreenState extends State<AlertsScreen> {
     final logs = await RenderWhatsAppService.loadLogs();
     if (!mounted) return;
     setState(() => _logs = logs);
-  }
-
-  Future<void> _loadRenderConfig() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() {
-      _renderEndpoint = (prefs.getString(_renderEndpointKey) ?? '').trim();
-      _renderApiKey = (prefs.getString(_renderApiKeyKey) ?? '').trim();
-    });
-  }
-
-  Future<void> _openRenderConfigDialog() async {
-    final endpointController = TextEditingController(text: _renderEndpoint);
-    final tokenController = TextEditingController(text: _renderApiKey);
-
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: AlertDialog(
-          title: const Text('إعدادات Render للإرسال التلقائي'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: endpointController,
-                decoration: const InputDecoration(
-                  labelText: 'Render Endpoint URL',
-                  hintText: 'https://ha-0cs7.onrender.com/send-message',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: tokenController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'API Key (اختياري حسب خادم Render)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('حفظ')),
-          ],
-        ),
-      ),
-    );
-
-    if (saved != true) return;
-
-    final prefs = await SharedPreferences.getInstance();
-    _renderEndpoint = endpointController.text.trim();
-    _renderApiKey = tokenController.text.trim();
-    await prefs.setString(_renderEndpointKey, _renderEndpoint);
-    await prefs.setString(RenderWhatsAppService.sendMessageEndpointKey, _renderEndpoint);
-    await prefs.setString(_renderApiKeyKey, _renderApiKey);
-
-    if (!mounted) return;
-    setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تم حفظ إعدادات Render بنجاح')),
-    );
   }
 
   String fmt(DateTime d) =>
@@ -160,15 +88,6 @@ class _AlertsScreenState extends State<AlertsScreen> {
       String note = '',
     }
   ) async {
-    if (_renderEndpoint.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى ضبط Render Endpoint أولاً من زر الإعدادات في الأعلى')),
-      );
-      await _openRenderConfigDialog();
-      if (_renderEndpoint.isEmpty) return;
-    }
-
     final valid = recipients.where((s) => normalizePhone(s.phone).isNotEmpty).toList();
     if (valid.isEmpty) {
       if (!mounted) return;
@@ -503,11 +422,6 @@ class _AlertsScreenState extends State<AlertsScreen> {
                   ),
                 ),
               ),
-            IconButton(
-              tooltip: 'إعدادات Render',
-              onPressed: _openRenderConfigDialog,
-              icon: const Icon(Icons.cloud_outlined),
-            ),
             IconButton(
               tooltip: 'سجل الإرسال',
               onPressed: _showLogs,
