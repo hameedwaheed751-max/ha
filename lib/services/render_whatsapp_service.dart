@@ -143,8 +143,18 @@ class RenderWhatsAppService {
   static const String apiKeyKey = 'render_whatsapp_api_key';
   static const String logsKey = 'render_whatsapp_send_logs';
   static const int maxLogs = 200;
-  static const String _defaultSendEndpoint = 'https://ha-0cs7.onrender.com/send-message';
-  static const String _embeddedApiKey = '';
+  static const String _defaultSendEndpoint = String.fromEnvironment(
+    'SAS_WEB_PROXY_URL',
+    defaultValue: 'https://ha-0cs7.onrender.com',
+  );
+  static const String _embeddedApiKey = String.fromEnvironment(
+    'SAS_PROXY_TOKEN',
+    defaultValue: '',
+  );
+  static const String _legacyEmbeddedApiKey = String.fromEnvironment(
+    'PROXY_TOKEN',
+    defaultValue: '',
+  );
   static const int _maxAttempts = 3;
 
   static String _fmt(DateTime d) =>
@@ -215,11 +225,19 @@ class RenderWhatsAppService {
   }
 
   static Future<(String endpoint, String apiKey)> loadConfig() async {
-    return (_defaultSendEndpoint, _embeddedApiKey);
+    final endpoint = _defaultSendEndpoint.trim().endsWith('/send-message')
+        ? _defaultSendEndpoint.trim()
+        : '${_defaultSendEndpoint.trim().replaceAll(RegExp(r'/+$'), '')}/send-message';
+    final token = _embeddedApiKey.trim().isNotEmpty
+        ? _embeddedApiKey.trim()
+        : _legacyEmbeddedApiKey.trim();
+    return (endpoint, token);
   }
 
   static Future<String> loadSendMessageEndpoint() async {
-    return _defaultSendEndpoint;
+    final endpoint = _defaultSendEndpoint.trim();
+    if (endpoint.endsWith('/send-message')) return endpoint;
+    return '${endpoint.replaceAll(RegExp(r'/+$'), '')}/send-message';
   }
 
   static String normalizePhone(String phone) {

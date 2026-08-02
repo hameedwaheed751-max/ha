@@ -731,6 +731,13 @@ function handleRequest(req, res) {
   }
 
   if (!DISABLE_PROXY_AUTH && !hasValidProxyToken(req)) {
+    const hasXProxy = String(req.headers['x-proxy-token'] || '').trim().length > 0;
+    const hasXSasProxy = String(req.headers['x-sas-proxy-token'] || '').trim().length > 0;
+    const hasApiKey = String(req.headers['x-api-key'] || '').trim().length > 0;
+    const hasBearer = String(req.headers.authorization || '').toLowerCase().startsWith('bearer ');
+    console.warn(
+      `[auth] 401 ${req.method} ${req.url} tokenHeaders: x-proxy-token=${hasXProxy} x-sas-proxy-token=${hasXSasProxy} x-api-key=${hasApiKey} bearer=${hasBearer}`
+    );
     sendJson(req, res, 401, {error: 'Unauthorized'});
     return;
   }
