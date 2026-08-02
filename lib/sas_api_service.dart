@@ -471,6 +471,7 @@ class SasApiService {
       if (effectiveProxyToken.isNotEmpty) {
         headers['X-Proxy-Token'] = effectiveProxyToken;
         headers['X-SAS-Proxy-Token'] = effectiveProxyToken;
+        headers['x-api-key'] = effectiveProxyToken;
       }
     }
   }
@@ -1342,6 +1343,15 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
       throw SasApiException('تعذر جلب بيانات SAS: $e');
     }
 
+    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
+      final body = res.body.trim();
+      throw SasApiException(
+        'رفض التوثيق من البروكسي (401) أثناء GET. '
+        'تأكد أن SAS_PROXY_TOKEN في التشغيل يساوي token في Render. '
+        '${body.isEmpty ? '' : 'Response: ${body.length > 180 ? body.substring(0, 180) : body}'}',
+      );
+    }
+
     if (res.statusCode < 200 || res.statusCode >= 300) {
       final body = res.body.trim();
       final detail = body.isEmpty
@@ -1403,6 +1413,15 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
       throw SasApiException('تعذر تعديل المشترك في SAS: $e');
     }
 
+    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
+      final body = res.body.trim();
+      throw SasApiException(
+        'رفض التوثيق من البروكسي (401) أثناء PUT. '
+        'تأكد أن SAS_PROXY_TOKEN في التشغيل يساوي token في Render. '
+        '${body.isEmpty ? '' : 'Response: ${body.length > 180 ? body.substring(0, 180) : body}'}',
+      );
+    }
+
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw SasApiException(
         'فشل تعديل SAS — HTTP ${res.statusCode}: '
@@ -1462,6 +1481,15 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
       if (e is SasApiException) rethrow;
       throw SasApiException('تعذر الاتصال بخادم SAS: $e');
     }
+    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
+      final body = res.body.trim();
+      throw SasApiException(
+        'رفض التوثيق من البروكسي (401) أثناء POST. '
+        'تأكد أن SAS_PROXY_TOKEN في التشغيل يساوي token في Render. '
+        '${body.isEmpty ? '' : 'Response: ${body.length > 180 ? body.substring(0, 180) : body}'}',
+      );
+    }
+
     if (res.statusCode < 200 || res.statusCode >= 400) {
       final body = res.body.trim();
       final detail = body.isEmpty
