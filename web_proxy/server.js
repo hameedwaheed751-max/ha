@@ -47,6 +47,10 @@ if (TARGET_ALLOWLIST.length === 0) {
   console.warn('WARNING: SAS_TARGET_ALLOWLIST is empty. Any public target host is allowed.');
 }
 
+if (NODE_ENV === 'production' && !DISABLE_PROXY_AUTH && CONFIGURED_PROXY_TOKENS.length === 0) {
+  console.warn('WARNING: Proxy auth is enabled but no proxy token is configured. Set PROXY_TOKEN or SAS_PROXY_TOKEN.');
+}
+
 function applyCors(req, res) {
   const requestedHeaders = req.headers['access-control-request-headers'];
   const allowOrigin = process.env.CORS_ALLOW_ORIGIN || '*';

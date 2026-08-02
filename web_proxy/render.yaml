@@ -20,8 +20,8 @@ services:
       # اختياري: رمز أمان للبروكسي
       # - key: PROXY_TOKEN
       #   value: your-secret-token-here
-      # تعطيل حماية التوكن مؤقتاً لحل 401 أثناء الانتقال
-      - key: DISABLE_PROXY_AUTH
-        value: "1"
       # - key: SAS_PROXY_TOKEN
       #   value: your-secret-token-here
+      # لإتاحة أكثر من توكن (comma-separated) عند الحاجة:
+      # - key: SAS_PROXY_TOKENS
+      #   value: token1,token2
