@@ -185,7 +185,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       Text(
                         AppStore.agentEmail.isNotEmpty
                             ? AppStore.agentEmail
-                            : 'wakel-iq',
+                            : 'وكيل نت',
                         style: const TextStyle(color: Colors.grey, fontSize: 12),
                       ),
                     ]),
@@ -322,7 +322,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Navigator.pop(context);
                   showAboutDialog(
                     context: context,
-                    applicationName: 'wakel-iq',
+                    applicationName: 'وكيل نت',
                     applicationVersion: 'v108',
                     applicationLegalese: 'إدارة مشتركي الإنترنت',
                   );
@@ -451,8 +451,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Text(AppStore.officeName, style: const TextStyle(fontWeight: FontWeight.bold)),
             Text(
               AppStore.sasUsername.isNotEmpty
-                  ? 'wakel-iq | ${AppStore.sasUsername}'
-                  : 'wakel-iq',
+                  ? 'وكيل نت | ${AppStore.sasUsername}'
+                  : 'وكيل نت',
               style: const TextStyle(fontSize: 11),
             ),
           ]),
@@ -1122,7 +1122,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       final stamp =
           '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_'
           '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
-      final fileName = 'wakel-iq_Debts_$stamp';
+        final fileName = 'وكيل-نت_Debts_$stamp';
 
       final savedPath = await FileSaver.instance.saveFile(
         name: fileName,

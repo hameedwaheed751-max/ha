@@ -438,6 +438,20 @@ class PackagePlan {
 class AppStore {
   static const int dataVersion = 1;
   static const String subscribersRevisionKey = 'subscribersRevision';
+  static const String _legacyNearExpiryTemplate =
+      'مرحباً {name}، نذكرك أن اشتراكك ينتهي بتاريخ {endDate}. يرجى التجديد.';
+    static const String _legacyActivationTemplate =
+      'مرحباً {name}، تم تفعيل اشتراكك لدى {office}. الباقة: {package} وتنتهي بتاريخ {endDate}.';
+      static const String _legacyDebtTemplate =
+        'مرحباً {name}، المبلغ المتبقي عليك هو {remaining}. يرجى التسديد، شكراً لكم.';
+    static const String activationTemplate =
+      'مرحباً {{الاسم المشترك}}،\n✅ تم تفعيل اشتراك الإنترنت بنجاح.\n📦 الباقة: {{اسم الباقة}}\n📅 يبدأ الاشتراك: {{تاريخ البدء}}\n📅 ينتهي الاشتراك: {{تاريخ الانتهاء}}\nمبلغ الاشتراك:{{مبلغ الاشتراك}}\n{{الواصل}}\n{{المتبقي}}\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+      static const String debtPaidTemplate =
+        'مرحباً {{الاسم المشترك}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ المسدد: {{المبلغ}} دينار عراقي\n📅 تاريخ التسديد: {{التاريخ}}\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+        static const String debtTemplate =
+          'مرحباً {{الاسم المشترك}}،\n✅ يوجد دين مترتب بذمتكم جراء تفعيل الاشتراك.\n💰 يرجى تسديد: {{المبلغ}} دينار عراقي\n📅 لضمان استمرار الخدمة\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+  static const String nearExpiryTemplate =
+      'مرحباً {{الاسم المشترك}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📅 تاريخ انتهاء الاشتراك: {{تاريخ الانتهاء}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
   static final List<Subscriber> subscribers = [];
   static String agentFirstName = '';
   static String agentLastName = '';
@@ -455,13 +469,36 @@ class AppStore {
   static int subscribersRevision = 0;
   static final List<PackagePlan> packages = [];
   static final Map<String,String> messageTemplates = {
-    'activation':'مرحباً {name}، تم تفعيل اشتراكك لدى {office}. الباقة: {package} وتنتهي بتاريخ {endDate}.',
+    'activation':activationTemplate,
     'extension':'مرحباً {name}، تم تمديد اشتراكك لدى {office} حتى {endDate}.',
-    'nearExpiry':'مرحباً {name}، نذكرك أن اشتراكك ينتهي بتاريخ {endDate}. يرجى التجديد.',
+    'nearExpiry':nearExpiryTemplate,
     'expired':'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.',
-    'debt':'مرحباً {name}، المبلغ المتبقي عليك هو {remaining}. يرجى التسديد، شكراً لكم.',
+    'debt':debtTemplate,
+    'debtPaid':debtPaidTemplate,
   };
   static StreamSubscription<DatabaseEvent>? realtimeListener;
+
+  static void _migrateNearExpiryTemplate() {
+    final current = (messageTemplates['nearExpiry'] ?? '').trim();
+    if (current.isEmpty || current == _legacyNearExpiryTemplate) {
+      messageTemplates['nearExpiry'] = nearExpiryTemplate;
+    }
+
+    final currentActivation = (messageTemplates['activation'] ?? '').trim();
+    if (currentActivation.isEmpty || currentActivation == _legacyActivationTemplate) {
+      messageTemplates['activation'] = activationTemplate;
+    }
+
+    final currentDebtPaid = (messageTemplates['debtPaid'] ?? '').trim();
+    if (currentDebtPaid.isEmpty) {
+      messageTemplates['debtPaid'] = debtPaidTemplate;
+    }
+
+    final currentDebt = (messageTemplates['debt'] ?? '').trim();
+    if (currentDebt.isEmpty || currentDebt == _legacyDebtTemplate) {
+      messageTemplates['debt'] = debtTemplate;
+    }
+  }
 
   /// المعرف الفريد للوكيل: uid_sasUsername
   static String? get _agentId {
@@ -571,10 +608,13 @@ class AppStore {
         for (final entry in (Map<String, dynamic>.from(agentData['messageTemplates'])).entries) {
           if (entry.value != null) messageTemplates[entry.key] = entry.value.toString();
         }
+        _migrateNearExpiryTemplate();
         await p.setString('messageTemplates', jsonEncode(messageTemplates));
       } else {
         final localMt = p.getString('messageTemplates');
         if (localMt != null) { try { messageTemplates.addAll(Map<String,String>.from(jsonDecode(localMt))); } catch (_) {} }
+        _migrateNearExpiryTemplate();
+        await p.setString('messageTemplates', jsonEncode(messageTemplates));
       }
 
       if (agentData['profile'] is Map) {
@@ -666,6 +706,8 @@ class AppStore {
       if (pr != null) { try { packages.addAll((jsonDecode(pr) as List).map((e)=>PackagePlan.fromJson(Map<String,dynamic>.from(e)))); } catch (_) {} }
       final mt = p.getString('messageTemplates');
       if (mt != null) { try { messageTemplates.addAll(Map<String,String>.from(jsonDecode(mt))); } catch (_) {} }
+      _migrateNearExpiryTemplate();
+      await p.setString('messageTemplates', jsonEncode(messageTemplates));
       await _loadSubscribers(p);
     }
   }
@@ -784,6 +826,7 @@ class AppStore {
             for (final entry in (Map<String, dynamic>.from(agentData['messageTemplates'])).entries) {
               if (entry.value != null) messageTemplates[entry.key] = entry.value.toString();
             }
+            _migrateNearExpiryTemplate();
             await p.setString('messageTemplates', jsonEncode(messageTemplates));
           }
           if (agentData['profile'] is Map) {

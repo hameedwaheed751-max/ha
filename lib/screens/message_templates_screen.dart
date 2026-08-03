@@ -61,6 +61,7 @@ class _MessageTemplatesScreenState extends State<MessageTemplatesScreen> {
       'nearExpiry': 'رسالة قرب الانتهاء',
       'expired': 'رسالة انتهاء الاشتراك',
       'debt': 'رسالة تنبيه دفع الديون',
+      'debtPaid': 'رسالة استلام دين سابق',
     };
 
     return Directionality(
@@ -77,7 +78,7 @@ class _MessageTemplatesScreenState extends State<MessageTemplatesScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Text(
-                  'المتغيرات المتاحة داخل الرسائل: {name} الاسم، {user} اليوزر، {office} اسم المكتب، {endDate} تاريخ الانتهاء، {price} مبلغ الاشتراك، {paid} الواصل، {remaining} المتبقي، {package} الباقة.',
+                  'المتغيرات المتاحة داخل الرسائل: {name} الاسم، {user} اليوزر، {office} اسم المكتب، {endDate} تاريخ الانتهاء، {price} مبلغ الاشتراك، {paid} الواصل، {remaining} المتبقي، {package} الباقة، {amount} المبلغ، {date} التاريخ. كما يمكنك استخدام الصيغة العربية: {{الاسم المشترك}}، {{اسم الوكيل}}، {{اسم الباقة}}، {{تاريخ البدء}}، {{تاريخ الانتهاء}}، {{مبلغ الاشتراك}}، {{الواصل}}، {{المتبقي}}، {{المبلغ}}، {{التاريخ}}.',
                   style: TextStyle(color: Colors.grey),
                 ),
               ),

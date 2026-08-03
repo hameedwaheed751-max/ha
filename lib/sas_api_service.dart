@@ -703,9 +703,9 @@ class SasApiService {
     final shouldUpdateName =
         requestedFull.isNotEmpty && existingFull.isNotEmpty && requestedFull != existingFull;
 
-    if (shouldUpdateName) {
-      setExistingOr('firstname', ['first_name'], firstName);
-      setExistingOr('lastname', ['last_name'], lastName);
+    if (shouldUpdateName && firstName.trim().isNotEmpty) {
+      // عند التعديل من التطبيق نحدّث الاسم الأول فقط ونترك اسم العائلة كما هو في SAS.
+      setExistingOr('firstname', ['first_name'], firstName.trim());
     }
 
     if (phone.trim().isNotEmpty) {

@@ -350,12 +350,25 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   }
 
   String _renderTemplate(String template, Subscriber s) {
+    final paid = s.paid.toStringAsFixed(0);
+    final remaining = s.remaining.toStringAsFixed(0);
     return template
         .replaceAll('{name}', s.name)
+      .replaceAll('{{الاسم المشترك}}', s.name)
         .replaceAll('{office}', AppStore.officeName)
+      .replaceAll('{{اسم الوكيل}}', AppStore.officeName)
         .replaceAll('{package}', s.packageDisplay)
+      .replaceAll('{{اسم الباقة}}', s.packageDisplay)
+      .replaceAll('{{تاريخ البدء}}', fmt(s.startDate))
         .replaceAll('{endDate}', fmt(s.endDate))
-        .replaceAll('{remaining}', s.remaining.toStringAsFixed(0));
+      .replaceAll('{{تاريخ الانتهاء}}', fmt(s.endDate))
+      .replaceAll('{price}', s.price.toStringAsFixed(0))
+      .replaceAll('{{مبلغ الاشتراك}}', s.price.toStringAsFixed(0))
+      .replaceAll('{{المبلغ}}', remaining)
+      .replaceAll('{paid}', paid)
+      .replaceAll('{{الواصل}}', 'الواصل: $paid')
+      .replaceAll('{remaining}', remaining)
+      .replaceAll('{{المتبقي}}', 'المتبقي: $remaining');
   }
 
   void messageTemplates(Subscriber s) {
@@ -365,6 +378,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       'nearExpiry': 'قرب انتهاء الاشتراك',
       'expired': 'انتهاء الاشتراك',
       'debt': 'تذكير بالدين',
+      'debtPaid': 'استلام دين سابق',
     };
 
     showModalBottomSheet(

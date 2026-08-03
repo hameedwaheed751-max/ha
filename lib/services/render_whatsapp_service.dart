@@ -168,15 +168,16 @@ class RenderWhatsAppService {
             'مرحباً {name}، تم تجديد اشتراكك بنجاح لدى {office} حتى {endDate}.';
       case WhatsAppNotificationType.subscriptionExpiresIn3Days:
         return map['nearExpiry'] ??
-            'مرحباً {name}، نذكرك أن اشتراكك ينتهي بتاريخ {endDate}. يرجى التجديد.';
+            'مرحباً {{الاسم المشترك}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📅 تاريخ انتهاء الاشتراك: {{تاريخ الانتهاء}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
       case WhatsAppNotificationType.subscriptionExpired:
         return map['expired'] ??
             'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.';
       case WhatsAppNotificationType.debtAdded:
         return map['debt'] ??
-            'مرحباً {name}، تمت إضافة مبلغ جديد عليك. المتبقي الحالي: {balance}.';
+            'مرحباً {{الاسم المشترك}}،\n✅ يوجد دين مترتب بذمتكم جراء تفعيل الاشتراك.\n💰 يرجى تسديد: {{المبلغ}} دينار عراقي\n📅 لضمان استمرار الخدمة\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
       case WhatsAppNotificationType.debtPaid:
-        return 'مرحباً {name}، تم تسديد مبلغ {amount} بنجاح. الرصيد المتبقي: {balance}. شكراً لكم.';
+        return map['debtPaid'] ??
+            'مرحباً {{الاسم المشترك}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ المسدد: {{المبلغ}} دينار عراقي\n📅 تاريخ التسديد: {{التاريخ}}\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
       case WhatsAppNotificationType.generalMessage:
         return '{message}';
       case WhatsAppNotificationType.broadcast:
@@ -204,6 +205,7 @@ class RenderWhatsAppService {
       'user': s.user,
       'office': AppStore.officeName,
       'package': resolvedPackage,
+      'startDate': _fmt(s.startDate),
       'endDate': _fmt(expiryDate ?? s.endDate),
       'expiryDate': _fmt(expiryDate ?? s.endDate),
       'price': s.price.toStringAsFixed(0),
@@ -212,6 +214,7 @@ class RenderWhatsAppService {
       'balance': resolvedBalance,
       'amount': resolvedAmount,
       'agentName': resolvedAgent,
+      'date': _fmt(DateTime.now()),
       'message': message ?? '',
     };
   }
@@ -221,6 +224,18 @@ class RenderWhatsAppService {
     for (final entry in variables.entries) {
       out = out.replaceAll('{${entry.key}}', entry.value);
     }
+    // دعم القوالب العربية بصيغة {{...}} مع إبقاء الصيغة القديمة {key}.
+    out = out
+        .replaceAll('{{الاسم المشترك}}', variables['name'] ?? '')
+      .replaceAll('{{اسم الباقة}}', variables['package'] ?? '')
+      .replaceAll('{{تاريخ البدء}}', variables['startDate'] ?? '')
+        .replaceAll('{{تاريخ الانتهاء}}', variables['endDate'] ?? '')
+      .replaceAll('{{مبلغ الاشتراك}}', variables['price'] ?? '')
+      .replaceAll('{{المبلغ}}', variables['amount'] ?? '')
+      .replaceAll('{{التاريخ}}', variables['date'] ?? '')
+      .replaceAll('{{الواصل}}', 'الواصل: ${variables['paid'] ?? ''}')
+      .replaceAll('{{المتبقي}}', 'المتبقي: ${variables['remaining'] ?? ''}')
+        .replaceAll('{{اسم الوكيل}}', (variables['agentName'] ?? variables['office'] ?? ''));
     return out;
   }
 

@@ -25,7 +25,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    title: 'wakel-iq',
+    title: 'وكيل نت',
     theme: ThemeData(
       useMaterial3: true,
       colorSchemeSeed: const Color(0xFF2E7D32),

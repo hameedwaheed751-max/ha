@@ -37,15 +37,26 @@ class _AlertsScreenState extends State<AlertsScreen> {
   }
 
   String _applyTemplate(String template, Subscriber s) {
+    final paid = s.paid.toStringAsFixed(0);
+    final remaining = s.remaining.toStringAsFixed(0);
     return template
         .replaceAll('{name}', s.name)
+      .replaceAll('{{الاسم المشترك}}', s.name)
         .replaceAll('{user}', s.user)
         .replaceAll('{office}', AppStore.officeName)
+      .replaceAll('{{اسم الوكيل}}', AppStore.officeName)
+      .replaceAll('{package}', s.packageDisplay)
+      .replaceAll('{{اسم الباقة}}', s.packageDisplay)
+      .replaceAll('{{تاريخ البدء}}', fmt(s.startDate))
         .replaceAll('{endDate}', fmt(s.endDate))
+      .replaceAll('{{تاريخ الانتهاء}}', fmt(s.endDate))
         .replaceAll('{price}', s.price.toStringAsFixed(0))
-        .replaceAll('{paid}', s.paid.toStringAsFixed(0))
-        .replaceAll('{remaining}', s.remaining.toStringAsFixed(0))
-        .replaceAll('{package}', s.type);
+      .replaceAll('{{مبلغ الاشتراك}}', s.price.toStringAsFixed(0))
+          .replaceAll('{{المبلغ}}', remaining)
+      .replaceAll('{paid}', paid)
+      .replaceAll('{{الواصل}}', 'الواصل: $paid')
+      .replaceAll('{remaining}', remaining)
+      .replaceAll('{{المتبقي}}', 'المتبقي: $remaining');
   }
 
   List<Subscriber> _recipients(String type) {
@@ -68,13 +79,13 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
   String _fallback(String type) {
     if (type == 'debt') {
-      return 'مرحباً {name}، تذكير من {office}: المبلغ المتبقي عليك هو {remaining}. شكراً لكم.';
+      return 'مرحباً {{الاسم المشترك}}،\n✅ يوجد دين مترتب بذمتكم جراء تفعيل الاشتراك.\n💰 يرجى تسديد: {{المبلغ}} دينار عراقي\n📅 لضمان استمرار الخدمة\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
     }
     if (type == 'threeDays') {
-      return 'مرحباً {name}، نذكرك من {office} أن اشتراكك ينتهي بتاريخ {endDate}. يرجى التجديد لتجنب انقطاع الخدمة.';
+      return 'مرحباً {{الاسم المشترك}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📅 تاريخ انتهاء الاشتراك: {{تاريخ الانتهاء}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
     }
     if (type == 'activated') {
-      return 'مرحباً {name}، تم تفعيل اشتراكك بنجاح لدى {office}. الباقة: {package}، تاريخ الانتهاء: {endDate}. شكراً لكم.';
+      return 'مرحباً {{الاسم المشترك}}،\n✅ تم تفعيل اشتراك الإنترنت بنجاح.\n📦 الباقة: {{اسم الباقة}}\n📅 يبدأ الاشتراك: {{تاريخ البدء}}\n📅 ينتهي الاشتراك: {{تاريخ الانتهاء}}\nمبلغ الاشتراك:{{مبلغ الاشتراك}}\n{{الواصل}}\n{{المتبقي}}\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
     }
     return 'مرحباً {name}، رسالة عامة من {office}.';
   }

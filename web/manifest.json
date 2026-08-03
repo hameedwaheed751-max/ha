@@ -1,11 +1,11 @@
 {
-    "name": "wakel-iq",
-    "short_name": "wakel-iq",
+    "name": "وكيل نت",
+    "short_name": "وكيل نت",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "wakel-iq ISP subscriber manager.",
+    "description": "تطبيق وكيل نت لإدارة مشتركي الإنترنت.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

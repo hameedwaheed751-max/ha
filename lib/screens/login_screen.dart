@@ -258,7 +258,7 @@ try {
                             ),
                             const SizedBox(height: 18),
                             Text(
-                              'wakel-iq',
+                              'وكيل نت',
                               style: textTheme.headlineSmall?.copyWith(
                                 fontWeight: FontWeight.bold,
                                 color: colorScheme.onSurface,
