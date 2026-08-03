@@ -666,6 +666,15 @@ class SasApiService {
     final firstName = parts.isEmpty ? fullName.trim() : parts.first;
     final lastName = parts.length > 1 ? parts.sublist(1).join(' ') : '-';
 
+    String readExistingValue(List<String> keys) {
+      for (final key in keys) {
+        if (payload.containsKey(key) && payload[key] != null) {
+          return payload[key].toString().trim();
+        }
+      }
+      return '';
+    }
+
     void setExistingOr(String preferred, List<String> alternatives, dynamic value) {
       String? target;
       if (payload.containsKey(preferred)) {
@@ -682,8 +691,23 @@ class SasApiService {
     }
 
     setExistingOr('username', ['user', 'user_name', 'login'], username.trim());
-    setExistingOr('firstname', ['first_name'], firstName);
-    setExistingOr('lastname', ['last_name'], lastName);
+
+    // لا نغيّر اسم SAS إلا إذا تغيّر الاسم فعلياً من داخل التطبيق.
+    final existingFirst = readExistingValue(['firstname', 'first_name']);
+    final existingLast = readExistingValue(['lastname', 'last_name']);
+    final existingFull = [existingFirst, existingLast]
+        .where((v) => v.isNotEmpty && v != '-')
+        .join(' ')
+        .trim();
+    final requestedFull = fullName.trim();
+    final shouldUpdateName =
+        requestedFull.isNotEmpty && existingFull.isNotEmpty && requestedFull != existingFull;
+
+    if (shouldUpdateName) {
+      setExistingOr('firstname', ['first_name'], firstName);
+      setExistingOr('lastname', ['last_name'], lastName);
+    }
+
     if (phone.trim().isNotEmpty) {
       setExistingOr('phone', ['mobile', 'phone_number', 'mobile_number'], phone.trim());
     }
