@@ -426,14 +426,19 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                           try {
                             final settings = await SasSettings.load();
                             final api = SasApiService(settings);
+                            final requestedName = name.text.trim();
+                            final explicitNameChangedInApp =
+                                requestedName.isNotEmpty &&
+                                requestedName != s.name.trim();
                             await api.updateUser(
                               userId: s.sasId.trim(),
                               currentData: s.sasData,
                               username: user.text.trim(),
-                              fullName: name.text.trim(),
+                              fullName: requestedName,
                               phone: phone.text.trim(),
                               address: address.text.trim(),
                               ip: ip.text.trim(),
+                              allowNameUpdate: explicitNameChangedInApp,
                             );
                           } catch (e) {
                             if (context.mounted) {

@@ -657,6 +657,7 @@ class SasApiService {
     required String phone,
     required String address,
     required String ip,
+    bool allowNameUpdate = false,
   }) async {
     if (_token == null) await login();
 
@@ -703,7 +704,7 @@ class SasApiService {
     final shouldUpdateName =
         requestedFull.isNotEmpty && existingFull.isNotEmpty && requestedFull != existingFull;
 
-    if (shouldUpdateName && firstName.trim().isNotEmpty) {
+    if (allowNameUpdate && shouldUpdateName && firstName.trim().isNotEmpty) {
       // عند التعديل من التطبيق نحدّث الاسم الأول فقط ونترك اسم العائلة كما هو في SAS.
       setExistingOr('firstname', ['first_name'], firstName.trim());
     }
@@ -930,12 +931,21 @@ class SasApiService {
       'points_required',
     ]));
 
+    final requiredAmount = _asNum(_firstDeep(activation, [
+      'required_amount',
+      'n_required_amount',
+      'amount_required',
+    ]));
+
     String method;
     if (explicitMethod != null && explicitMethod.toString().trim().isNotEmpty) {
       method = explicitMethod.toString().trim();
     } else if (requiredPoints != null &&
+        requiredPoints > 0 &&
         rewardPoints != null &&
         rewardPoints >= requiredPoints) {
+      // لا نعتمد reward_points عندما required_points = 0 لأن بعض أنظمة SAS
+      // تعتبرها تفعيل Credit وليس نقاط.
       method = 'reward_points';
     } else {
       // SAS Radius الشائع وحساب SpeedNet الحقيقي.
@@ -990,9 +1000,15 @@ class SasApiService {
       payload['money_collected'] =
           _asNum(_firstDeep(activation, ['money_collected'])) ?? 1;
       if (price != null) payload['user_price'] = price;
+      if (requiredAmount != null) payload['required_amount'] = requiredAmount;
       payload['activation_units'] = units;
     } else {
+      // بعض نسخ SAS تتطلب حقولاً إضافية مع reward_points.
       payload['units'] = units;
+      if (rewardPoints != null) payload['points'] = rewardPoints;
+      if (requiredPoints != null) payload['points_required'] = requiredPoints;
+      if (price != null) payload['price'] = price;
+      if (requiredAmount != null) payload['required_amount'] = requiredAmount;
     }
 
     final response = await _post(

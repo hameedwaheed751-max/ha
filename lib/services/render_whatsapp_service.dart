@@ -157,6 +157,35 @@ class RenderWhatsAppService {
   );
   static const int _maxAttempts = 3;
 
+  static String _digitsOnly(String value) {
+    return value.replaceAll(RegExp(r'[^0-9]'), '');
+  }
+
+  static String _withAgentPhoneFooter(String message) {
+    final officePhone = AppStore.officePhone.trim();
+    if (officePhone.isEmpty) return message;
+
+    final messageDigits = _digitsOnly(message);
+    final officeDigits = _digitsOnly(officePhone);
+    final normalizedOfficePhone = normalizePhone(officePhone);
+
+    final alreadyContainsPhone =
+        (officeDigits.isNotEmpty && messageDigits.contains(officeDigits)) ||
+        (normalizedOfficePhone.isNotEmpty && messageDigits.contains(normalizedOfficePhone));
+
+    if (alreadyContainsPhone) return message;
+
+    final agentLabel = AppStore.officeName.trim().isNotEmpty
+        ? AppStore.officeName.trim()
+        : AppStore.agentName.trim();
+
+    if (agentLabel.isEmpty) {
+      return '$message\n($officePhone)';
+    }
+
+    return '$message\n🏢 $agentLabel ($officePhone)';
+  }
+
   static String _fmt(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
@@ -333,7 +362,7 @@ class RenderWhatsAppService {
     int maxAttempts = _maxAttempts,
   }) async {
     final normalizedPhone = normalizePhone(to);
-    final cleanMessage = message.trim();
+    final cleanMessage = _withAgentPhoneFooter(message.trim());
     if (normalizedPhone.isEmpty || cleanMessage.isEmpty) {
       return const RenderSingleWhatsAppResult(
         success: false,

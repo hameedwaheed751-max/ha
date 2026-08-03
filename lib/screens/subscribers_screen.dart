@@ -104,7 +104,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           final days = s.endDate.difference(now).inDays;
           if (days < 0 || days > 3) return false;
         }
-        if (_advancedStatus == 'مستهلك' && !_isConsumed(s)) return false;
+        if (_advancedStatus == 'ينتهي اشتراكهم اليوم') {
+          final sameDay = s.endDate.year == now.year &&
+              s.endDate.month == now.month &&
+              s.endDate.day == now.day;
+          if (!sameDay) return false;
+        }
       }
 
       if (_advancedConnection != 'الكل') {
@@ -157,15 +162,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   String fmt(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
-  bool _isConsumed(Subscriber s) {
-    final d = s.sasData;
-    for (final key in const ['consumed', 'is_consumed', 'isConsumed', 'quota_exceeded']) {
-      final v = d[key];
-      if (v == true || v == 1) return true;
-      final z = (v ?? '').toString().toLowerCase().trim();
-      if (const ['1', 'true', 'yes', 'consumed'].contains(z)) return true;
-    }
-    return false;
+  DateTime _dayOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  void _setStartDateAsActivationDay(Subscriber s, {DateTime? at}) {
+    s.startDate = _dayOnly(at ?? DateTime.now());
   }
 
   String _parentText(Subscriber s) => _sasText(
@@ -297,6 +297,41 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         .replaceAll('٬', '');
     if (normalized.isEmpty) return null;
     return double.tryParse(normalized);
+  }
+
+  double _toNum(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse((value ?? '').toString().replaceAll(',', '').trim()) ?? 0;
+  }
+
+  double _activationReceivedAmount(dynamic response) {
+    if (response is! Map) return 0;
+    for (final key in const [
+      'money_collected',
+      'required_amount',
+      'amount',
+      'user_price',
+      'price',
+      'total',
+    ]) {
+      final v = _toNum(response[key]);
+      if (v > 0) return v;
+    }
+    final data = response['data'];
+    if (data is Map) {
+      for (final key in const [
+        'money_collected',
+        'required_amount',
+        'amount',
+        'user_price',
+        'price',
+        'total',
+      ]) {
+        final v = _toNum(data[key]);
+        if (v > 0) return v;
+      }
+    }
+    return 0;
   }
 
   Future<void> whatsapp(Subscriber s, {String? message}) async {
@@ -511,6 +546,21 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       s.active = true;
       s.disabled = false;
       s.points++;
+      _setStartDateAsActivationDay(s);
+
+      final activationAmount = _activationReceivedAmount(activationResponse);
+      await AppStore.addDailyTaskEvent(
+        DailyTaskEvent(
+          type: 'activation',
+          subscriberUser: s.user,
+          subscriberName: s.name,
+          at: DateTime.now(),
+          amount: activationAmount,
+          remainingAfter: s.remaining,
+          note: 'تفعيل من قائمة المشتركين',
+        ),
+        persist: false,
+      );
 
       // تحديث بيانات SAS إذا تم جلبها
       if (userOverview is Map) {
@@ -534,6 +584,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           const Duration(seconds: 45),
           onTimeout: () => throw Exception('انتهت مهلة المزامنة التلقائية'),
         );
+        _setStartDateAsActivationDay(s);
         AppStore.lastSasSync = DateTime.now();
         await AppStore.save();
         debugPrint(
@@ -1191,8 +1242,22 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         if(activate==true && mounted){
           showDialog(context:context,barrierDismissible:false,
             builder:(_)=>const Center(child:CircularProgressIndicator()));
-          await api.activateUser(userId).timeout(const Duration(seconds:30));
+          final activationResponse = await api.activateUser(userId)
+              .timeout(const Duration(seconds:30));
           s.active=true; s.disabled=false;
+          _setStartDateAsActivationDay(s);
+          await AppStore.addDailyTaskEvent(
+            DailyTaskEvent(
+              type: 'activation',
+              subscriberUser: s.user,
+              subscriberName: s.name,
+              at: DateTime.now(),
+              amount: _activationReceivedAmount(activationResponse),
+              remainingAfter: s.remaining,
+              note: 'تفعيل بعد تغيير الباقة',
+            ),
+            persist: false,
+          );
           await AppStore.save();
           if(mounted) Navigator.pop(context);
           if(mounted){
@@ -1336,6 +1401,24 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                         ? 'فاتورة تسديد كامل'
                         : 'فاتورة تسديد جزئي',
                   );
+
+                  if (delta > 0) {
+                    await AppStore.addDailyTaskEvent(
+                      DailyTaskEvent(
+                        type: 'debt_payment',
+                        subscriberUser: s.user,
+                        subscriberName: s.name,
+                        at: now,
+                        amount: delta,
+                        remainingAfter: s.remaining,
+                        note: s.remaining <= 0.0001
+                            ? 'تسديد كامل'
+                            : 'تسديد جزئي',
+                      ),
+                      persist: false,
+                    );
+                  }
+
                   s.paymentDate = date.text.trim().isEmpty ? fmt(now) : date.text.trim();
                   await AppStore.save();
                   await AutoNotificationService.notifyDebtSettledIfNeeded(
@@ -1491,7 +1574,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       dropdownColor: const Color(0xFFF8FFF9),
                       iconEnabledColor: const Color(0xFF2E7D32),
                       style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w600),
-                        items: const ['الكل','فعال','منتهي الصلاحية','معطل','ينتهي قريباً','خلال 3 أيام','مستهلك']
+                        items: const ['الكل','فعال','منتهي الصلاحية','معطل','ينتهي قريباً','خلال 3 أيام','ينتهي اشتراكهم اليوم']
                           .map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
                       onChanged: (v) => setLocal(() => status = v ?? 'الكل'),
                     ),
@@ -1953,7 +2036,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                             child: OutlinedButton.icon(
                               onPressed: _showColumnSelector,
                               icon: const Icon(Icons.view_column_outlined, size: 18),
-                              label: const Text('أعمدة'),
+                              label: const Text('المزيد'),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: green,
                                 side: BorderSide(color: green.withValues(alpha: 0.35)),

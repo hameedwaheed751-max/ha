@@ -19,6 +19,7 @@ import 'message_templates_screen.dart';
 import 'sas_settings_screen.dart';
 import 'receipt_screen.dart';
 import 'quick_reports_screen.dart';
+import 'today_tasks_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'login_screen.dart';
 
@@ -229,6 +230,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   _subTile('المشتركين الفعالين', () => open('active')),
                   _subTile('المنتهي اشتراكهم', () => open('expired')),
+                  _subTile('المهام اليومية', () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const TodayTasksScreen()),
+                    );
+                  }),
                   _subTile('الديون', () { Navigator.pop(context); _openDebtsTable(); }),
                 ],
               ),
@@ -495,6 +503,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _quickActionCard(Icons.sync_alt_outlined, 'مزامنة المشتركين', Colors.green, _syncSubscribersFromDashboard),
                   _quickActionCard(Icons.notifications_active_outlined, 'التنبيهات', Colors.amber.shade800, () async {
                     await Navigator.push(context, MaterialPageRoute(builder: (_) => const AlertsScreen()));
+                    if (mounted) setState(() {});
+                  }),
+                  _quickActionCard(Icons.task_alt_outlined, 'المهام اليومية', Colors.indigo, () async {
+                    await Navigator.push(context, MaterialPageRoute(builder: (_) => const TodayTasksScreen()));
                     if (mounted) setState(() {});
                   }),
                   _quickActionCard(Icons.event_available_outlined, 'ينتهون قريباً', Colors.orange, () async {

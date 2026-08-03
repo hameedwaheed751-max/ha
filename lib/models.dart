@@ -56,6 +56,46 @@ class InvoiceRecord {
       );
 }
 
+class DailyTaskEvent {
+  DailyTaskEvent({
+    required this.type,
+    required this.subscriberUser,
+    required this.subscriberName,
+    required this.at,
+    this.amount = 0,
+    this.remainingAfter = 0,
+    this.note = '',
+  });
+
+  String type;
+  String subscriberUser;
+  String subscriberName;
+  DateTime at;
+  double amount;
+  double remainingAfter;
+  String note;
+
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'subscriberUser': subscriberUser,
+        'subscriberName': subscriberName,
+        'at': at.toIso8601String(),
+        'amount': amount,
+        'remainingAfter': remainingAfter,
+        'note': note,
+      };
+
+  factory DailyTaskEvent.fromJson(Map<String, dynamic> j) => DailyTaskEvent(
+        type: (j['type'] ?? '').toString(),
+        subscriberUser: (j['subscriberUser'] ?? '').toString(),
+        subscriberName: (j['subscriberName'] ?? '').toString(),
+        at: DateTime.tryParse((j['at'] ?? '').toString()) ?? DateTime.now(),
+        amount: (j['amount'] ?? 0).toDouble(),
+        remainingAfter: (j['remainingAfter'] ?? 0).toDouble(),
+        note: (j['note'] ?? '').toString(),
+      );
+}
+
 class Subscriber {
   Subscriber({
     required this.user,
@@ -438,6 +478,7 @@ class PackagePlan {
 class AppStore {
   static const int dataVersion = 1;
   static const String subscribersRevisionKey = 'subscribersRevision';
+  static const String dailyTaskEventsKey = 'dailyTaskEvents';
   static const String _legacyNearExpiryTemplate =
       'مرحباً {name}، نذكرك أن اشتراكك ينتهي بتاريخ {endDate}. يرجى التجديد.';
     static const String _legacyActivationTemplate =
@@ -453,6 +494,7 @@ class AppStore {
   static const String nearExpiryTemplate =
       'مرحباً {{الاسم المشترك}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📅 تاريخ انتهاء الاشتراك: {{تاريخ الانتهاء}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
   static final List<Subscriber> subscribers = [];
+  static final List<DailyTaskEvent> dailyTaskEvents = [];
   static String agentFirstName = '';
   static String agentLastName = '';
   static String agentName = '';
@@ -697,6 +739,23 @@ class AppStore {
     nextReceiptNumber = p.getInt('nextReceiptNumber') ?? 1;
     subscribersRevision = p.getInt(subscribersRevisionKey) ?? 0;
     lastSasSync = DateTime.tryParse(p.getString('lastSasSync') ?? '');
+    final eventsRaw = p.getString(dailyTaskEventsKey);
+    dailyTaskEvents.clear();
+    if (eventsRaw != null && eventsRaw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(eventsRaw);
+        if (decoded is List) {
+          for (final e in decoded) {
+            if (e is Map) {
+              dailyTaskEvents.add(
+                DailyTaskEvent.fromJson(Map<String, dynamic>.from(e)),
+              );
+            }
+          }
+        }
+      } catch (_) {}
+    }
+    _trimDailyTaskEvents();
     try {
       await _pullFromFirebase().timeout(const Duration(seconds: 8));
     } catch (e) {
@@ -733,6 +792,11 @@ class AppStore {
     if (previous != null && previous.isNotEmpty) await p.setString('subscribers_backup', previous);
     await p.setInt('dataVersion', dataVersion);
     await p.setString('subscribers', encoded);
+    _trimDailyTaskEvents();
+    await p.setString(
+      dailyTaskEventsKey,
+      jsonEncode(dailyTaskEvents.map((e) => e.toJson()).toList()),
+    );
 
     if (!_isLoggedIn) return;
 
@@ -855,6 +919,35 @@ class AppStore {
 
   static Future<void> deleteAllSubscribers() async { subscribers.clear(); await save(); }
   static Future<void> deleteSasSubscribersOnly() async { subscribers.removeWhere((s) => s.source == 'sas'); await save(); }
+
+  static bool isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  static void _trimDailyTaskEvents() {
+    final now = DateTime.now();
+    dailyTaskEvents.removeWhere((e) => now.difference(e.at).inDays > 30);
+    if (dailyTaskEvents.length > 3000) {
+      dailyTaskEvents.sort((a, b) => a.at.compareTo(b.at));
+      final overflow = dailyTaskEvents.length - 3000;
+      dailyTaskEvents.removeRange(0, overflow);
+    }
+  }
+
+  static Future<void> addDailyTaskEvent(
+    DailyTaskEvent event, {
+    bool persist = true,
+  }) async {
+    dailyTaskEvents.insert(0, event);
+    _trimDailyTaskEvents();
+    if (!persist) return;
+    final p = await SharedPreferences.getInstance();
+    await p.setString(
+      dailyTaskEventsKey,
+      jsonEncode(dailyTaskEvents.map((e) => e.toJson()).toList()),
+    );
+  }
+
   static Future<int> issueReceiptNumber({bool persist = true}) async {
     final number = nextReceiptNumber;
     nextReceiptNumber++;
