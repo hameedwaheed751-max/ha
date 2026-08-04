@@ -127,20 +127,27 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('الوكيل الحالي', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                  const Text('اسم الوكيل', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                                   const SizedBox(height: 4),
                                   Text(
-                                    AppStore.sasUsername.isNotEmpty
-                                        ? AppStore.sasUsername
-                                        : 'لم يتم ربط SAS بعد',
+                                    AppStore.effectiveAgentName.isNotEmpty
+                                        ? AppStore.effectiveAgentName
+                                        : 'لم يتم إدخال اسم الوكيل بعد',
                                     style: TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.bold,
-                                      color: AppStore.sasUsername.isNotEmpty
+                                      color: AppStore.effectiveAgentName.isNotEmpty
                                           ? Colors.blue.shade800
                                           : Colors.grey,
                                     ),
                                   ),
+                                  if (AppStore.sasUsername.isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'SAS: ${AppStore.sasUsername}',
+                                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),

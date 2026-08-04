@@ -22,6 +22,7 @@ import 'quick_reports_screen.dart';
 import 'today_tasks_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'login_screen.dart';
+import 'subscription_requests_admin_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -159,6 +160,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onTap: onTap,
       );
 
+  Widget _subscriptionDrawerCard() {
+    AppStore.refreshSubscriptionStatus();
+    final isPlanActive = AppStore.subscriptionStatus == 'active';
+    final statusColor = isPlanActive ? Colors.green.shade700 : Colors.red.shade700;
+    final planLabel = AppStore.subscriptionPlanLabel.isNotEmpty ? AppStore.subscriptionPlanLabel : 'لا توجد باقة';
+    final statusText = isPlanActive ? 'نشط' : 'منتهي';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border(left: BorderSide(color: statusColor, width: 4)),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('معلومات SAS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.grey.shade700)),
+          const SizedBox(height: 4),
+          Text(planLabel, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF29323A))),
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              Icon(Icons.circle, size: 8, color: statusColor),
+              const SizedBox(width: 6),
+              Text(statusText, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: statusColor)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _mainDrawer() {
     return Drawer(
       backgroundColor: const Color(0xFF29323A),
@@ -169,27 +205,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
             padding: EdgeInsets.zero,
             children: [
               Container(
-                height: 76,
-                padding: const EdgeInsets.symmetric(horizontal: 18),
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 10),
                 color: Colors.white,
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.menu, size: 30, color: Color(0xFF5D6770)),
-                    const Spacer(),
-                    Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Text(
-                        AppStore.agentName.isNotEmpty
-                            ? AppStore.agentName
-                            : (AppStore.officeName.isNotEmpty ? AppStore.officeName : 'وكيل جديد'),
-                        style: const TextStyle(color: Color(0xFFE8492E), fontSize: 20, fontWeight: FontWeight.w900),
-                      ),
-                      Text(
-                        AppStore.agentEmail.isNotEmpty
-                            ? AppStore.agentEmail
-                            : 'وكيل نت',
-                        style: const TextStyle(color: Colors.grey, fontSize: 12),
-                      ),
-                    ]),
+                    Row(
+                      children: [
+                        const Icon(Icons.menu, size: 30, color: Color(0xFF5D6770)),
+                        const Spacer(),
+                        Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Text(
+                            AppStore.agentName.isNotEmpty
+                                ? AppStore.agentName
+                                : (AppStore.officeName.isNotEmpty ? AppStore.officeName : 'وكيل جديد'),
+                            style: const TextStyle(color: Color(0xFFE8492E), fontSize: 20, fontWeight: FontWeight.w900),
+                          ),
+                          Text(
+                            AppStore.agentEmail.isNotEmpty
+                                ? AppStore.agentEmail
+                                : 'وكيل نت',
+                            style: const TextStyle(color: Colors.grey, fontSize: 12),
+                          ),
+                        ]),
+                      ],
+                    ),
+                    _subscriptionDrawerCard(),
                   ],
                 ),
               ),
@@ -249,6 +290,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               _drawerTile(icon: Icons.cloud_sync_outlined, title: 'ربط SAS Radius', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const SasSettingsScreen())); }),
               _drawerTile(icon: Icons.notifications_active_outlined, title: 'التنبيهات ورسائل واتساب', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const MessageTemplatesScreen())); }),
+              _drawerTile(
+                icon: Icons.assignment_turned_in_outlined,
+                title: 'طلبات الاشتراك',
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SubscriptionRequestsAdminScreen()));
+                },
+              ),
               _drawerTile(
                 icon: Icons.speed_outlined,
                 title: 'بيانات SAS المباشرة',
@@ -340,6 +389,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   icon: Icons.logout,
   title: 'تسجيل الخروج',
   onTap: () async {
+    await AppStore.clearForAccountSwitch(clearStorage: false);
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -449,6 +499,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final active = AppStore.subscribers.where((s) => s.isActive).length;
     final expired = AppStore.subscribers.where((s) => s.expired).length;
     final debts = AppStore.subscribers.where((s) => s.remaining > 0).length;
+    AppStore.refreshSubscriptionStatus();
+    final isPlanActive = AppStore.subscriptionStatus == 'active';
+    final statusColor = isPlanActive ? Colors.green.shade700 : Colors.red.shade700;
+    final statusIcon = isPlanActive ? Icons.verified_user_rounded : Icons.warning_amber_rounded;
+    final statusText = isPlanActive
+        ? 'باقتك نشطة حتى ${AppStore.subscriptionEndsAt != null ? AppStore.subscriptionEndsAt!.toLocal().toString().split(' ').first : '—'}'
+        : 'انتهت مدة الباقة يرجى التجديد';
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -491,7 +548,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         body: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 6),
               child: Wrap(
                 spacing: 12,
                 runSpacing: 12,

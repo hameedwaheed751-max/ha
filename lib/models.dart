@@ -479,6 +479,7 @@ class AppStore {
   static const int dataVersion = 1;
   static const String subscribersRevisionKey = 'subscribersRevision';
   static const String dailyTaskEventsKey = 'dailyTaskEvents';
+  static String? _loadedUid;
   static const String _legacyNearExpiryTemplate =
       'مرحباً {name}، نذكرك أن اشتراكك ينتهي بتاريخ {endDate}. يرجى التجديد.';
     static const String _legacyActivationTemplate =
@@ -499,12 +500,27 @@ class AppStore {
   static String agentLastName = '';
   static String agentName = '';
   static String agentEmail = '';
+
+  static String get effectiveAgentName {
+    final names = [agentFirstName, agentLastName].where((e) => e.trim().isNotEmpty).toList();
+    final derived = names.join(' ').trim();
+    if (agentName.trim().isNotEmpty) return agentName.trim();
+    if (derived.isNotEmpty) return derived;
+    return officeName.trim();
+  }
   static String officeName = '';
   static String officePhone = '';
   static String officeAddress = '';
   static String officeLogoBase64 = '';
   static String receiptFooter = '';
   static String sasUsername = '';
+  static String subscriptionPlan = '';
+  static String subscriptionPlanLabel = '';
+  static String subscriptionPrice = '';
+  static String paymentMethod = 'master';
+  static DateTime? subscriptionStartedAt;
+  static DateTime? subscriptionEndsAt;
+  static String subscriptionStatus = 'inactive';
   static double balance = 0;
   static int nextReceiptNumber = 1;
   static DateTime? lastSasSync;
@@ -542,21 +558,61 @@ class AppStore {
     }
   }
 
-  /// المعرف الفريد للوكيل: uid_sasUsername
-  static String? get _agentId {
+  /// مسار Firebase الأساسي للوكيل: agents/{uid}
+  /// بحيث يبدأ كل حساب جديد بعقدة خاصة به ويُحافظ على فصل البيانات بين الحسابات.
+  static DatabaseReference get _agentRef {
     final uid = _uid;
-    if (uid == null) return null;
-    if (sasUsername.trim().isNotEmpty) {
-      return '${uid}_${sasUsername.trim()}';
-    }
-    return uid;
+    if (uid == null || uid.isEmpty) throw Exception('User not logged in');
+    return FirebaseDatabase.instance.ref('agents/$uid');
   }
 
-  /// مسار Firebase للوكيل: agents/{uid_sasUsername}
-  static DatabaseReference get _agentRef {
-    final id = _agentId;
-    if (id == null) throw Exception('User not logged in');
-    return FirebaseDatabase.instance.ref('agents/$id');
+  static Map<String, dynamic> buildEmptyAgentNodePayload({required String uid}) {
+    final resolvedUid = uid.trim();
+    return {
+      'profile': {
+        'email': '',
+        'name': '',
+        'firstName': '',
+        'lastName': '',
+        'admin': '',
+        'company': '',
+        'phone': '',
+        'sasUsername': '',
+        'emailKey': '',
+        'agentKey': '',
+        'currentAgentId': resolvedUid,
+        'createdAt': ServerValue.timestamp,
+        'status': 'pending_sas',
+      },
+      'settings': <String, dynamic>{
+        subscribersRevisionKey: 0,
+      },
+      'packages': <String, dynamic>{},
+      'messageTemplates': <String, dynamic>{
+        'activation': activationTemplate,
+        'extension': 'مرحباً {name}، تم تمديد اشتراكك لدى {office} حتى {endDate}.',
+        'nearExpiry': nearExpiryTemplate,
+        'expired': 'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.',
+        'debt': debtTemplate,
+        'debtPaid': debtPaidTemplate,
+      },
+      'subscribers': <dynamic>[],
+      'sas': <String, dynamic>{
+        'serverUrl': '',
+        'username': '',
+        'password': '',
+      },
+    };
+  }
+
+  static Future<void> initializeEmptyAgentNode({String? uid}) async {
+    final resolvedUid = (uid ?? _uid ?? '').trim();
+    if (resolvedUid.isEmpty) return;
+
+    final ref = FirebaseDatabase.instance.ref('agents/$resolvedUid');
+    final defaults = buildEmptyAgentNodePayload(uid: resolvedUid);
+
+    await ref.set(defaults).timeout(const Duration(seconds: 10));
   }
 
   static bool get _isLoggedIn {
@@ -673,11 +729,32 @@ class AppStore {
           agentName = profile['name'].toString().trim();
           await p.setString('agentName', agentName);
         }
+        if (agentName.trim().isEmpty) {
+          agentName = [agentFirstName, agentLastName].where((e) => e.isNotEmpty).join(' ').trim();
+          await p.setString('agentName', agentName);
+        }
         if (profile['email'] != null) {
           agentEmail = profile['email'].toString().trim();
           await p.setString('agentEmail', agentEmail);
         }
         if (profile['sasUsername'] != null) sasUsername = profile['sasUsername'].toString();
+        if (profile['phone'] != null) officePhone = profile['phone'].toString().trim();
+        if (profile['subscriptionPlan'] != null) subscriptionPlan = profile['subscriptionPlan'].toString().trim();
+        if (profile['subscriptionPlanLabel'] != null) subscriptionPlanLabel = profile['subscriptionPlanLabel'].toString().trim();
+        if (profile['subscriptionPrice'] != null) subscriptionPrice = profile['subscriptionPrice'].toString().trim();
+        if (profile['paymentMethod'] != null) paymentMethod = profile['paymentMethod'].toString().trim();
+        final startRaw = profile['subscriptionStartDate'];
+        if (startRaw != null) {
+          subscriptionStartedAt = _parseDateTime(startRaw);
+        }
+        final endRaw = profile['subscriptionEndDate'];
+        if (endRaw != null) {
+          subscriptionEndsAt = _parseDateTime(endRaw);
+        }
+        if (subscriptionPlan.isNotEmpty && subscriptionStartedAt != null && subscriptionEndsAt == null) {
+          subscriptionEndsAt = subscriptionStartedAt!.add(_subscriptionDurationForPlan(subscriptionPlan));
+        }
+        refreshSubscriptionStatus();
       }
 
       if (agentData['subscribers'] != null) {
@@ -724,7 +801,93 @@ class AppStore {
     }
   }
 
+  static Future<void> clearForAccountSwitch({bool clearStorage = false}) async {
+    realtimeListener?.cancel();
+    realtimeListener = null;
+
+    subscribers.clear();
+    packages.clear();
+    dailyTaskEvents.clear();
+
+    messageTemplates.clear();
+    messageTemplates['activation'] = activationTemplate;
+    messageTemplates['extension'] = 'مرحباً {name}، تم تمديد اشتراكك لدى {office} حتى {endDate}.';
+    messageTemplates['nearExpiry'] = nearExpiryTemplate;
+    messageTemplates['expired'] = 'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.';
+    messageTemplates['debt'] = debtTemplate;
+    messageTemplates['debtPaid'] = debtPaidTemplate;
+
+    agentFirstName = '';
+    agentLastName = '';
+    agentName = '';
+    agentEmail = '';
+    officeName = '';
+    officePhone = '';
+    officeAddress = '';
+    officeLogoBase64 = '';
+    receiptFooter = '';
+    balance = 0;
+    nextReceiptNumber = 1;
+    subscribersRevision = 0;
+    lastSasSync = null;
+    sasUsername = '';
+    subscriptionPlan = '';
+    subscriptionPlanLabel = '';
+    subscriptionPrice = '';
+    paymentMethod = 'master';
+    subscriptionStartedAt = null;
+    subscriptionEndsAt = null;
+    subscriptionStatus = 'inactive';
+    _loadedUid = null;
+
+    if (!clearStorage) return;
+
+    final p = await SharedPreferences.getInstance();
+    const keysToClear = <String>[
+      'officeName',
+      'officePhone',
+      'officeAddress',
+      'officeLogoBase64',
+      'receiptFooter',
+      'balance',
+      'nextReceiptNumber',
+      'lastSasSync',
+      'packages',
+      'messageTemplates',
+      'subscribers',
+      'subscribers_backup',
+      'sas_server_url',
+      'sas_manager_username',
+      'sas_manager_password',
+      'sas_manager_password_sec',
+      'sas_web_proxy_url',
+      'web_proxy_url',
+      'proxy_url',
+      'render_proxy_url',
+      'subscribersRevision',
+      'dailyTaskEvents',
+      'agentFirstName',
+      'agentLastName',
+      'agentName',
+      'agentEmail',
+      'agentId',
+      'sasUsername',
+      'dataVersion',
+    ];
+    for (final key in keysToClear) {
+      await p.remove(key);
+    }
+  }
+
   static Future<void> load() async {
+    final uid = _uid;
+    if (uid != null && _loadedUid != uid) {
+      await clearForAccountSwitch();
+      _loadedUid = uid;
+    } else if (uid == null) {
+      _loadedUid = null;
+    }
+
     final p = await SharedPreferences.getInstance();
     agentFirstName = p.getString('agentFirstName') ?? '';
     agentLastName = p.getString('agentLastName') ?? '';
@@ -771,10 +934,58 @@ class AppStore {
     }
   }
 
+  static DateTime? _parseDateTime(dynamic value) {
+    if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+    if (value is num) return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+    if (value is String && value.trim().isNotEmpty) {
+      return DateTime.tryParse(value.trim()) ?? DateTime.tryParse(value.trim().replaceFirst(' ', 'T'));
+    }
+    return null;
+  }
+
+  static Duration _subscriptionDurationForPlan(String plan) {
+    switch (plan) {
+      case 'trial':
+        return const Duration(days: 15);
+      case '3m':
+        return const Duration(days: 90);
+      case '6m':
+        return const Duration(days: 183);
+      case '1y':
+        return const Duration(days: 365);
+      default:
+        return const Duration(days: 15);
+    }
+  }
+
+  static void refreshSubscriptionStatus({DateTime? now}) {
+    final reference = now ?? DateTime.now();
+    if (subscriptionPlan.isEmpty) {
+      subscriptionStatus = 'inactive';
+      return;
+    }
+
+    if (subscriptionEndsAt == null) {
+      if (subscriptionStartedAt != null) {
+        subscriptionEndsAt = subscriptionStartedAt!.add(_subscriptionDurationForPlan(subscriptionPlan));
+      } else {
+        subscriptionStatus = 'inactive';
+        return;
+      }
+    }
+
+    subscriptionStatus = reference.isAfter(subscriptionEndsAt!) ? 'expired' : 'active';
+  }
+
   static Future<void> save() async {
     if (!_isLoggedIn) debugPrint('AppStore.save: User not logged in, saving locally only');
     final p = await SharedPreferences.getInstance();
     subscribersRevision = DateTime.now().millisecondsSinceEpoch;
+    refreshSubscriptionStatus();
+
+    if (agentName.trim().isEmpty) {
+      agentName = [agentFirstName, agentLastName].where((e) => e.isNotEmpty).join(' ').trim();
+    }
 
     await p.setString('officeName', officeName);
     await p.setString('officePhone', officePhone);
@@ -808,7 +1019,15 @@ class AppStore {
         if (agentFirstName.isNotEmpty) 'firstName': agentFirstName,
         if (agentLastName.isNotEmpty) 'lastName': agentLastName,
         if (agentName.isNotEmpty) 'name': agentName,
+        if (officePhone.trim().isNotEmpty) 'phone': officePhone.trim(),
         if (sasUsername.trim().isNotEmpty) 'sasUsername': sasUsername.trim(),
+        if (subscriptionPlan.isNotEmpty) 'subscriptionPlan': subscriptionPlan,
+        if (subscriptionPlanLabel.isNotEmpty) 'subscriptionPlanLabel': subscriptionPlanLabel,
+        if (subscriptionPrice.isNotEmpty) 'subscriptionPrice': subscriptionPrice,
+        'paymentMethod': paymentMethod,
+        'subscriptionStatus': subscriptionStatus,
+        'subscriptionStartDate': subscriptionStartedAt?.toIso8601String() ?? '',
+        'subscriptionEndDate': subscriptionEndsAt?.toIso8601String() ?? '',
         'status': sasUsername.trim().isNotEmpty ? 'active' : 'pending_sas',
         'updatedAt': ServerValue.timestamp,
       });

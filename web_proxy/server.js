@@ -482,6 +482,11 @@ async function sendWhatsAppText(to, message) {
   }
 
   const endpoint = `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`;
+  console.log('[whatsapp] outbound text payload:', JSON.stringify({
+    to: cleanTo,
+    type: 'text',
+    textLength: body.length,
+  }));
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
@@ -499,6 +504,83 @@ async function sendWhatsAppText(to, message) {
   });
 
   const raw = await response.text();
+  console.log(`[whatsapp] text response status=${response.status} body=${raw || '<empty>'}`);
+  let parsed;
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    parsed = {raw};
+  }
+
+  if (!response.ok) {
+    const err = new Error('WhatsApp API request failed');
+    err.statusCode = response.status;
+    err.details = parsed;
+    throw err;
+  }
+
+  return parsed;
+}
+
+async function sendWhatsAppTemplate(to, templateName, languageCode = 'ar', parameters = []) {
+  const accessToken = WHATSAPP_ACCESS_TOKEN || WHATSAPP_TOKEN;
+  const phoneNumberId = WHATSAPP_PHONE_NUMBER_ID || PHONE_NUMBER_ID;
+  const cleanTo = String(to || '').replace(/\D/g, '').trim();
+  const name = String(templateName || '').trim();
+  const lang = String(languageCode || 'ar').trim() || 'ar';
+  const bodyParameters = Array.isArray(parameters)
+    ? parameters
+        .map((p) => String(p || '').trim())
+        .filter((p) => p.length > 0)
+        .map((p) => ({type: 'text', text: p}))
+    : [];
+
+  if (!phoneNumberId || !accessToken) {
+    const err = new Error('Missing WHATSAPP_TOKEN or PHONE_NUMBER_ID');
+    err.statusCode = 500;
+    throw err;
+  }
+
+  if (!cleanTo || !name) {
+    const err = new Error('Both "to" and "templateName" are required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const endpoint = `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`;
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: cleanTo,
+    type: 'template',
+    template: {
+      name,
+      language: {code: lang},
+      ...(bodyParameters.length > 0
+        ? {
+            components: [
+              {
+                type: 'body',
+                parameters: bodyParameters,
+              },
+            ],
+          }
+        : {}),
+    },
+  };
+
+  console.log('[whatsapp] outbound template payload:', JSON.stringify(payload));
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const raw = await response.text();
+  console.log(`[whatsapp] template response status=${response.status} body=${raw || '<empty>'}`);
   let parsed;
   try {
     parsed = raw ? JSON.parse(raw) : {};
@@ -700,13 +782,26 @@ function handleRequest(req, res) {
         const body = await readJsonBody(req, MAX_BODY_BYTES);
         const to = String(body.to || '').trim();
         const message = String(body.message || '').trim();
+        const templateName = String(body.templateName || '').trim();
+        const language = String(body.language || 'ar').trim() || 'ar';
+        const parameters = Array.isArray(body.parameters) ? body.parameters : [];
 
-        if (!to || !message) {
-          sendJson(req, res, 400, {error: 'Both "to" and "message" are required'});
+        console.log('[send-message] incoming payload:', JSON.stringify({
+          to,
+          hasMessage: message.length > 0,
+          templateName,
+          language,
+          parametersCount: parameters.length,
+        }));
+
+        if (!to) {
+          sendJson(req, res, 400, {error: '"to" is required'});
           return;
         }
 
-        const apiResult = await sendWhatsAppText(to, message);
+        const apiResult = templateName
+          ? await sendWhatsAppTemplate(to, templateName, language, parameters)
+          : await sendWhatsAppText(to, message);
         const messageId = apiResult?.messages?.[0]?.id || apiResult?.message_id || '';
 
         sendJson(req, res, 200, {
@@ -753,13 +848,26 @@ function handleRequest(req, res) {
         const body = await readJsonBody(req, MAX_BODY_BYTES);
         const to = String(body.to || '').trim();
         const message = String(body.message || '').trim();
+        const templateName = String(body.templateName || '').trim();
+        const language = String(body.language || 'ar').trim() || 'ar';
+        const parameters = Array.isArray(body.parameters) ? body.parameters : [];
 
-        if (!to || !message) {
-          sendJson(req, res, 400, {error: 'Both "to" and "message" are required'});
+        console.log('[whatsapp/send] incoming payload:', JSON.stringify({
+          to,
+          hasMessage: message.length > 0,
+          templateName,
+          language,
+          parametersCount: parameters.length,
+        }));
+
+        if (!to) {
+          sendJson(req, res, 400, {error: '"to" is required'});
           return;
         }
 
-        const apiResult = await sendWhatsAppText(to, message);
+        const apiResult = templateName
+          ? await sendWhatsAppTemplate(to, templateName, language, parameters)
+          : await sendWhatsAppText(to, message);
         sendJson(req, res, 200, apiResult);
       } catch (error) {
         const status = Number(error?.statusCode) || 500;

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -152,7 +153,27 @@ class RenderWhatsAppService {
     defaultValue: '',
   );
   static const String _legacyEmbeddedApiKey = String.fromEnvironment(
-    'PROXY_TOKEN',
+  'PROXY_TOKEN',
+    defaultValue: '',
+  );
+  static const String _metaApiBaseUrl = String.fromEnvironment(
+    'META_WHATSAPP_API_URL',
+    defaultValue: 'https://graph.facebook.com/v22.0',
+  );
+  static const String _metaPhoneNumberId = String.fromEnvironment(
+    'META_WHATSAPP_PHONE_NUMBER_ID',
+    defaultValue: '',
+  );
+  static const String _metaAccessToken = String.fromEnvironment(
+    'META_WHATSAPP_ACCESS_TOKEN',
+    defaultValue: '',
+  );
+  static const String _legacyMetaAccessToken = String.fromEnvironment(
+    'META_ACCESS_TOKEN',
+    defaultValue: '',
+  );
+  static const String _legacyMetaPhoneNumberId = String.fromEnvironment(
+    'WHATSAPP_PHONE_NUMBER_ID',
     defaultValue: '',
   );
   static const int _maxAttempts = 3;
@@ -162,28 +183,27 @@ class RenderWhatsAppService {
   }
 
   static String _withAgentPhoneFooter(String message) {
+    final agentLabel = AppStore.effectiveAgentName.trim();
     final officePhone = AppStore.officePhone.trim();
-    if (officePhone.isEmpty) return message;
+    final footerParts = <String>[];
+    if (agentLabel.isNotEmpty) footerParts.add(agentLabel);
+    if (officePhone.isNotEmpty) footerParts.add(officePhone);
+
+    if (footerParts.isEmpty) return message;
 
     final messageDigits = _digitsOnly(message);
     final officeDigits = _digitsOnly(officePhone);
     final normalizedOfficePhone = normalizePhone(officePhone);
-
     final alreadyContainsPhone =
         (officeDigits.isNotEmpty && messageDigits.contains(officeDigits)) ||
         (normalizedOfficePhone.isNotEmpty && messageDigits.contains(normalizedOfficePhone));
+    final alreadyContainsAgent = agentLabel.isNotEmpty && message.contains(agentLabel);
 
-    if (alreadyContainsPhone) return message;
+    if (alreadyContainsPhone && alreadyContainsAgent) return message;
 
-    final agentLabel = AppStore.officeName.trim().isNotEmpty
-        ? AppStore.officeName.trim()
-        : AppStore.agentName.trim();
-
-    if (agentLabel.isEmpty) {
-      return '$message\n($officePhone)';
-    }
-
-    return '$message\n🏢 $agentLabel ($officePhone)';
+    final footer = footerParts.join(' • ');
+    if (message.trim().isEmpty) return footer;
+    return '$message\n🏢 $footer';
   }
 
   static String _fmt(DateTime d) =>
@@ -226,7 +246,7 @@ class RenderWhatsAppService {
     final resolvedPackage = (packageName ?? s.packageDisplay).trim();
     final resolvedAmount = amount == null ? '' : amount.toStringAsFixed(0);
     final resolvedBalance = (balance ?? s.remaining).toStringAsFixed(0);
-    final resolvedAgent = (agentName ?? AppStore.agentName).trim();
+    final resolvedAgent = (agentName ?? AppStore.effectiveAgentName).trim();
 
     return {
       'name': s.name,
@@ -268,20 +288,141 @@ class RenderWhatsAppService {
     return out;
   }
 
+  static String _resolvePhoneNumberId() {
+    return _metaPhoneNumberId.trim().isNotEmpty
+        ? _metaPhoneNumberId.trim()
+        : _legacyMetaPhoneNumberId.trim();
+  }
+
+  static String _resolveAccessToken() {
+    return _metaAccessToken.trim().isNotEmpty
+        ? _metaAccessToken.trim()
+        : _legacyMetaAccessToken.trim();
+  }
+
+  static String _templateNameForType(WhatsAppNotificationType type) {
+    switch (type) {
+      case WhatsAppNotificationType.subscriptionRenewed:
+        return 'activated';
+      case WhatsAppNotificationType.subscriptionExpiresIn3Days:
+        return 'expiring';
+      case WhatsAppNotificationType.subscriptionExpired:
+        return 'expiring';
+      case WhatsAppNotificationType.debtAdded:
+        return 'debt_added';
+      case WhatsAppNotificationType.debtPaid:
+        return 'debt_paid';
+      case WhatsAppNotificationType.generalMessage:
+      case WhatsAppNotificationType.broadcast:
+        return 'activated';
+    }
+  }
+
+  static List<String> _bodyParametersForTemplate(
+    String templateName,
+    String message,
+    Map<String, String> variables,
+  ) {
+    switch (templateName) {
+      case 'activated':
+        return [
+          variables['name']?.trim() ?? '',
+          variables['package']?.trim() ?? '',
+          variables['endDate']?.trim() ?? '',
+        ];
+      case 'expiring':
+        return [
+          variables['name']?.trim() ?? '',
+          variables['endDate']?.trim() ?? '',
+        ];
+      case 'debt_paid':
+      case 'debt_added':
+        return [
+          variables['name']?.trim() ?? '',
+          variables['amount']?.trim() ?? '',
+          variables['date']?.trim() ?? '',
+        ];
+      default:
+        return [message.trim().isEmpty ? variables['message']?.trim() ?? '' : message.trim()];
+    }
+  }
+
+  static Map<String, dynamic> _buildMetaTemplatePayload({
+    required String to,
+    required String templateName,
+    required String message,
+    required Map<String, String> variables,
+  }) {
+    final params = _bodyParametersForTemplate(templateName, message, variables)
+        .where((value) => value.isNotEmpty)
+        .toList();
+
+    final components = <Map<String, dynamic>>[];
+    if (params.isNotEmpty) {
+      components.add({
+        'type': 'body',
+        'parameters': params
+            .map((value) => <String, dynamic>{'type': 'text', 'text': value})
+            .toList(),
+      });
+    }
+
+    return {
+      'messaging_product': 'whatsapp',
+      'to': to,
+      'type': 'template',
+      'template': {
+        'name': templateName,
+        'language': {'code': 'ar'},
+        if (components.isNotEmpty) 'components': components,
+      },
+    };
+  }
+
+  static List<String> _extractTemplateBodyTexts(Map<String, dynamic> payload) {
+    final template = payload['template'];
+    if (template is! Map) return const <String>[];
+    final components = template['components'];
+    if (components is! List) return const <String>[];
+
+    for (final component in components) {
+      if (component is! Map) continue;
+      if ((component['type'] ?? '').toString() != 'body') continue;
+      final parameters = component['parameters'];
+      if (parameters is! List) return const <String>[];
+      return parameters
+          .whereType<Map>()
+          .map((p) => (p['text'] ?? '').toString().trim())
+          .where((v) => v.isNotEmpty)
+          .toList();
+    }
+
+    return const <String>[];
+  }
+
   static Future<(String endpoint, String apiKey)> loadConfig() async {
-    final endpoint = _defaultSendEndpoint.trim().endsWith('/send-message')
-        ? _defaultSendEndpoint.trim()
-        : '${_defaultSendEndpoint.trim().replaceAll(RegExp(r'/+$'), '')}/send-message';
-    final token = _embeddedApiKey.trim().isNotEmpty
-        ? _embeddedApiKey.trim()
-        : _legacyEmbeddedApiKey.trim();
+    final phoneNumberId = _resolvePhoneNumberId();
+    if (phoneNumberId.isEmpty) {
+      final fallbackEndpoint = _defaultSendEndpoint.trim().endsWith('/send-message')
+          ? _defaultSendEndpoint.trim()
+          : '${_defaultSendEndpoint.trim().replaceAll(RegExp(r'/+$'), '')}/send-message';
+      final fallbackToken = _embeddedApiKey.trim().isNotEmpty
+          ? _embeddedApiKey.trim()
+          : _legacyEmbeddedApiKey.trim();
+      return (fallbackEndpoint, fallbackToken);
+    }
+
+    final baseUrl = _metaApiBaseUrl.trim().isNotEmpty
+        ? _metaApiBaseUrl.trim()
+        : 'https://graph.facebook.com/v22.0';
+    final endpoint = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/$phoneNumberId/messages';
+    final token = _resolveAccessToken();
     return (endpoint, token);
   }
 
   static Future<String> loadSendMessageEndpoint() async {
-    final endpoint = _defaultSendEndpoint.trim();
-    if (endpoint.endsWith('/send-message')) return endpoint;
-    return '${endpoint.replaceAll(RegExp(r'/+$'), '')}/send-message';
+    final config = await loadConfig();
+    return config.$1;
   }
 
   static String normalizePhone(String phone) {
@@ -360,6 +501,8 @@ class RenderWhatsAppService {
     required String eventType,
     String note = '',
     int maxAttempts = _maxAttempts,
+    String? templateName,
+    Map<String, dynamic>? payloadOverride,
   }) async {
     final normalizedPhone = normalizePhone(to);
     final cleanMessage = _withAgentPhoneFooter(message.trim());
@@ -376,22 +519,79 @@ class RenderWhatsAppService {
     final headers = <String, String>{
       'Content-Type': 'application/json',
     };
+    final usesMetaTemplate = endpoint.contains('graph.facebook.com') &&
+        _resolvePhoneNumberId().isNotEmpty &&
+        apiKey.isNotEmpty;
 
     if (apiKey.isNotEmpty) {
       headers['Authorization'] = 'Bearer $apiKey';
-      headers['x-api-key'] = apiKey;
-      headers['x-proxy-token'] = apiKey;
+      if (!usesMetaTemplate) {
+        headers['x-api-key'] = apiKey;
+        headers['x-proxy-token'] = apiKey;
+      }
     }
 
-    final payload = <String, dynamic>{
-      'to': normalizedPhone,
-      'message': cleanMessage,
-    };
+    if (endpoint.isEmpty) {
+      return const RenderSingleWhatsAppResult(
+        success: false,
+        error: 'Missing Meta WhatsApp configuration. Set META_WHATSAPP_PHONE_NUMBER_ID and META_WHATSAPP_ACCESS_TOKEN.',
+      );
+    }
+
+    final payload = usesMetaTemplate
+        ? (payloadOverride ?? <String, dynamic>{
+            'messaging_product': 'whatsapp',
+            'to': normalizedPhone,
+            'type': 'template',
+            'template': {
+              'name': templateName ?? 'activated',
+              'language': {'code': 'ar'},
+              'components': [
+                {
+                  'type': 'body',
+                  'parameters': [
+                    {'type': 'text', 'text': cleanMessage},
+                  ],
+                },
+              ],
+            },
+          })
+        : () {
+            if (payloadOverride != null) {
+              final templateMap = payloadOverride['template'];
+              final templateNameValue =
+                  templateMap is Map ? (templateMap['name'] ?? '').toString().trim() : '';
+              final languageCode = templateMap is Map
+                  ? ((templateMap['language'] is Map
+                          ? (templateMap['language'] as Map)['code']
+                          : null) ??
+                      'ar')
+                      .toString()
+                      .trim()
+                  : 'ar';
+              final params = _extractTemplateBodyTexts(payloadOverride);
+              if (templateNameValue.isNotEmpty) {
+                return <String, dynamic>{
+                  'to': normalizedPhone,
+                  'message': cleanMessage,
+                  'templateName': templateNameValue,
+                  'language': languageCode.isEmpty ? 'ar' : languageCode,
+                  'parameters': params,
+                };
+              }
+            }
+
+            return <String, dynamic>{
+              'to': normalizedPhone,
+              'message': cleanMessage,
+            };
+          }();
 
     RenderSingleWhatsAppResult? lastFailure;
 
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
+        debugPrint('Render WhatsApp request body:\n${const JsonEncoder.withIndent('  ').convert(payload)}');
         final response = await http
             .post(
               Uri.parse(endpoint),
@@ -410,6 +610,7 @@ class RenderWhatsAppService {
           } catch (_) {}
         }
 
+        debugPrint('Render WhatsApp response body:\n${response.body.isEmpty ? '<empty>' : response.body}');
         final successByStatus = response.statusCode >= 200 && response.statusCode < 300;
         final success = successByStatus && (data['success'] != false);
 
@@ -434,9 +635,16 @@ class RenderWhatsAppService {
           );
         }
 
+        final errorMessage = (data['error'] ?? 'HTTP ${response.statusCode}').toString();
+        if (data.isNotEmpty) {
+          debugPrint('Render WhatsApp Meta error JSON:\n${const JsonEncoder.withIndent('  ').convert(data)}');
+        } else {
+          debugPrint('Render WhatsApp Meta error body:\n${response.body}');
+        }
+
         lastFailure = RenderSingleWhatsAppResult(
           success: false,
-          error: (data['error'] ?? 'HTTP ${response.statusCode}').toString(),
+          error: errorMessage,
           details: data.isNotEmpty ? data : {'raw': response.body},
           statusCode: response.statusCode,
         );
@@ -500,11 +708,20 @@ class RenderWhatsAppService {
     );
 
     final rendered = applyTemplate(tmpl, vars).trim();
+    final templateName = _templateNameForType(type);
+    final payload = _buildMetaTemplatePayload(
+      to: phone,
+      templateName: templateName,
+      message: rendered,
+      variables: vars,
+    );
     return _sendCore(
       to: phone,
       message: rendered,
       eventType: type.eventType,
       note: type.eventType,
+      templateName: templateName,
+      payloadOverride: payload,
     );
   }
 

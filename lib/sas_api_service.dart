@@ -230,9 +230,7 @@ class SasSettings {
             ? '${emailKey}__${normalizedSasUser.toLowerCase()}'
             : normalizedSasUser.toLowerCase();
 
-        // المعرف الجديد: uid_sasUsername
-        final agentId = '${_uid}_$normalizedSasUser';
-        final agentRef = FirebaseDatabase.instance.ref('agents/$agentId');
+        final agentRef = FirebaseDatabase.instance.ref('agents/$_uid');
         final sasRef = agentRef.child('sas');
         await sasRef.set({
           'serverUrl': cleanedServerUrl,
@@ -246,26 +244,11 @@ class SasSettings {
           'emailKey': emailKey,
           'sasUsername': normalizedSasUser,
           'agentKey': agentKey,
-          'status': 'active',
-        }).timeout(const Duration(seconds: 5));
-
-        // اترك مؤشراً في مسار uid القديم حتى يتمكن تسجيل الدخول التالي من
-        // اكتشاف agentId المركب ثم تحميل الإعدادات والبيانات من المسار الصحيح.
-        await FirebaseDatabase.instance.ref('agents/$_uid/profile').update({
-          'email': emailKey,
-          'emailKey': emailKey,
-          'sasUsername': normalizedSasUser,
-          'agentKey': agentKey,
-          'currentAgentId': agentId,
+          'currentAgentId': _uid,
           'status': 'active',
         }).timeout(const Duration(seconds: 5));
         
-        // حذف بيانات SAS القديمة فقط بعد ترك المؤشر أعلاه.
-        try {
-          await FirebaseDatabase.instance.ref('agents/$_uid/sas').remove().timeout(const Duration(seconds: 3));
-        } catch (_) {}
-        
-        debugPrint('SAS settings saved to Firebase with agentId=$agentId');
+        debugPrint('SAS settings saved to Firebase for agent uid=$_uid');
       } catch (e) {
         debugPrint('Failed to save SAS to Firebase: $e');
       }
