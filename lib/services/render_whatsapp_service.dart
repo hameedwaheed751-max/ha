@@ -216,14 +216,12 @@ class RenderWhatsAppService {
         return map['extension'] ??
             'مرحباً {name}، تم تجديد اشتراكك بنجاح لدى {office} حتى {endDate}.';
       case WhatsAppNotificationType.subscriptionExpiresIn3Days:
-        return map['nearExpiry'] ??
-            'مرحباً {{الاسم المشترك}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📅 تاريخ انتهاء الاشتراك: {{تاريخ الانتهاء}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+        return map['nearExpiry'] ?? AppStore.nearExpiryTemplate;
       case WhatsAppNotificationType.subscriptionExpired:
         return map['expired'] ??
             'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.';
       case WhatsAppNotificationType.debtAdded:
-        return map['debt'] ??
-            'مرحباً {{الاسم المشترك}}،\n✅ يوجد دين مترتب بذمتكم جراء تفعيل الاشتراك.\n💰 يرجى تسديد: {{المبلغ}} دينار عراقي\n📅 لضمان استمرار الخدمة\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+        return AppStore.debtTemplate;
       case WhatsAppNotificationType.debtPaid:
         return map['debtPaid'] ??
             'مرحباً {{الاسم المشترك}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ المسدد: {{المبلغ}} دينار عراقي\n📅 تاريخ التسديد: {{التاريخ}}\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
@@ -276,8 +274,12 @@ class RenderWhatsAppService {
     // دعم القوالب العربية بصيغة {{...}} مع إبقاء الصيغة القديمة {key}.
     out = out
         .replaceAll('{{الاسم المشترك}}', variables['name'] ?? '')
+      .replaceAll('{{اسم المشترك}}', variables['name'] ?? '')
+      .replaceAll('{{الباقة}}', variables['package'] ?? '')
       .replaceAll('{{اسم الباقة}}', variables['package'] ?? '')
+      .replaceAll('{{تاريخ بداية الاشتراك}}', variables['startDate'] ?? '')
       .replaceAll('{{تاريخ البدء}}', variables['startDate'] ?? '')
+      .replaceAll('{{تاريخ انتهاء الاشتراك}}', variables['endDate'] ?? '')
         .replaceAll('{{تاريخ الانتهاء}}', variables['endDate'] ?? '')
       .replaceAll('{{مبلغ الاشتراك}}', variables['price'] ?? '')
       .replaceAll('{{المبلغ}}', variables['amount'] ?? '')
@@ -318,44 +320,152 @@ class RenderWhatsAppService {
     }
   }
 
-  static List<String> _bodyParametersForTemplate(
-    String templateName,
-    String message,
+  static List<String> _extractOrderedPlaceholders(String templateBody) {
+    final matches = RegExp(r'\{\{\s*([^{}]+?)\s*\}\}|\{\s*([a-zA-Z][^{}]*?)\s*\}')
+        .allMatches(templateBody);
+    final ordered = <String>[];
+    for (final match in matches) {
+      final placeholder = (match.group(1) ?? match.group(2) ?? '').trim();
+      if (placeholder.isNotEmpty) {
+        ordered.add(placeholder);
+      }
+    }
+    return ordered;
+  }
+
+  static String _normalizePlaceholderKey(String placeholder) {
+    return placeholder
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\p{L}\p{N}]', unicode: true), '');
+  }
+
+  static String _valueForPlaceholder(
+    String placeholder,
     Map<String, String> variables,
   ) {
-    switch (templateName) {
-      case 'activated':
-        return [
-          variables['name']?.trim() ?? '',
-          variables['package']?.trim() ?? '',
-          variables['endDate']?.trim() ?? '',
-        ];
-      case 'expiring':
-        return [
-          variables['name']?.trim() ?? '',
-          variables['endDate']?.trim() ?? '',
-        ];
-      case 'debt_paid':
-      case 'debt_added':
-        return [
-          variables['name']?.trim() ?? '',
-          variables['amount']?.trim() ?? '',
-          variables['date']?.trim() ?? '',
-        ];
-      default:
-        return [message.trim().isEmpty ? variables['message']?.trim() ?? '' : message.trim()];
+    final key = _normalizePlaceholderKey(placeholder);
+    const aliases = <String, List<String>>{
+      'name': <String>[
+        'name',
+        'customername',
+        'subscribername',
+        'الاسم',
+        'اسم',
+        'الاسمالمشترك',
+        'اسمالمشترك',
+        'اسم_المشترك',
+      ],
+      'package': <String>[
+        'package',
+        'packagename',
+        'الباقة',
+        'اسمالباقة',
+        'الباقه',
+      ],
+      'startDate': <String>[
+        'startdate',
+        'subscriptionstart',
+        'تاريخالبدء',
+        'تاريخالبدء',
+        'بدءالاشتراك',
+        'تاريخبدايةالاشتراك',
+      ],
+      'endDate': <String>[
+        'enddate',
+        'expirydate',
+        'subscriptionend',
+        'تاريخالانتهاء',
+        'تاريخالانتهاءالاشتراك',
+        'تاريخانتهاءالاشتراك',
+        'انتهاءالاشتراك',
+      ],
+      'price': <String>[
+        'price',
+        'subscriptionamount',
+        'مبلغالاشتراك',
+        'سعرالاشتراك',
+      ],
+      'paid': <String>[
+        'paid',
+        'الواصل',
+        'المبلغالواصل',
+      ],
+      'remaining': <String>[
+        'remaining',
+        'balance',
+        'المتبقي',
+        'المتبقى',
+        'المبلغالمتبقي',
+      ],
+      'amount': <String>[
+        'amount',
+        'debtamount',
+        'paymentamount',
+        'المبلغ',
+        'مبلغالدين',
+        'قيمةالدين',
+        'المبلغالمسدد',
+      ],
+      'date': <String>[
+        'date',
+        'paymentdate',
+        'today',
+        'التاريخ',
+        'تاريخالتسديد',
+        'تاريخالدفع',
+      ],
+      'agentName': <String>[
+        'agentname',
+        'office',
+        'officename',
+        'اسمالوكيل',
+        'اسممكتب',
+        'اسمالمكتب',
+        'اسممكتبالاشتراكات',
+      ],
+      'message': <String>[
+        'message',
+        'الرسالة',
+        'النص',
+      ],
+    };
+
+    for (final entry in aliases.entries) {
+      if (entry.value.contains(key)) {
+        return (variables[entry.key] ?? '').trim();
+      }
     }
+
+    return (variables[placeholder] ?? '').trim();
+  }
+
+  static List<String> _bodyParametersForTemplate(
+    String templateBody,
+    Map<String, String> variables,
+  ) {
+    final placeholders = _extractOrderedPlaceholders(templateBody);
+    if (placeholders.isEmpty) {
+      final fallbackMessage = (variables['message'] ?? '').trim();
+      return fallbackMessage.isEmpty ? const <String>[] : <String>[fallbackMessage];
+    }
+
+    return placeholders
+        .map((placeholder) => _valueForPlaceholder(placeholder, variables))
+        .toList();
   }
 
   static Map<String, dynamic> _buildMetaTemplatePayload({
     required String to,
     required String templateName,
-    required String message,
+    required String templateBody,
     required Map<String, String> variables,
   }) {
-    final params = _bodyParametersForTemplate(templateName, message, variables)
-        .where((value) => value.isNotEmpty)
-        .toList();
+    final params = _bodyParametersForTemplate(templateBody, variables);
+
+    debugPrint(
+      'Render WhatsApp template parameters for $templateName: ${jsonEncode(params)}',
+    );
 
     final components = <Map<String, dynamic>>[];
     if (params.isNotEmpty) {
@@ -400,6 +510,31 @@ class RenderWhatsAppService {
     return const <String>[];
   }
 
+  static bool _shouldRetryTemplateWithoutParams(Map<String, dynamic> responseBody) {
+    final encoded = jsonEncode(responseBody);
+    return encoded.contains('132000') &&
+        encoded.contains('expected number of params (0)');
+  }
+
+  static Map<String, dynamic> _withoutTemplateParams(Map<String, dynamic> payload) {
+    final updated = Map<String, dynamic>.from(payload);
+
+    if (updated.containsKey('parameters')) {
+      updated['parameters'] = <String>[];
+    }
+
+    final template = updated['template'];
+    if (template is Map) {
+      final updatedTemplate = Map<String, dynamic>.from(
+        Map<String, dynamic>.from(template.cast<Object?, Object?>()),
+      );
+      updatedTemplate.remove('components');
+      updated['template'] = updatedTemplate;
+    }
+
+    return updated;
+  }
+
   static Future<(String endpoint, String apiKey)> loadConfig() async {
     final phoneNumberId = _resolvePhoneNumberId();
     if (phoneNumberId.isEmpty) {
@@ -423,6 +558,12 @@ class RenderWhatsAppService {
   static Future<String> loadSendMessageEndpoint() async {
     final config = await loadConfig();
     return config.$1;
+  }
+
+  static String _buildProxySendMessageEndpoint() {
+    final endpoint = _defaultSendEndpoint.trim();
+    if (endpoint.endsWith('/send-message')) return endpoint;
+    return '${endpoint.replaceAll(RegExp(r'/+$'), '')}/send-message';
   }
 
   static String normalizePhone(String phone) {
@@ -503,6 +644,7 @@ class RenderWhatsAppService {
     int maxAttempts = _maxAttempts,
     String? templateName,
     Map<String, dynamic>? payloadOverride,
+    bool forcePlainText = false,
   }) async {
     final normalizedPhone = normalizePhone(to);
     final cleanMessage = _withAgentPhoneFooter(message.trim());
@@ -513,13 +655,16 @@ class RenderWhatsAppService {
       );
     }
 
-    final endpoint = await loadSendMessageEndpoint();
+    final endpoint = forcePlainText
+      ? _buildProxySendMessageEndpoint()
+      : await loadSendMessageEndpoint();
     final config = await loadConfig();
     final apiKey = config.$2;
     final headers = <String, String>{
       'Content-Type': 'application/json',
     };
-    final usesMetaTemplate = endpoint.contains('graph.facebook.com') &&
+    final usesMetaTemplate = !forcePlainText &&
+      endpoint.contains('graph.facebook.com') &&
         _resolvePhoneNumberId().isNotEmpty &&
         apiKey.isNotEmpty;
 
@@ -538,7 +683,12 @@ class RenderWhatsAppService {
       );
     }
 
-    final payload = usesMetaTemplate
+    final payload = (forcePlainText)
+      ? <String, dynamic>{
+        'to': normalizedPhone,
+        'message': cleanMessage,
+        }
+      : usesMetaTemplate
         ? (payloadOverride ?? <String, dynamic>{
             'messaging_product': 'whatsapp',
             'to': normalizedPhone,
@@ -588,15 +738,17 @@ class RenderWhatsAppService {
           }();
 
     RenderSingleWhatsAppResult? lastFailure;
+    var currentPayload = Map<String, dynamic>.from(payload);
+    var retriedWithoutParams = false;
 
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        debugPrint('Render WhatsApp request body:\n${const JsonEncoder.withIndent('  ').convert(payload)}');
+        debugPrint('Render WhatsApp request body:\n${const JsonEncoder.withIndent('  ').convert(currentPayload)}');
         final response = await http
             .post(
               Uri.parse(endpoint),
               headers: headers,
-              body: jsonEncode(payload),
+              body: jsonEncode(currentPayload),
             )
             .timeout(const Duration(seconds: 25));
 
@@ -621,7 +773,7 @@ class RenderWhatsAppService {
           ok: success,
           note: success ? (note.isEmpty ? 'Delivered' : note) : 'HTTP ${response.statusCode}',
           endpoint: endpoint,
-          requestBody: payload,
+          requestBody: currentPayload,
           responseBody: data.isNotEmpty ? data : {'raw': response.body},
           statusCode: response.statusCode,
         );
@@ -648,6 +800,17 @@ class RenderWhatsAppService {
           details: data.isNotEmpty ? data : {'raw': response.body},
           statusCode: response.statusCode,
         );
+
+        final shouldRetryWithoutParams =
+            !retriedWithoutParams && _shouldRetryTemplateWithoutParams(lastFailure.details ?? const <String, dynamic>{});
+        if (shouldRetryWithoutParams) {
+          retriedWithoutParams = true;
+          currentPayload = _withoutTemplateParams(currentPayload);
+          debugPrint(
+            'Render WhatsApp retrying template without parameters after 132000 mismatch.',
+          );
+          continue;
+        }
       } catch (e) {
         await _appendAttemptLog(
           eventType: eventType,
@@ -656,7 +819,7 @@ class RenderWhatsAppService {
           ok: false,
           note: 'Transport error',
           endpoint: endpoint,
-          requestBody: payload,
+          requestBody: currentPayload,
           responseBody: {'error': e.toString()},
         );
         lastFailure = RenderSingleWhatsAppResult(
@@ -712,7 +875,7 @@ class RenderWhatsAppService {
     final payload = _buildMetaTemplatePayload(
       to: phone,
       templateName: templateName,
-      message: rendered,
+      templateBody: tmpl,
       variables: vars,
     );
     return _sendCore(
@@ -792,12 +955,25 @@ class RenderWhatsAppService {
     Subscriber subscriber, {
     required String message,
     String? template,
-  }) {
-    return _notifyByType(
-      type: WhatsAppNotificationType.generalMessage,
-      subscriber: subscriber,
-      template: template,
-      message: message,
+  }) async {
+    final phone = normalizePhone(subscriber.phone);
+    if (phone.isEmpty) {
+      return const RenderSingleWhatsAppResult(
+        success: false,
+        error: 'Subscriber has no valid phone number',
+      );
+    }
+
+    final tmpl = (template ?? '{message}').trim();
+    final vars = _variablesForSubscriber(subscriber, message: message);
+    final rendered = applyTemplate(tmpl, vars).trim();
+
+    return _sendCore(
+      to: phone,
+      message: rendered,
+      eventType: WhatsAppNotificationType.generalMessage.eventType,
+      note: WhatsAppNotificationType.generalMessage.eventType,
+      forcePlainText: true,
     );
   }
 
@@ -816,6 +992,7 @@ class RenderWhatsAppService {
       message: applyTemplate(template, vars),
       eventType: eventType,
       note: 'custom-template',
+      forcePlainText: true,
     );
   }
 
@@ -827,6 +1004,7 @@ class RenderWhatsAppService {
       to: to,
       message: message,
       eventType: WhatsAppNotificationType.generalMessage.eventType,
+      forcePlainText: true,
     );
   }
 
@@ -839,10 +1017,14 @@ class RenderWhatsAppService {
     var sent = 0;
     var failed = 0;
     for (final s in subscribers) {
-      final result = await _notifyByType(
-        type: WhatsAppNotificationType.broadcast,
-        subscriber: s,
-        template: template,
+      final vars = _variablesForSubscriber(s);
+      final rendered = applyTemplate(template, vars).trim();
+      final result = await _sendCore(
+        to: s.phone,
+        message: rendered,
+        eventType: WhatsAppNotificationType.broadcast.eventType,
+        note: WhatsAppNotificationType.broadcast.eventType,
+        forcePlainText: true,
       );
       if (result.success) {
         sent += 1;
@@ -894,6 +1076,7 @@ class RenderWhatsAppService {
         message: row['message'] ?? '',
         eventType: eventType,
         note: note,
+        forcePlainText: true,
       );
       if (result.success) {
         sent += 1;

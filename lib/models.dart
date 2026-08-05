@@ -480,20 +480,14 @@ class AppStore {
   static const String subscribersRevisionKey = 'subscribersRevision';
   static const String dailyTaskEventsKey = 'dailyTaskEvents';
   static String? _loadedUid;
-  static const String _legacyNearExpiryTemplate =
-      'مرحباً {name}، نذكرك أن اشتراكك ينتهي بتاريخ {endDate}. يرجى التجديد.';
-    static const String _legacyActivationTemplate =
-      'مرحباً {name}، تم تفعيل اشتراكك لدى {office}. الباقة: {package} وتنتهي بتاريخ {endDate}.';
-      static const String _legacyDebtTemplate =
-        'مرحباً {name}، المبلغ المتبقي عليك هو {remaining}. يرجى التسديد، شكراً لكم.';
     static const String activationTemplate =
-      'مرحباً {{الاسم المشترك}}،\n✅ تم تفعيل اشتراك الإنترنت بنجاح.\n📦 الباقة: {{اسم الباقة}}\n📅 يبدأ الاشتراك: {{تاريخ البدء}}\n📅 ينتهي الاشتراك: {{تاريخ الانتهاء}}\nمبلغ الاشتراك:{{مبلغ الاشتراك}}\n{{الواصل}}\n{{المتبقي}}\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+      'مرحباً {{اسم المشترك}}،\n✅ تم تفعيل اشتراك الإنترنت بنجاح.\n📦 الباقة: {{الباقة}}\n📅 يبدأ الاشتراك: {{تاريخ بداية الاشتراك}}\n📅 ينتهي الاشتراك: {{تاريخ انتهاء الاشتراك}}\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
       static const String debtPaidTemplate =
         'مرحباً {{الاسم المشترك}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ المسدد: {{المبلغ}} دينار عراقي\n📅 تاريخ التسديد: {{التاريخ}}\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
         static const String debtTemplate =
-          'مرحباً {{الاسم المشترك}}،\n✅ يوجد دين مترتب بذمتكم جراء تفعيل الاشتراك.\n💰 يرجى تسديد: {{المبلغ}} دينار عراقي\n📅 لضمان استمرار الخدمة\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+          'مرحباً {{اسم المشترك}}،\n✅ يوجد دين مترتب بذمتكم جراء تفعيل الاشتراك.\n💰 يرجى تسديد: {{المتبقي}} دينار عراقي\n📅 لضمان استمرار الخدمة\nنشكر لكم التزامكم بالتسديد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
   static const String nearExpiryTemplate =
-      'مرحباً {{الاسم المشترك}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📅 تاريخ انتهاء الاشتراك: {{تاريخ الانتهاء}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+      'مرحباً {{اسم المشترك}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📅 تاريخ الانتهاء: {{تاريخ انتهاء الاشتراك}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
   static final List<Subscriber> subscribers = [];
   static final List<DailyTaskEvent> dailyTaskEvents = [];
   static String agentFirstName = '';
@@ -537,25 +531,17 @@ class AppStore {
   static StreamSubscription<DatabaseEvent>? realtimeListener;
 
   static void _migrateNearExpiryTemplate() {
-    final current = (messageTemplates['nearExpiry'] ?? '').trim();
-    if (current.isEmpty || current == _legacyNearExpiryTemplate) {
-      messageTemplates['nearExpiry'] = nearExpiryTemplate;
-    }
-
-    final currentActivation = (messageTemplates['activation'] ?? '').trim();
-    if (currentActivation.isEmpty || currentActivation == _legacyActivationTemplate) {
-      messageTemplates['activation'] = activationTemplate;
-    }
+    // Always normalize activation and near-expiry to the canonical wording.
+    messageTemplates['nearExpiry'] = nearExpiryTemplate;
+    messageTemplates['activation'] = activationTemplate;
 
     final currentDebtPaid = (messageTemplates['debtPaid'] ?? '').trim();
     if (currentDebtPaid.isEmpty) {
       messageTemplates['debtPaid'] = debtPaidTemplate;
     }
 
-    final currentDebt = (messageTemplates['debt'] ?? '').trim();
-    if (currentDebt.isEmpty || currentDebt == _legacyDebtTemplate) {
-      messageTemplates['debt'] = debtTemplate;
-    }
+    // Always normalize debt template to the canonical approved wording.
+    messageTemplates['debt'] = debtTemplate;
   }
 
   /// مسار Firebase الأساسي للوكيل: agents/{uid}
