@@ -14,5 +14,11 @@
   flutter config --enable-web
   flutter config --no-analytics
   flutter pub get
-  flutter build web --release
+
+  echo "Using SAS_PROXY_TOKEN from Netlify env: ${SAS_PROXY_TOKEN:+set}"
+  echo "Using SAS_WEB_PROXY_URL from Netlify env: ${SAS_WEB_PROXY_URL:+set}"
+
+  flutter build web --release \
+    --dart-define=SAS_PROXY_TOKEN="${SAS_PROXY_TOKEN}" \
+    --dart-define=SAS_WEB_PROXY_URL="${SAS_WEB_PROXY_URL}"
   """
