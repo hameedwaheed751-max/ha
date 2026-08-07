@@ -10,6 +10,18 @@ class SasSyncResult {
 }
 
 class SasSyncService {
+  static DateTime resolveStartDateForSync({
+    required Subscriber existing,
+    required DateTime remoteStartDate,
+  }) {
+    final markerValue = existing.sasData['local_activation_date'] ?? existing.sasData['activation_date'];
+    if (markerValue is String && markerValue.trim().isNotEmpty) {
+      final parsed = DateTime.tryParse(markerValue.trim());
+      if (parsed != null) return DateTime(parsed.year, parsed.month, parsed.day);
+    }
+    return DateTime(remoteStartDate.year, remoteStartDate.month, remoteStartDate.day);
+  }
+
   static Future<SasSyncResult> sync(SasApiService api) async {
     final response = await api.fetchUsers();
     final rows = api.extractUsers(response);
@@ -101,6 +113,11 @@ class SasSyncService {
             old.sasId != nextSasId;
 
         if (changed) {
+          final resolvedStartDate = resolveStartDateForSync(
+            existing: old,
+            remoteStartDate: mapped.startDate,
+          );
+
           old
             ..user = nextUser
             ..name = nextName
@@ -108,7 +125,7 @@ class SasSyncService {
             ..address = nextAddress
             ..ip = nextIp
             ..type = nextType
-            ..startDate = mapped.startDate
+            ..startDate = resolvedStartDate
             ..endDate = mapped.endDate
             ..active = mapped.active
             ..disabled = mapped.disabled

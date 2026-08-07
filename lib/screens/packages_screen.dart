@@ -9,6 +9,26 @@ class PackagesScreen extends StatefulWidget {
 }
 
 class _PackagesScreenState extends State<PackagesScreen> {
+  late final ValueNotifier<int> _refreshToken;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshToken = ValueNotifier<int>(0);
+  }
+
+  @override
+  void dispose() {
+    _refreshToken.dispose();
+    super.dispose();
+  }
+
+  void _refreshUi() {
+    if (!mounted) return;
+    _refreshToken.value += 1;
+    setState(() {});
+  }
+
   void edit([PackagePlan? package]) {
     final nameController = TextEditingController(text: package?.name ?? '');
     final priceController = TextEditingController(
@@ -69,7 +89,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
                 if (dialogContext.mounted) {
                   Navigator.pop(dialogContext);
                 }
-                setState(() {});
+                _refreshUi();
               },
               child: const Text('حفظ'),
             ),
@@ -92,43 +112,50 @@ class _PackagesScreenState extends State<PackagesScreen> {
           onPressed: () => edit(),
           child: const Icon(Icons.add),
         ),
-        body: AppStore.packages.isEmpty
-            ? const Center(
+        body: ValueListenableBuilder<int>(
+          valueListenable: _refreshToken,
+          builder: (context, _, __) {
+            final packages = AppStore.packages;
+            if (packages.isEmpty) {
+              return const Center(
                 child: Text('لا توجد باقات، اضغط + للإضافة'),
-              )
-            : ListView.builder(
-                padding: const EdgeInsets.all(12),
-                itemCount: AppStore.packages.length,
-                itemBuilder: (context, index) {
-                  final package = AppStore.packages[index];
-                  return Card(
-                    child: ListTile(
-                      leading: const CircleAvatar(
-                        child: Icon(Icons.inventory_2_outlined),
-                      ),
-                      title: Text(
-                        package.name,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text(
-                        'السعر: ${package.price.toStringAsFixed(0)}',
-                      ),
-                      onTap: () => edit(package),
-                      trailing: IconButton(
-                        icon: const Icon(
-                          Icons.delete_outline,
-                          color: Colors.red,
-                        ),
-                        onPressed: () async {
-                          AppStore.removePackage(package);
-                          await AppStore.save();
-                          if (mounted) setState(() {});
-                        },
-                      ),
+              );
+            }
+            return ListView.builder(
+              padding: const EdgeInsets.all(12),
+              itemCount: packages.length,
+              itemBuilder: (context, index) {
+                final package = packages[index];
+                return Card(
+                  child: ListTile(
+                    leading: const CircleAvatar(
+                      child: Icon(Icons.inventory_2_outlined),
                     ),
-                  );
-                },
-              ),
+                    title: Text(
+                      package.name,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text(
+                      'السعر: ${package.price.toStringAsFixed(0)}',
+                    ),
+                    onTap: () => edit(package),
+                    trailing: IconButton(
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        color: Colors.red,
+                      ),
+                      onPressed: () async {
+                        AppStore.removePackage(package);
+                        await AppStore.save();
+                        if (mounted) _refreshUi();
+                      },
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }

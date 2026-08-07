@@ -156,6 +156,14 @@ class Subscriber {
   bool get isActive => active && !disabled && !expired;
   bool get isOnline => sasOnline || _detectOnline(sasData);
 
+  void markActivationDate({DateTime? at}) {
+    final activationDay = DateTime(at?.year ?? DateTime.now().year, at?.month ?? DateTime.now().month, at?.day ?? DateTime.now().day);
+    startDate = activationDay;
+    final marker = activationDay.toIso8601String();
+    sasData['local_activation_date'] = marker;
+    sasData['activation_date'] = marker;
+  }
+
   void normalizeDebtFields() {
     if (!price.isFinite || price < 0) {
       price = 0;
@@ -546,6 +554,7 @@ extension PackagePlanListX on List<PackagePlan> {
 class AppStore {
   static const int dataVersion = 1;
   static const String subscribersRevisionKey = 'subscribersRevision';
+  static const String packagesRevisionKey = 'packagesRevision';
   static const String dailyTaskEventsKey = 'dailyTaskEvents';
   static const String subscriptionNodeKey = 'subscription';
   static String? _loadedUid;
@@ -632,6 +641,7 @@ class AppStore {
   static int nextReceiptNumber = 1;
   static DateTime? lastSasSync;
   static int subscribersRevision = 0;
+  static int packagesRevision = 0;
   static final List<PackagePlan> packages = [];
 
   static void addPackage(PackagePlan package) {
@@ -816,8 +826,14 @@ class AppStore {
 
       final packagesPayload = agentData['packages'];
       final packagesListPayload = agentData['packagesList'];
+      final allowBootstrap = subscribersRevision == 0 && subscribers.isEmpty;
       if (packagesPayload != null || packagesListPayload != null) {
-        packages.applyPayload(packagesListPayload ?? packagesPayload);
+        applyPackagesPayload(
+          packagesListPayload ?? packagesPayload,
+          fromRemote: true,
+          remoteRevision: remoteRevision,
+          allowBootstrap: allowBootstrap,
+        );
         await p.setString('packages', jsonEncode(_packagesListPayload()));
       } else {
         final localP = p.getString('packages');
@@ -979,6 +995,7 @@ class AppStore {
     balance = 0;
     nextReceiptNumber = 1;
     subscribersRevision = 0;
+    packagesRevision = 0;
     lastSasSync = null;
     sasUsername = '';
     subscriptionPlan = 'free';
@@ -1028,6 +1045,7 @@ class AppStore {
       'proxy_url',
       'render_proxy_url',
       'subscribersRevision',
+      'packagesRevision',
       'dailyTaskEvents',
       'subscriptionPlan',
       'subscriptionPlanLabel',
@@ -1074,6 +1092,7 @@ class AppStore {
     balance = p.getDouble('balance') ?? 0;
     nextReceiptNumber = p.getInt('nextReceiptNumber') ?? 1;
     subscribersRevision = p.getInt(subscribersRevisionKey) ?? 0;
+    packagesRevision = p.getInt(packagesRevisionKey) ?? 0;
     lastSasSync = DateTime.tryParse(p.getString('lastSasSync') ?? '');
     subscriptionPlan = p.getString('subscriptionPlan') ?? '';
     subscriptionPlanLabel = p.getString('subscriptionPlanLabel') ?? '';
@@ -1193,6 +1212,72 @@ class AppStore {
   static List<Map<String, dynamic>> _packagesListPayload() =>
       packages.map((e) => e.toJson()).toList();
 
+  static void applyPackagesPayload(
+    dynamic payload, {
+    bool fromRemote = false,
+    int remoteRevision = 0,
+    bool allowBootstrap = false,
+  }) {
+    if (fromRemote && !allowBootstrap && remoteRevision <= packagesRevision) {
+      return;
+    }
+
+    final parsed = <PackagePlan>[];
+
+    void addFromMap(Map<String, dynamic> map) {
+      final name = (map['name'] ?? '').toString().trim();
+      if (name.isEmpty) return;
+      parsed.add(
+        PackagePlan(
+          name: name,
+          price: (map['price'] ?? 0).toDouble(),
+        ),
+      );
+    }
+
+    if (payload is List) {
+      for (final item in payload) {
+        if (item is Map) {
+          addFromMap(Map<String, dynamic>.from(item));
+        } else if (item is String && item.trim().isNotEmpty) {
+          try {
+            final decoded = jsonDecode(item);
+            if (decoded is Map) {
+              addFromMap(Map<String, dynamic>.from(decoded));
+            }
+          } catch (_) {}
+        }
+      }
+    } else if (payload is Map) {
+      for (final entry in payload.entries) {
+        if (entry.value is Map) {
+          addFromMap(Map<String, dynamic>.from(entry.value as Map));
+        }
+      }
+    } else if (payload is String && payload.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(payload);
+        if (decoded is List || decoded is Map) {
+          applyPackagesPayload(
+            decoded,
+            fromRemote: fromRemote,
+            remoteRevision: remoteRevision,
+            allowBootstrap: allowBootstrap,
+          );
+        }
+      } catch (_) {}
+    }
+
+    if (parsed.isEmpty) {
+      packages.clear();
+      return;
+    }
+
+    packages
+      ..clear()
+      ..addAll(parsed);
+  }
+
   static Map<String, dynamic> _packagesMapPayload() {
     final map = <String, dynamic>{};
     for (var i = 0; i < packages.length; i++) {
@@ -1219,6 +1304,8 @@ class AppStore {
     await p.setDouble('balance', balance);
     await p.setInt('nextReceiptNumber', nextReceiptNumber);
     await p.setInt(subscribersRevisionKey, subscribersRevision);
+    packagesRevision = DateTime.now().millisecondsSinceEpoch;
+    await p.setInt(packagesRevisionKey, packagesRevision);
     if (lastSasSync != null) await p.setString('lastSasSync', lastSasSync!.toIso8601String());
     await p.setString('packages', jsonEncode(packages.map((e)=>e.toJson()).toList()));
     await p.setString('messageTemplates', jsonEncode(messageTemplates));
@@ -1327,10 +1414,12 @@ class AppStore {
             }
           }
           if (agentData['packages'] is Map) {
-            packages.clear();
-            for (final entry in (Map<String, dynamic>.from(agentData['packages'])).entries) {
-              if (entry.value is Map) packages.add(PackagePlan.fromJson(Map<String, dynamic>.from(entry.value)));
-            }
+            applyPackagesPayload(
+              agentData['packages'],
+              fromRemote: true,
+              remoteRevision: remoteRevision,
+              allowBootstrap: subscribersRevision == 0 && subscribers.isEmpty,
+            );
             await p.setString('packages', jsonEncode(packages.map((e)=>e.toJson()).toList()));
           }
           if (agentData['messageTemplates'] is Map) {

@@ -165,7 +165,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   DateTime _dayOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
   void _setStartDateAsActivationDay(Subscriber s, {DateTime? at}) {
-    s.startDate = _dayOnly(at ?? DateTime.now());
+    s.markActivationDate(at: at ?? DateTime.now());
   }
 
   String _parentText(Subscriber s) => _sasText(
