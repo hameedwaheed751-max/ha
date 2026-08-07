@@ -454,6 +454,8 @@ class SasApiService {
       if (effectiveProxyToken.isNotEmpty) {
         headers['X-Proxy-Token'] = effectiveProxyToken;
         headers['X-SAS-Proxy-Token'] = effectiveProxyToken;
+        headers['x-proxy-token'] = effectiveProxyToken;
+        headers['x-sas-proxy-token'] = effectiveProxyToken;
         headers['x-api-key'] = effectiveProxyToken;
       }
     }

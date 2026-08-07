@@ -178,6 +178,11 @@ class RenderWhatsAppService {
   );
   static const int _maxAttempts = 3;
 
+  static String _coalesce(String value, String fallback) {
+    final normalized = value.trim();
+    return normalized.isNotEmpty ? normalized : fallback;
+  }
+
   static String _digitsOnly(String value) {
     return value.replaceAll(RegExp(r'[^0-9]'), '');
   }
@@ -624,12 +629,10 @@ class RenderWhatsAppService {
   static Future<(String endpoint, String apiKey)> loadConfig() async {
     final phoneNumberId = _resolvePhoneNumberId();
     if (phoneNumberId.isEmpty) {
-      final fallbackEndpoint = _defaultSendEndpoint.trim().endsWith('/send-message')
-          ? _defaultSendEndpoint.trim()
-          : '${_defaultSendEndpoint.trim().replaceAll(RegExp(r'/+$'), '')}/send-message';
-      final fallbackToken = _embeddedApiKey.trim().isNotEmpty
-          ? _embeddedApiKey.trim()
-          : _legacyEmbeddedApiKey.trim();
+      final fallbackEndpoint = _coalesce(_defaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim().endsWith('/send-message')
+          ? _coalesce(_defaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim()
+          : '${_coalesce(_defaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim().replaceAll(RegExp(r'/+$'), '')}/send-message';
+      final fallbackToken = _coalesce(_embeddedApiKey, _legacyEmbeddedApiKey).trim();
       return (fallbackEndpoint, fallbackToken);
     }
 
@@ -647,7 +650,7 @@ class RenderWhatsAppService {
   }
 
   static String _buildProxySendMessageEndpoint() {
-    final endpoint = _defaultSendEndpoint.trim();
+    final endpoint = _coalesce(_defaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim();
     if (endpoint.endsWith('/send-message')) return endpoint;
     return '${endpoint.replaceAll(RegExp(r'/+$'), '')}/send-message';
   }
@@ -754,11 +757,13 @@ class RenderWhatsAppService {
         _resolvePhoneNumberId().isNotEmpty &&
         apiKey.isNotEmpty;
 
-    if (apiKey.isNotEmpty) {
-      headers['Authorization'] = 'Bearer $apiKey';
+    final resolvedApiKey = _coalesce(apiKey, '').trim();
+    if (resolvedApiKey.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $resolvedApiKey';
       if (!usesMetaTemplate) {
-        headers['x-api-key'] = apiKey;
-        headers['x-proxy-token'] = apiKey;
+        headers['x-api-key'] = resolvedApiKey;
+        headers['x-proxy-token'] = resolvedApiKey;
+        headers['x-sas-proxy-token'] = resolvedApiKey;
       }
     }
 
