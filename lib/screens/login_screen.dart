@@ -1,16 +1,40 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'dashboard_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
-import '../services/subscription_request_service.dart';
+import '../services/payment_request_service.dart';
+import '../services/user_role_service.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final bool forceExpiredMode;
+  final String expiredUid;
+  final String expiredEmail;
+  final String expiredName;
+  final String expiredPhone;
+  final String expiredRole;
+  final String expiredGovernorate;
+  final String expiredRegion;
+  final String expiredAddress;
+
+  const LoginScreen({
+    super.key,
+    this.forceExpiredMode = false,
+    this.expiredUid = '',
+    this.expiredEmail = '',
+    this.expiredName = '',
+    this.expiredPhone = '',
+    this.expiredRole = 'agent',
+    this.expiredGovernorate = '',
+    this.expiredRegion = '',
+    this.expiredAddress = '',
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -24,6 +48,10 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _rememberMe = false;
   bool _isLoading = false;
+  bool _isRenewActionBusy = false;
+  ExpiredAccountData? _expiredAccount;
+  Timer? _emailProbeDebounce;
+  bool _pendingScreenOpening = false;
 
   static const String _rememberMeKey = 'rememberMe';
   static const String _savedEmailKey = 'savedLoginEmail';
@@ -33,7 +61,46 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
+    _usernameController.addListener(_onEmailChanged);
+    if (widget.forceExpiredMode && widget.expiredUid.trim().isNotEmpty) {
+      _expiredAccount = ExpiredAccountData(
+        uid: widget.expiredUid.trim(),
+        email: widget.expiredEmail.trim().toLowerCase(),
+        name: widget.expiredName.trim(),
+        phone: widget.expiredPhone.trim(),
+        role: widget.expiredRole.trim().isEmpty ? 'agent' : widget.expiredRole.trim(),
+        governorate: widget.expiredGovernorate.trim(),
+        region: widget.expiredRegion.trim(),
+        address: widget.expiredAddress.trim(),
+      );
+      if (_expiredAccount!.email.isNotEmpty) {
+        _usernameController.text = _expiredAccount!.email;
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_expiredAccount != null) {
+          _openPendingRenewalIfExists(account: _expiredAccount!);
+        }
+      });
+    }
     _checkRememberMe();
+  }
+
+  void _onEmailChanged() {
+    final email = _usernameController.text.trim().toLowerCase();
+    if (_expiredAccount != null && email != _expiredAccount!.email) {
+      if (mounted) setState(() => _expiredAccount = null);
+    }
+    _emailProbeDebounce?.cancel();
+    if (email.isEmpty || !email.contains('@')) return;
+    _emailProbeDebounce = Timer(const Duration(milliseconds: 450), () async {
+      final info = await _findExpiredAccountByEmail(email);
+      if (!mounted) return;
+      final currentEmail = _usernameController.text.trim().toLowerCase();
+      if (currentEmail != email) return;
+      if (info != null) {
+        setState(() => _expiredAccount = info);
+      }
+    });
   }
 
   Future<void> _checkRememberMe() async {
@@ -59,11 +126,34 @@ class _LoginScreenState extends State<LoginScreen> {
     if (rememberMe && FirebaseAuth.instance.currentUser != null && mounted) {
       await _loadAgentData();
       if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const DashboardScreen()),
-      );
+      await _openHomeForCurrentUser();
+      return;
     }
+
+    if (preferredEmail.isNotEmpty && mounted) {
+      final account = await _findExpiredAccountByEmail(preferredEmail);
+      if (account != null && mounted) {
+        setState(() => _expiredAccount = account);
+        await _openPendingRenewalIfExists(account: account);
+      }
+    }
+  }
+
+  Future<void> _openHomeForCurrentUser() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final role = await UserRoleService.resolveRole(uid: uid);
+    AppStore.refreshSubscriptionStatus();
+    if (role == UserRoleService.agentRole && AppStore.subscriptionStatus == 'expired') {
+      await _enforceExpiredAccessForCurrentSession();
+      return;
+    }
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DashboardScreen(isAgentMode: role == UserRoleService.agentRole),
+      ),
+    );
   }
 
 /// تحميل بيانات الوكيل من Firebase وبدء المزامنة
@@ -94,89 +184,219 @@ Future<void> _loadAgentData() async {
   }
 }
 
-/// إنشاء عقدة وكيل جديدة في Firebase RTDB
-/// المعرف: uid (بدون sasUsername لأن المستخدم جديد)
-static Future<void> createAgentNode(
-  User user, {
-  String firstName = '',
-  String lastName = '',
-}) async {
-  final uid = user.uid;
-  try {
-    final ref = FirebaseDatabase.instance.ref('agents/$uid');
-    final snapshot = await ref.child('profile').get().timeout(const Duration(seconds: 5));
-    final normalizedEmail = (user.email ?? '').trim().toLowerCase();
-
-    // الحساب الجديد يجب أن يبدأ ببيانات تطبيق فارغة محلياً.
-    await AppStore.clearForAccountSwitch(clearStorage: true);
-
-    final p = await SharedPreferences.getInstance();
-    const keysToClear = <String>[
-      'officeName',
-      'officePhone',
-      'officeAddress',
-      'officeLogoBase64',
-      'receiptFooter',
-      'balance',
-      'nextReceiptNumber',
-      'lastSasSync',
-      'packages',
-      'messageTemplates',
-      'subscribers',
-      'subscribers_backup',
-      'sas_server_url',
-      'sas_manager_username',
-      'sas_manager_password',
-      'sas_manager_password_sec',
-      'sas_web_proxy_url',
-      'web_proxy_url',
-      'proxy_url',
-      'render_proxy_url',
-    ];
-    for (final key in keysToClear) {
-      await p.remove(key);
-    }
-    
-    await AppStore.initializeEmptyAgentNode(uid: uid);
-
-    if (!snapshot.exists) {
-      // الوكيل جديد: نُنشئ عقدة خاصة به تبدأ فارغة تماماً.
-      final profileName = [firstName.trim(), lastName.trim()].where((e) => e.isNotEmpty).join(' ').trim();
-      await ref.child('profile').update({
-        'email': normalizedEmail,
-        'name': profileName,
-        'firstName': firstName.trim(),
-        'lastName': lastName.trim(),
-        'admin': '',
-        'company': '',
-        'phone': '',
-        'sasUsername': '',
-        'emailKey': normalizedEmail,
-        'agentKey': normalizedEmail,
-        'currentAgentId': uid,
-        'createdAt': ServerValue.timestamp,
-        'status': 'pending_sas',
-      }).timeout(const Duration(seconds: 10));
-      await ref.child('sas').set({
-        'serverUrl': '',
-        'username': '',
-        'password': '',
-      }).timeout(const Duration(seconds: 10));
-
-      debugPrint('Agent node created for uid=$uid');
-    } else {
-      debugPrint('Agent node already exists for uid=$uid');
-    }
-  } catch (e) {
-    debugPrint('Agent node creation error: $e');
-  }
-}
-
   @override
   void dispose() {
+    _emailProbeDebounce?.cancel();
+    _usernameController.removeListener(_onEmailChanged);
     _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<ExpiredAccountData?> _findExpiredAccountByEmail(String email) async {
+    final normalized = email.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+
+    final snapshot = await FirebaseDatabase.instance.ref('agents').get();
+    final root = snapshot.value;
+    if (root is! Map) return null;
+
+    for (final entry in root.entries) {
+      if (entry.value is! Map) continue;
+      final node = Map<String, dynamic>.from(entry.value as Map);
+      final profile = node['profile'] is Map
+          ? Map<String, dynamic>.from(node['profile'] as Map)
+          : <String, dynamic>{};
+
+      final emailValue = (profile['email'] ?? '').toString().trim().toLowerCase();
+      if (emailValue != normalized) continue;
+
+      final subscription = node['subscription'] is Map
+          ? Map<String, dynamic>.from(node['subscription'] as Map)
+          : <String, dynamic>{};
+      final status = (subscription['status'] ?? '').toString().trim().toLowerCase();
+      final endDateRaw = (subscription['endDate'] ?? '').toString().trim();
+      final endDate = endDateRaw.isNotEmpty ? DateTime.tryParse(endDateRaw)?.toUtc() : null;
+      final now = DateTime.now().toUtc();
+      final isExpired = status == 'expired' || (endDate != null && !endDate.isAfter(now));
+      if (!isExpired) return null;
+
+      return ExpiredAccountData(
+        uid: entry.key.toString(),
+        email: emailValue,
+        name: (profile['name'] ?? '').toString().trim(),
+        phone: (profile['phone'] ?? '').toString().trim(),
+        role: (profile['role'] ?? 'agent').toString().trim(),
+        governorate: (profile['governorate'] ?? '').toString().trim(),
+        region: (profile['region'] ?? '').toString().trim(),
+        address: (profile['address'] ?? '').toString().trim(),
+      );
+    }
+    return null;
+  }
+
+  Future<void> _enforceExpiredAccessForCurrentSession() async {
+    final user = FirebaseAuth.instance.currentUser;
+    final fallbackEmail = _usernameController.text.trim().toLowerCase();
+    final expired = await _findExpiredAccountByEmail((user?.email ?? fallbackEmail).trim().toLowerCase());
+    await AppStore.clearForAccountSwitch(clearStorage: false);
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      _expiredAccount = expired;
+      if (_expiredAccount != null && _expiredAccount!.email.isNotEmpty) {
+        _usernameController.text = _expiredAccount!.email;
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('انتهى اشتراكك، يرجى تجديد الاشتراك.')),
+    );
+    if (_expiredAccount != null) {
+      await _openPendingRenewalIfExists(account: _expiredAccount!);
+    }
+  }
+
+  Future<void> _openPendingRenewalIfExists({required ExpiredAccountData account}) async {
+    if (!mounted || _pendingScreenOpening) return;
+    _pendingScreenOpening = true;
+    try {
+      final latest = await PaymentRequestService.findLatestRenewalRequestForAccount(
+        uid: account.uid,
+        email: account.email,
+      );
+      if (!mounted || latest == null || !latest.isPending) return;
+      _navigateToRenewalStatusScreen(
+        account: account,
+        successNotice: 'تم إرسال طلب تجديد الاشتراك بنجاح.\nيرجى انتظار موافقة الإدارة.',
+      );
+    } finally {
+      _pendingScreenOpening = false;
+    }
+  }
+
+  void _navigateToRenewalStatusScreen({
+    required ExpiredAccountData account,
+    String? successNotice,
+  }) {
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => RenewalRequestStatusScreen(
+          account: account,
+          successNotice: successNotice,
+        ),
+      ),
+      (route) => false,
+    );
+  }
+
+  Future<void> _submitRenewalRequest({
+    required ExpiredAccountData account,
+    required String selectedPlan,
+    required String transferNumber,
+    required XFile? receiptFile,
+  }) async {
+    final pending = await PaymentRequestService.findLatestRenewalRequestForAccount(
+      uid: account.uid,
+      email: account.email,
+    );
+    if (pending != null && pending.isPending) {
+      _navigateToRenewalStatusScreen(
+        account: account,
+        successNotice: 'طلب التجديد الحالي قيد المراجعة.\nيرجى انتظار موافقة الإدارة.',
+      );
+      return;
+    }
+
+    final requestId = await PaymentRequestService.createRequest(
+      uid: account.uid,
+      userType: account.role.isEmpty ? 'agent' : account.role,
+      phone: account.phone,
+      email: account.email,
+      agentName: account.name,
+      governorate: account.governorate,
+      region: account.region,
+      address: account.address,
+      selectedPlan: selectedPlan,
+      amount: PaymentPlanCatalog.amount(selectedPlan),
+      paymentMethod: 'Qi Card',
+      transferNumber: transferNumber,
+      password: '',
+      isRenewal: true,
+      renewalForUid: account.uid,
+    );
+
+    if (receiptFile != null) {
+      final receipt = receiptFile;
+      unawaited(() async {
+        try {
+          final imageUrl = await PaymentRequestService.uploadReceiptImage(
+            requestId: requestId,
+            file: receipt,
+          ).timeout(const Duration(seconds: 30));
+          await PaymentRequestService.markRequestAsPendingReview(
+            requestId: requestId,
+            patch: {'receiptImage': imageUrl ?? ''},
+          ).timeout(const Duration(seconds: 15));
+        } catch (e) {
+          debugPrint('Renewal receipt upload/update failed for request $requestId: $e');
+        }
+      }());
+    }
+
+    _navigateToRenewalStatusScreen(
+      account: account,
+      successNotice: 'تم إرسال طلب تجديد الاشتراك بنجاح.\nيرجى انتظار موافقة الإدارة.',
+    );
+  }
+
+  Future<void> _openRenewSubscriptionFlow() async {
+    final email = _usernameController.text.trim().toLowerCase();
+    var account = _expiredAccount;
+    if (account == null) {
+      account = await _findExpiredAccountByEmail(email);
+      if (account != null && mounted) {
+        setState(() => _expiredAccount = account);
+      }
+    }
+    if (account == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('هذا الحساب غير منتهي أو غير موجود.')),
+      );
+      return;
+    }
+
+    final pending = await PaymentRequestService.findLatestRenewalRequestForAccount(
+      uid: account.uid,
+      email: account.email,
+    );
+    if (pending != null && pending.isPending) {
+      _navigateToRenewalStatusScreen(
+        account: account,
+        successNotice: 'طلب التجديد الحالي قيد المراجعة.\nيرجى انتظار موافقة الإدارة.',
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SubscriptionPlansScreen(
+          renewalAccount: account,
+          onRenewSubmit: (plan, transferNumber, receiptFile) async {
+            await _submitRenewalRequest(
+              account: account!,
+              selectedPlan: plan,
+              transferNumber: transferNumber,
+              receiptFile: receiptFile,
+            );
+          },
+        ),
+      ),
+    );
   }
 
   Future<void> _submitLogin() async {
@@ -189,6 +409,20 @@ static Future<void> createAgentNode(
 try {
   final email = _usernameController.text.trim();
   final password = _passwordController.text;
+
+  final expired = await _findExpiredAccountByEmail(email);
+  if (expired != null) {
+    if (mounted) {
+      setState(() {
+        _expiredAccount = expired;
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('انتهى اشتراكك، يرجى تجديد الاشتراك.')),
+      );
+    }
+    return;
+  }
 
   await FirebaseAuth.instance.signInWithEmailAndPassword(
     email: email,
@@ -210,13 +444,7 @@ try {
   await _loadAgentData();
 
   if (!mounted) return;
-
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (context) => const DashboardScreen(),
-    ),
-  );
+  await _openHomeForCurrentUser();
 } on FirebaseAuthException catch (e) {
   if (!mounted) return;
 
@@ -407,44 +635,95 @@ try {
                               ],
                             ),
                             const SizedBox(height: 14),
-                            SizedBox(
-                              width: double.infinity,
-                              height: 56,
-                              child: FilledButton(
-                                onPressed: _isLoading ? null : _submitLogin,
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: const Color(0xFF2E7D32),
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
+                            if (_expiredAccount != null) ...[
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFEBEE),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: const Color(0xFFEF9A9A)),
+                                ),
+                                child: const Text(
+                                  'انتهى اشتراكك، يرجى تجديد الاشتراك.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: Color(0xFFC62828), fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                width: double.infinity,
+                                height: 56,
+                                child: FilledButton.icon(
+                                  onPressed: _isRenewActionBusy
+                                      ? null
+                                      : () async {
+                                          setState(() => _isRenewActionBusy = true);
+                                          try {
+                                            await _openRenewSubscriptionFlow();
+                                          } finally {
+                                            if (mounted) setState(() => _isRenewActionBusy = false);
+                                          }
+                                        },
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xFF1565C0),
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                  ),
+                                  icon: _isRenewActionBusy
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                        )
+                                      : const Icon(Icons.restart_alt),
+                                  label: Text(
+                                    _isRenewActionBusy ? 'يرجى الانتظار...' : 'تجديد الاشتراك',
+                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                                   ),
                                 ),
-                                child: _isLoading
-                                    ? const SizedBox(
-                                        width: 22,
-                                        height: 22,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2.5,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : const Text(
-                                        'دخول',
-                                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                                      ),
                               ),
-                            ),
+                            ] else
+                              SizedBox(
+                                width: double.infinity,
+                                height: 56,
+                                child: FilledButton(
+                                  onPressed: _isLoading ? null : _submitLogin,
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xFF2E7D32),
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                  ),
+                                  child: _isLoading
+                                      ? const SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.5,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Text(
+                                          'دخول',
+                                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                        ),
+                                ),
+                              ),
                             const SizedBox(height: 10),
 TextButton(
-  onPressed: () {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const RegisterScreen(),
-      ),
-    );
-  },
-  child: const Text('إنشاء حساب جديد'),
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const SubscriptionPlansScreen(),
+                                  ),
+                                );
+                              },
+                              child: const Text('الاشتراك وإنشاء الحساب'),
 ),
                           ],
                         ),
@@ -461,136 +740,49 @@ TextButton(
   }
 }
 class RegisterScreen extends StatefulWidget {
-  const RegisterScreen({super.key});
+  final String selectedPlan;
+  final String transferNumber;
+  final XFile? receiptFile;
+  const RegisterScreen({
+    super.key,
+    required this.selectedPlan,
+    required this.transferNumber,
+    this.receiptFile,
+  });
 
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final _firstNameController = TextEditingController();
-  final _lastNameController = TextEditingController();
+  final _fullNameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _governorateController = TextEditingController();
+  final _regionController = TextEditingController();
+  final _addressController = TextEditingController();
   bool _isLoading = false;
-  String _selectedPlan = 'trial';
+  late String _selectedPlan;
+  late String _transferNumber;
+  XFile? _receiptFile;
 
-  Future<void> _register() async {
-    if (_firstNameController.text.trim().isEmpty ||
-        _lastNameController.text.trim().isEmpty ||
-        _phoneController.text.trim().isEmpty ||
-        _emailController.text.trim().isEmpty ||
-        _passwordController.text.isEmpty ||
-        _confirmPasswordController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى ملء جميع الحقول')),
-      );
-      return;
-    }
-
-    if (_passwordController.text != _confirmPasswordController.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('كلمتا المرور غير متطابقتين')),
-      );
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-      );
-
-      await _LoginScreenState.createAgentNode(
-        cred.user!,
-        firstName: _firstNameController.text.trim(),
-        lastName: _lastNameController.text.trim(),
-      );
-
-      final now = DateTime.now();
-      final startDate = now.toIso8601String();
-      final endDate = SubscriptionRequestService.endDateForPlan(_selectedPlan, from: now).toIso8601String();
-
-      await FirebaseDatabase.instance
-          .ref('agents/${cred.user!.uid}/profile')
-          .update({
-            'phone': _phoneController.text.trim(),
-            'subscriptionPlan': _selectedPlan,
-            'subscriptionPlanLabel': _planLabel(_selectedPlan),
-            'subscriptionPrice': _planPrice(_selectedPlan),
-            'paymentMethod': 'master',
-            'subscriptionStartDate': startDate,
-            'subscriptionEndDate': endDate,
-            'subscriptionStatus': 'active',
-          }).timeout(const Duration(seconds: 10));
-
-      AppStore.agentFirstName = _firstNameController.text.trim();
-      AppStore.agentLastName = _lastNameController.text.trim();
-      AppStore.officePhone = _phoneController.text.trim();
-      AppStore.agentName = [
-        AppStore.agentFirstName,
-        AppStore.agentLastName,
-      ].where((e) => e.isNotEmpty).join(' ').trim();
-      AppStore.agentEmail = _emailController.text.trim().toLowerCase();
-      AppStore.subscriptionPlan = _selectedPlan;
-      AppStore.subscriptionPlanLabel = _planLabel(_selectedPlan);
-      AppStore.subscriptionPrice = _planPrice(_selectedPlan);
-      AppStore.paymentMethod = 'master';
-      AppStore.subscriptionStartedAt = now;
-      AppStore.subscriptionEndsAt = SubscriptionRequestService.endDateForPlan(_selectedPlan, from: now);
-      AppStore.subscriptionStatus = 'active';
-      await AppStore.save();
-
-      if (!mounted) return;
-
-      // تحميل بيانات الوكيل وإنشاء إعدادات افتراضية محلية
-      await AppStore.initializeEmptyAgentNode(uid: cred.user!.uid);
-      await AppStore.load().timeout(const Duration(seconds: 5));
-      AppStore.startRealtimeSync();
-
-      if (!mounted) return;
-
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const DashboardScreen(),
-        ),
-      );
-    } on FirebaseAuthException catch (e) {
-      String message = 'حدث خطأ أثناء إنشاء الحساب';
-
-      if (e.code == 'email-already-in-use') {
-        message = 'هذا البريد الإلكتروني مسجل مسبقاً';
-      } else if (e.code == 'weak-password') {
-        message = 'كلمة المرور ضعيفة';
-      } else if (e.code == 'invalid-email') {
-        message = 'صيغة البريد الإلكتروني غير صحيحة';
-      }
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
+  @override
+  void initState() {
+    super.initState();
+    _selectedPlan = PaymentPlanCatalog.normalize(widget.selectedPlan);
+    _transferNumber = widget.transferNumber;
+    _receiptFile = widget.receiptFile;
   }
 
-  Future<void> _submitPaidSubscriptionRequest({
-    required String transferNumber,
-    XFile? receiptFile,
-  }) async {
-    if (_firstNameController.text.trim().isEmpty ||
-        _lastNameController.text.trim().isEmpty ||
+  Future<void> _submitPaidSubscriptionRequest() async {
+    if (_fullNameController.text.trim().isEmpty ||
         _phoneController.text.trim().isEmpty ||
         _emailController.text.trim().isEmpty ||
+        _governorateController.text.trim().isEmpty ||
+        _regionController.text.trim().isEmpty ||
+        _addressController.text.trim().isEmpty ||
         _passwordController.text.isEmpty ||
         _confirmPasswordController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -609,31 +801,64 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final requestId = await SubscriptionRequestService.createRequest(
-        firstName: _firstNameController.text.trim(),
-        lastName: _lastNameController.text.trim(),
+      final requestId = await PaymentRequestService.createRequest(
+        uid: '',
+        userType: 'agent',
         phone: _phoneController.text.trim(),
         email: _emailController.text.trim().toLowerCase(),
+        agentName: _fullNameController.text.trim(),
+        governorate: _governorateController.text.trim(),
+        region: _regionController.text.trim(),
+        address: _addressController.text.trim(),
         selectedPlan: _selectedPlan,
-        amount: _planPrice(_selectedPlan),
+        amount: PaymentPlanCatalog.amount(_selectedPlan),
         paymentMethod: 'Qi Card',
-        transferNumber: transferNumber,
+        transferNumber: _transferNumber,
         password: _passwordController.text,
       );
 
-      if (receiptFile != null) {
-        final imageUrl = await SubscriptionRequestService.uploadReceiptImage(
-          requestId: requestId,
-          file: receiptFile,
-        );
-        await FirebaseDatabase.instance.ref('subscription_requests/$requestId').update({
-          'receiptImageUrl': imageUrl ?? '',
-        });
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      if (_receiptFile != null) {
+        final receipt = _receiptFile!;
+        unawaited(() async {
+          try {
+            final imageUrl = await PaymentRequestService.uploadReceiptImage(
+              requestId: requestId,
+              file: receipt,
+            ).timeout(const Duration(seconds: 30));
+            await PaymentRequestService.markRequestAsPendingReview(
+              requestId: requestId,
+              patch: {'receiptImage': imageUrl ?? ''},
+            ).timeout(const Duration(seconds: 15));
+          } catch (e) {
+            debugPrint('Receipt upload/update failed for request $requestId: $e');
+          }
+        }());
       }
 
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            content: const Text('تم إرسال طلب الاشتراك بنجاح، وهو الآن بانتظار موافقة الإدارة.'),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('موافق'),
+              ),
+            ],
+          ),
+        ),
+      );
+
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم إرسال طلب الاشتراك بنجاح وسيتم مراجعته من الإدارة')),
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (route) => false,
       );
     } catch (e) {
       if (!mounted) return;
@@ -641,123 +866,42 @@ class _RegisterScreenState extends State<RegisterScreen> {
         SnackBar(content: Text('فشل إرسال الطلب: $e')),
       );
     } finally {
-      if (mounted) {
+      if (mounted && _isLoading) {
         setState(() => _isLoading = false);
       }
     }
   }
 
-  Future<void> _openMasterAccountFlow() async {
-    if (_selectedPlan == 'trial') {
-      await _register();
-      return;
-    }
-
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MasterAccountScreen(
-          planLabel: _planLabel(_selectedPlan),
-          planPrice: _planPrice(_selectedPlan),
-          onContinue: ({required String transferNumber, XFile? receiptFile}) async {
-            await _submitPaidSubscriptionRequest(
-              transferNumber: transferNumber,
-              receiptFile: receiptFile,
-            );
-          },
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
-    _firstNameController.dispose();
-    _lastNameController.dispose();
+    _fullNameController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _governorateController.dispose();
+    _regionController.dispose();
+    _addressController.dispose();
     super.dispose();
   }
 
   String _planLabel(String value) {
-    switch (value) {
+    switch (value.trim()) {
       case 'trial':
+      case 'free_15_days':
         return 'تجريبي 15 يوم';
       case '3m':
+      case 'three_months':
         return '3 أشهر';
       case '6m':
+      case 'six_months':
         return '6 أشهر';
       case '1y':
+      case 'one_year':
         return 'سنة';
       default:
         return 'تجريبي 15 يوم';
     }
-  }
-
-  String _planPrice(String value) {
-    switch (value) {
-      case 'trial':
-        return 'مجاني';
-      case '3m':
-        return '40000';
-      case '6m':
-        return '50000';
-      case '1y':
-        return '70000';
-      default:
-        return 'مجاني';
-    }
-  }
-
-  Widget _planCard({required String value, required String title, required String subtitle, required String price, required bool selected}) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: () => setState(() => _selectedPlan = value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        padding: const EdgeInsets.all(14),
-        margin: const EdgeInsets.only(bottom: 10),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: selected ? colorScheme.primary : colorScheme.outlineVariant.withValues(alpha: 0.6)),
-          color: selected ? colorScheme.primaryContainer.withValues(alpha: 0.45) : colorScheme.surface,
-          boxShadow: selected
-              ? [BoxShadow(color: colorScheme.primary.withValues(alpha: 0.18), blurRadius: 10, offset: const Offset(0, 4))]
-              : null,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: selected ? colorScheme.primary : colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                selected ? Icons.check_circle : Icons.workspace_premium_outlined,
-                color: selected ? Colors.white : colorScheme.primary,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                  const SizedBox(height: 4),
-                  Text(subtitle, style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
-                  const SizedBox(height: 6),
-                  Text(price, style: TextStyle(color: colorScheme.primary, fontWeight: FontWeight.w800, fontSize: 13)),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
@@ -769,7 +913,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       child: Scaffold(
         backgroundColor: const Color(0xFFF7F9FC),
         appBar: AppBar(
-          title: const Text('إنشاء حساب جديد'),
+          title: const Text('إنشاء حساب الاشتراك'),
           centerTitle: true,
           elevation: 0,
           backgroundColor: Colors.transparent,
@@ -813,12 +957,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Text(
-                                  'إنشاء حساب وكيل جديد',
+                                  'إنشاء حساب الاشتراك',
                                   style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Colors.white),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'أدخل بياناتك الأساسية ثم اختر الباقة المناسبة لك.',
+                                  'بعد اختيار الباقة، أدخل بياناتك ثم أرسل طلب الاشتراك للمراجعة.',
                                   style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13),
                                 ),
                               ],
@@ -833,9 +977,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       icon: Icons.person_outline,
                       child: Column(
                         children: [
-                          _styledField(controller: _firstNameController, label: 'الاسم الأول', icon: Icons.person),
+                          _styledField(controller: _fullNameController, label: 'الاسم الكامل', icon: Icons.person),
                           const SizedBox(height: 12),
-                          _styledField(controller: _lastNameController, label: 'الاسم الثاني', icon: Icons.person_2_outlined),
+                          _styledField(controller: _governorateController, label: 'المحافظة', icon: Icons.location_city_outlined),
+                          const SizedBox(height: 12),
+                          _styledField(controller: _regionController, label: 'المنطقة', icon: Icons.map_outlined),
+                          const SizedBox(height: 12),
+                          _styledField(controller: _addressController, label: 'العنوان', icon: Icons.home_outlined),
                           const SizedBox(height: 12),
                           _styledField(
                             controller: _phoneController,
@@ -858,19 +1006,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    _sectionCard(
-                      title: 'الباقات المتاحة',
-                      icon: Icons.workspace_premium_rounded,
-                      child: Column(
-                        children: [
-                          _planCard(value: 'trial', title: 'الاشتراك التجريبي', subtitle: '15 يوم مجاناً', price: 'مجاني', selected: _selectedPlan == 'trial'),
-                          _planCard(value: '3m', title: 'اشتراك 3 أشهر', subtitle: 'صلاحية 3 أشهر', price: '40,000 دينار', selected: _selectedPlan == '3m'),
-                          _planCard(value: '6m', title: 'اشتراك 6 أشهر', subtitle: 'صلاحية 6 أشهر', price: '50,000 دينار', selected: _selectedPlan == '6m'),
-                          _planCard(value: '1y', title: 'اشتراك سنة', subtitle: 'صلاحية سنة كاملة', price: '70,000 دينار', selected: _selectedPlan == '1y'),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(12),
@@ -885,26 +1020,36 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'الدفع عن طريق الماستر عند اختيار الباقة المناسبة.',
+                              'الباقة المختارة: ${_planLabel(_selectedPlan)}',
                               style: TextStyle(color: colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600),
                             ),
                           ),
                         ],
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(builder: (_) => const SubscriptionPlansScreen()),
+                        );
+                      },
+                      child: const Text('تغيير الباقة'),
+                    ),
                     const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,
                       height: 56,
                       child: FilledButton.icon(
-                        onPressed: _isLoading ? null : _openMasterAccountFlow,
+                        onPressed: _isLoading ? null : _submitPaidSubscriptionRequest,
                         icon: _isLoading
                             ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white))
-                            : Icon(_selectedPlan == 'trial' ? Icons.app_registration_rounded : Icons.account_balance_wallet_outlined),
+                            : const Icon(Icons.send_outlined),
                         label: Text(
                           _isLoading
-                              ? 'جاري الإنشاء...'
-                              : (_selectedPlan == 'trial' ? 'إنشاء الحساب' : 'فتح حساب الماستر'),
+                              ? 'جاري الإرسال...'
+                              : 'إرسال طلب الاشتراك',
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                         ),
                         style: FilledButton.styleFrom(
@@ -990,6 +1135,437 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 }
 
+class ExpiredAccountData {
+  ExpiredAccountData({
+    required this.uid,
+    required this.email,
+    required this.name,
+    required this.phone,
+    required this.role,
+    required this.governorate,
+    required this.region,
+    required this.address,
+  });
+
+  final String uid;
+  final String email;
+  final String name;
+  final String phone;
+  final String role;
+  final String governorate;
+  final String region;
+  final String address;
+}
+
+class RenewalRequestStatusScreen extends StatefulWidget {
+  const RenewalRequestStatusScreen({
+    super.key,
+    required this.account,
+    this.successNotice,
+  });
+
+  final ExpiredAccountData account;
+  final String? successNotice;
+
+  @override
+  State<RenewalRequestStatusScreen> createState() => _RenewalRequestStatusScreenState();
+}
+
+class _RenewalRequestStatusScreenState extends State<RenewalRequestStatusScreen> {
+  bool _navigatedAfterApproval = false;
+  bool _isSubmittingNew = false;
+
+  Future<void> _submitNewRenewalRequest({
+    required String selectedPlan,
+    required String transferNumber,
+    required XFile? receiptFile,
+  }) async {
+    final pending = await PaymentRequestService.findLatestRenewalRequestForAccount(
+      uid: widget.account.uid,
+      email: widget.account.email,
+    );
+    if (pending != null && pending.isPending) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('يوجد طلب تجديد قيد المراجعة بالفعل.')),
+      );
+      return;
+    }
+
+    final requestId = await PaymentRequestService.createRequest(
+      uid: widget.account.uid,
+      userType: widget.account.role.isEmpty ? 'agent' : widget.account.role,
+      phone: widget.account.phone,
+      email: widget.account.email,
+      agentName: widget.account.name,
+      governorate: widget.account.governorate,
+      region: widget.account.region,
+      address: widget.account.address,
+      selectedPlan: selectedPlan,
+      amount: PaymentPlanCatalog.amount(selectedPlan),
+      paymentMethod: 'Qi Card',
+      transferNumber: transferNumber,
+      password: '',
+      isRenewal: true,
+      renewalForUid: widget.account.uid,
+    );
+
+    if (receiptFile != null) {
+      final receipt = receiptFile;
+      unawaited(() async {
+        try {
+          final imageUrl = await PaymentRequestService.uploadReceiptImage(
+            requestId: requestId,
+            file: receipt,
+          ).timeout(const Duration(seconds: 30));
+          await PaymentRequestService.markRequestAsPendingReview(
+            requestId: requestId,
+            patch: {'receiptImage': imageUrl ?? ''},
+          ).timeout(const Duration(seconds: 15));
+        } catch (e) {
+          debugPrint('Renewal receipt upload/update failed for request $requestId: $e');
+        }
+      }());
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('تم إرسال طلب تجديد الاشتراك بنجاح. يرجى انتظار موافقة الإدارة.')),
+    );
+    setState(() {});
+  }
+
+  void _openNewRenewalFlow() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SubscriptionPlansScreen(
+          renewalAccount: widget.account,
+          onRenewSubmit: (plan, transferNumber, receiptFile) async {
+            await _submitNewRenewalRequest(
+              selectedPlan: plan,
+              transferNumber: transferNumber,
+              receiptFile: receiptFile,
+            );
+            if (mounted) {
+              Navigator.of(context).pop();
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  void _handleApprovedOnce() {
+    if (_navigatedAfterApproval || !mounted) return;
+    _navigatedAfterApproval = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تمت الموافقة على تجديد اشتراكك. يمكنك تسجيل الدخول الآن.')),
+      );
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (route) => false,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('حالة طلب التجديد'),
+          centerTitle: true,
+        ),
+        body: StreamBuilder<RenewalRequestState?>(
+          stream: PaymentRequestService.watchLatestRenewalRequestForAccount(
+            uid: widget.account.uid,
+            email: widget.account.email,
+          ),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final state = snapshot.data;
+            final isPending = state?.isPending ?? false;
+            final isRejected = state?.isRejected ?? false;
+            final rejectedReason = (state?.rejectionReason ?? '').trim();
+            if (state?.isApproved == true) {
+              _handleApprovedOnce();
+            }
+
+            return Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: Card(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Icon(
+                            isPending ? Icons.hourglass_top_rounded : (isRejected ? Icons.cancel_rounded : Icons.info_outline),
+                            size: 58,
+                            color: isPending ? const Color(0xFF1565C0) : (isRejected ? const Color(0xFFC62828) : colorScheme.primary),
+                          ),
+                          const SizedBox(height: 14),
+                          Text(
+                            isPending
+                                ? 'تم إرسال طلب تجديد الاشتراك بنجاح.'
+                                : (isRejected ? 'تم رفض طلب التجديد.' : 'لا يوجد طلب تجديد قيد المراجعة حالياً.'),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            isPending
+                                ? 'يرجى انتظار موافقة الإدارة.'
+                                : (isRejected
+                                    ? (rejectedReason.isEmpty ? 'يمكنك إرسال طلب جديد.' : 'سبب الرفض: $rejectedReason')
+                                    : 'يمكنك إرسال طلب تجديد جديد.'),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 14, color: Colors.black87),
+                          ),
+                          if (widget.successNotice != null && widget.successNotice!.trim().isNotEmpty && isPending) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE8F5E9),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFA5D6A7)),
+                              ),
+                              child: Text(
+                                widget.successNotice!,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF2E7D32)),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 18),
+                          FilledButton.icon(
+                            onPressed: isPending || _isSubmittingNew
+                                ? null
+                                : () async {
+                                    setState(() => _isSubmittingNew = true);
+                                    try {
+                                      _openNewRenewalFlow();
+                                    } finally {
+                                      if (mounted) setState(() => _isSubmittingNew = false);
+                                    }
+                                  },
+                            icon: _isSubmittingNew
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  )
+                                : const Icon(Icons.restart_alt),
+                            label: Text(isPending ? 'بانتظار الموافقة' : 'إرسال طلب جديد'),
+                          ),
+                          const SizedBox(height: 8),
+                          OutlinedButton(
+                            onPressed: () {
+                              Navigator.of(context).pushAndRemoveUntil(
+                                MaterialPageRoute(
+                                  builder: (_) => LoginScreen(
+                                    forceExpiredMode: true,
+                                    expiredUid: widget.account.uid,
+                                    expiredEmail: widget.account.email,
+                                    expiredName: widget.account.name,
+                                    expiredPhone: widget.account.phone,
+                                    expiredRole: widget.account.role,
+                                    expiredGovernorate: widget.account.governorate,
+                                    expiredRegion: widget.account.region,
+                                    expiredAddress: widget.account.address,
+                                  ),
+                                ),
+                                (route) => false,
+                              );
+                            },
+                            child: const Text('العودة إلى تسجيل الدخول'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class SubscriptionPlansScreen extends StatelessWidget {
+  final ExpiredAccountData? renewalAccount;
+  final Future<void> Function(String plan, String transferNumber, XFile? receiptFile)? onRenewSubmit;
+
+  const SubscriptionPlansScreen({
+    super.key,
+    this.renewalAccount,
+    this.onRenewSubmit,
+  });
+
+  String _planLabel(String value) {
+    switch (PaymentPlanCatalog.normalize(value)) {
+      case PaymentPlanCatalog.free15Days:
+        return 'مجاني 15 يوم';
+      case PaymentPlanCatalog.threeMonths:
+        return '3 أشهر';
+      case PaymentPlanCatalog.sixMonths:
+        return '6 أشهر';
+      case PaymentPlanCatalog.oneYear:
+        return 'سنة';
+      default:
+        return 'مجاني 15 يوم';
+    }
+  }
+
+  String _planPrice(String value) {
+    final amount = PaymentPlanCatalog.amount(value);
+    if (amount == 'مجاني') return amount;
+    return '$amount دينار';
+  }
+
+  void _openRegistration(BuildContext context, String plan) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MasterAccountScreen(
+          planLabel: _planLabel(plan),
+          planPrice: _planPrice(plan),
+          onContinue: ({required String transferNumber, XFile? receiptFile}) async {
+            if (renewalAccount != null && onRenewSubmit != null) {
+              await onRenewSubmit!(plan, transferNumber, receiptFile);
+              return;
+            }
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => RegisterScreen(
+                  selectedPlan: plan,
+                  transferNumber: transferNumber,
+                  receiptFile: receiptFile,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _planTile(BuildContext context, {required String plan, required String title, required String subtitle, required String price, required Color accent}) {
+    return InkWell(
+      onTap: () => _openRegistration(context, plan),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: accent.withValues(alpha: 0.25)),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(Icons.workspace_premium_outlined, color: accent),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 4),
+                  Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(price, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: accent)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF7F9FC),
+        appBar: AppBar(
+          title: const Text('الاشتراكات'),
+          centerTitle: true,
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          foregroundColor: colorScheme.onSurface,
+        ),
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(18),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 500),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(24),
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF1E88E5), Color(0xFF43A047)],
+                          begin: Alignment.topRight,
+                          end: Alignment.bottomLeft,
+                        ),
+                      ),
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('اختر الباقة المناسبة', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)),
+                          SizedBox(height: 4),
+                          Text('بعد اختيار الباقة تنتقل مباشرة إلى صفحة إنشاء الحساب.', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    _planTile(context, plan: PaymentPlanCatalog.free15Days, title: 'مجاني 15 يوم', subtitle: 'تجربة أولية', price: 'مجاني', accent: const Color(0xFF2E7D32)),
+                    _planTile(context, plan: PaymentPlanCatalog.threeMonths, title: '3 أشهر', subtitle: 'اشتراك مدفوع', price: '40,000 دينار', accent: const Color(0xFF1565C0)),
+                    _planTile(context, plan: PaymentPlanCatalog.sixMonths, title: '6 أشهر', subtitle: 'اشتراك مدفوع', price: '50,000 دينار', accent: const Color(0xFF00897B)),
+                    _planTile(context, plan: PaymentPlanCatalog.oneYear, title: 'سنة', subtitle: 'اشتراك مدفوع', price: '70,000 دينار', accent: const Color(0xFF8E24AA)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class MasterAccountScreen extends StatefulWidget {
   final String planLabel;
   final String planPrice;
@@ -1030,11 +1606,14 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يرجى إدخال رقم التحويل')));
       return;
     }
+    if (_receiptFile == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يرجى إرفاق صورة وصل الدفع')));
+      return;
+    }
 
     setState(() => _isSubmitting = true);
     try {
       await widget.onContinue(transferNumber: _transferController.text.trim(), receiptFile: _receiptFile);
-      if (mounted) Navigator.pop(context);
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -1099,7 +1678,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      'إدارة دفع الباقة من خلال حساب الماستر',
+                                      'إرسال بيانات الدفع لمراجعة الإدارة',
                                       style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 12),
                                     ),
                                   ],
@@ -1120,7 +1699,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'سيتم توجيهك لإكمال الاشتراك عبر حساب الماستر قبل إنشاء الحساب النهائي.',
+                                    'لن يتم إنشاء الحساب أو تفعيل الاشتراك إلا بعد موافقة المدير.',
                                     style: TextStyle(color: Colors.white.withValues(alpha: 0.94), fontSize: 12),
                                   ),
                                 ),
@@ -1168,7 +1747,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                                 const SizedBox(height: 4),
                                 Text('المبلغ المستحق: ${widget.planPrice}', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
                                 const SizedBox(height: 4),
-                                Text('الحالة: في انتظار تأكيد الدفع قبل إنشاء الحساب', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                                Text('الحالة: pending حتى موافقة المدير', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
                               ],
                             ),
                           ),
@@ -1185,7 +1764,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'لا يتم إنشاء الحساب قبل تأكيد الدفع عبر حساب الماستر.',
+                                    'سيتم إنشاء الحساب لأول مرة عند الموافقة فقط.',
                                     style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
                                   ),
                                 ),

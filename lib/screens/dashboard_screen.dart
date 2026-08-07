@@ -1,5 +1,6 @@
 // ignore_for_file: use_build_context_synchronously, unused_element, unused_local_variable, unnecessary_underscores
 
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -20,26 +21,95 @@ import 'sas_settings_screen.dart';
 import 'receipt_screen.dart';
 import 'quick_reports_screen.dart';
 import 'today_tasks_screen.dart';
+import 'payment_requests_admin_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'login_screen.dart';
 import 'subscription_requests_admin_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final bool isAgentMode;
+  const DashboardScreen({super.key, this.isAgentMode = false});
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingObserver {
   String? sasBalanceText;
   String? sasRewardPointsText;
   bool sasWalletLoading = false;
+  Timer? _subscriptionGuardTimer;
+  bool _handlingExpiredLockout = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSasWallet();
     AutoNotificationService.runDailyExpiryAutomation();
+    _startSubscriptionGuard();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _handleSubscriptionGuardTick();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _subscriptionGuardTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _handleSubscriptionGuardTick();
+    }
+  }
+
+  void _startSubscriptionGuard() {
+    if (!widget.isAgentMode) return;
+    _subscriptionGuardTimer?.cancel();
+    _subscriptionGuardTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _handleSubscriptionGuardTick();
+    });
+  }
+
+  Future<void> _handleSubscriptionGuardTick() async {
+    if (!mounted || !widget.isAgentMode || _handlingExpiredLockout) return;
+
+    AppStore.refreshSubscriptionStatus();
+    if (AppStore.subscriptionStatus != 'expired') return;
+
+    _handlingExpiredLockout = true;
+    final user = FirebaseAuth.instance.currentUser;
+    final expiredUid = user?.uid ?? '';
+    final expiredEmail = (user?.email ?? AppStore.agentEmail).trim().toLowerCase();
+    final expiredName = AppStore.agentName.trim();
+    final expiredPhone = AppStore.officePhone.trim();
+
+    try {
+      await AppStore.clearForAccountSwitch(clearStorage: false);
+      await FirebaseAuth.instance.signOut();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (_) => LoginScreen(
+            forceExpiredMode: true,
+            expiredUid: expiredUid,
+            expiredEmail: expiredEmail,
+            expiredName: expiredName,
+            expiredPhone: expiredPhone,
+            expiredRole: 'agent',
+          ),
+        ),
+        (route) => false,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('انتهى اشتراكك، تم تسجيل الخروج تلقائياً.')),
+      );
+    } finally {
+      _handlingExpiredLockout = false;
+    }
   }
 
   Future<void> _loadSasWallet() async {
@@ -166,6 +236,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final statusColor = isPlanActive ? Colors.green.shade700 : Colors.red.shade700;
     final planLabel = AppStore.subscriptionPlanLabel.isNotEmpty ? AppStore.subscriptionPlanLabel : 'لا توجد باقة';
     final statusText = isPlanActive ? 'نشط' : 'منتهي';
+    final endDateText = AppStore.subscriptionEndsAt != null
+        ? AppStore.subscriptionEndsAt!.toLocal().toString().split(' ').first
+        : '—';
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
@@ -182,6 +255,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Text('معلومات SAS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.grey.shade700)),
           const SizedBox(height: 4),
           Text(planLabel, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF29323A))),
+          const SizedBox(height: 2),
+          Text(
+            'تاريخ الانتهاء: $endDateText',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.grey.shade700),
+          ),
           const SizedBox(height: 2),
           Row(
             children: [
@@ -245,7 +323,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _subTile('المتصلين', () => open('active')),
                 ],
               ),
-              _drawerTile(icon: Icons.admin_panel_settings_rounded, title: 'مدراء', onTap: () => _coming('مدراء')),
+              if (!widget.isAgentMode)
+                _drawerTile(icon: Icons.admin_panel_settings_rounded, title: 'مدراء', onTap: () => _coming('مدراء')),
               ExpansionTile(
                 leading: const Icon(Icons.extension_rounded, color: Color(0xFFAAB5C8)),
                 iconColor: const Color(0xFFAAB5C8),
@@ -290,14 +369,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               _drawerTile(icon: Icons.cloud_sync_outlined, title: 'ربط SAS Radius', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const SasSettingsScreen())); }),
               _drawerTile(icon: Icons.notifications_active_outlined, title: 'التنبيهات ورسائل واتساب', onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (_) => const MessageTemplatesScreen())); }),
-              _drawerTile(
-                icon: Icons.assignment_turned_in_outlined,
-                title: 'طلبات الاشتراك',
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SubscriptionRequestsAdminScreen()));
-                },
-              ),
+              if (!widget.isAgentMode)
+                _drawerTile(
+                  icon: Icons.assignment_turned_in_outlined,
+                  title: 'طلبات الاشتراك',
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const SubscriptionRequestsAdminScreen()));
+                  },
+                ),
+              if (!widget.isAgentMode)
+                _drawerTile(
+                  icon: Icons.payments_outlined,
+                  title: 'طلبات الدفع',
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const PaymentRequestsAdminScreen()));
+                  },
+                ),
               _drawerTile(
                 icon: Icons.speed_outlined,
                 title: 'بيانات SAS المباشرة',

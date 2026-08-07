@@ -53,7 +53,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
 
                 final price = double.tryParse(priceController.text) ?? 0;
                 if (package == null) {
-                  AppStore.packages.add(
+                  AppStore.addPackage(
                     PackagePlan(
                       name: nameController.text.trim(),
                       price: price,
@@ -120,7 +120,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
                           color: Colors.red,
                         ),
                         onPressed: () async {
-                          AppStore.packages.remove(package);
+                          AppStore.removePackage(package);
                           await AppStore.save();
                           if (mounted) setState(() {});
                         },

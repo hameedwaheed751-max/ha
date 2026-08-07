@@ -648,7 +648,6 @@ class SasApiService {
     final payload = Map<String, dynamic>.from(currentData);
     final parts = fullName.trim().split(RegExp(r'\s+'));
     final firstName = parts.isEmpty ? fullName.trim() : parts.first;
-    final lastName = parts.length > 1 ? parts.sublist(1).join(' ') : '-';
 
     String readExistingValue(List<String> keys) {
       for (final key in keys) {

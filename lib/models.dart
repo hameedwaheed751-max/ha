@@ -171,6 +171,28 @@ class Subscriber {
     }
   }
 
+  static double resolveDebtTargetPaid({
+    required double price,
+    required double currentPaid,
+    required double partialAmount,
+    double? directTargetPaid,
+  }) {
+    final safePrice = price.isFinite ? price : 0;
+    final safeCurrentPaid = currentPaid.isFinite ? currentPaid : 0;
+    final safePartialAmount = partialAmount.isFinite ? partialAmount : 0;
+
+    if (directTargetPaid != null && directTargetPaid.isFinite) {
+      return directTargetPaid.clamp(0, safePrice).toDouble();
+    }
+
+    if (safePartialAmount <= 0) {
+      return safeCurrentPaid.clamp(0, safePrice).toDouble();
+    }
+
+    final tentative = safeCurrentPaid - safePartialAmount;
+    return tentative.clamp(0, safePrice).toDouble();
+  }
+
   void setDebtAmounts({
     required double subscriptionAmount,
     required double paidAmount,
@@ -262,21 +284,23 @@ class Subscriber {
     return '${date.year}-$m';
   }
 
-  void registerInvoiceFromPayment({
+  InvoiceRecord? registerInvoiceFromPayment({
     required int receiptNumber,
     required double amount,
     DateTime? at,
     String note = '',
   }) {
-    if (receiptNumber <= 0 || amount <= 0 || !amount.isFinite) return;
+    if (receiptNumber <= 0 || amount <= 0 || !amount.isFinite) return null;
     final stamp = at ?? DateTime.now();
-    invoices.add(InvoiceRecord(
+    final invoice = InvoiceRecord(
       receiptNumber: receiptNumber,
       amount: amount,
       at: stamp,
       monthKey: monthKeyOf(stamp),
       note: note,
-    ));
+    );
+    invoices.add(invoice);
+    return invoice;
   }
 
   Map<String, double> get monthlyPaidTotals {
@@ -475,19 +499,64 @@ class PackagePlan {
   factory PackagePlan.fromJson(Map<String,dynamic> j)=>PackagePlan(name:j['name']??'',price:(j['price']??0).toDouble());
 }
 
+extension PackagePlanListX on List<PackagePlan> {
+  void applyPayload(dynamic payload) {
+    final parsed = <PackagePlan>[];
+
+    void addFromMap(Map<String, dynamic> map) {
+      final name = (map['name'] ?? '').toString().trim();
+      if (name.isEmpty) return;
+      parsed.add(PackagePlan(
+        name: name,
+        price: (map['price'] ?? 0).toDouble(),
+      ));
+    }
+
+    if (payload is List) {
+      for (final item in payload) {
+        if (item is Map) {
+          addFromMap(Map<String, dynamic>.from(item));
+        } else if (item is String && item.trim().isNotEmpty) {
+          final decoded = jsonDecode(item);
+          if (decoded is Map) addFromMap(Map<String, dynamic>.from(decoded));
+        }
+      }
+    } else if (payload is Map) {
+      for (final entry in payload.entries) {
+        if (entry.value is Map) {
+          addFromMap(Map<String, dynamic>.from(entry.value as Map));
+        }
+      }
+    } else if (payload is String && payload.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(payload);
+        if (decoded is List || decoded is Map) {
+          applyPayload(decoded);
+        }
+      } catch (_) {}
+    }
+
+    if (parsed.isNotEmpty) {
+      clear();
+      addAll(parsed);
+    }
+  }
+}
+
 class AppStore {
   static const int dataVersion = 1;
   static const String subscribersRevisionKey = 'subscribersRevision';
   static const String dailyTaskEventsKey = 'dailyTaskEvents';
+  static const String subscriptionNodeKey = 'subscription';
   static String? _loadedUid;
     static const String activationTemplate =
-      'مرحباً {{اسم المشترك}}،\n✅ تم تفعيل اشتراك الإنترنت بنجاح.\n📦 الباقة: {{الباقة}}\n📅 يبدأ الاشتراك: {{تاريخ بداية الاشتراك}}\n📅 ينتهي الاشتراك: {{تاريخ انتهاء الاشتراك}}\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+      'مرحباً {{customer_name}}،\n✅ تم تفعيل اشتراك الإنترنت بنجاح.\n📦 الباقة: {{package_name}}\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المبلغ المتبقي: {{remaining_amount}} دينار عراقي\n📅 يبدأ الاشتراك: {{subscription_start}}\n📅 ينتهي الاشتراك: {{subscription_end}}\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
       static const String debtPaidTemplate =
-        'مرحباً {{الاسم المشترك}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ المسدد: {{المبلغ}} دينار عراقي\n📅 تاريخ التسديد: {{التاريخ}}\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+        'مرحباً {{customer_name}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المتبقي: {{remaining_amount}} دينار عراقي\n📅 تاريخ التسديد: {{payment_date}}\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
         static const String debtTemplate =
-          'مرحباً {{اسم المشترك}}،\n✅ يوجد دين مترتب بذمتكم جراء تفعيل الاشتراك.\n💰 يرجى تسديد: {{المتبقي}} دينار عراقي\n📅 لضمان استمرار الخدمة\nنشكر لكم التزامكم بالتسديد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+          'مرحبا {{customer_name}}\nتم تسجيل مبلغ دين جديد على حسابك\nالمبلغ: {{amount}} دينار عراقي\nالتاريخ: {{date}}\nللاستفسار يرجى التواصل مع :\n{{agent_name}}';
   static const String nearExpiryTemplate =
-      'مرحباً {{اسم المشترك}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📅 تاريخ الانتهاء: {{تاريخ انتهاء الاشتراك}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+      'مرحباً {{customer_name}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📦 الباقة: {{package_name}}\n📅 تاريخ الانتهاء: {{subscription_end_date}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
   static final List<Subscriber> subscribers = [];
   static final List<DailyTaskEvent> dailyTaskEvents = [];
   static String agentFirstName = '';
@@ -502,6 +571,47 @@ class AppStore {
     if (derived.isNotEmpty) return derived;
     return officeName.trim();
   }
+
+  static String subscriptionPlanLabelFor(String plan) {
+    switch (plan.trim()) {
+      case 'free_15_days':
+      case 'trial':
+        return 'مجاني 15 يوم';
+      case 'three_months':
+      case '3m':
+        return 'ثلاثة أشهر';
+      case 'six_months':
+      case '6m':
+        return 'ستة أشهر';
+      case 'one_year':
+      case '1y':
+        return 'سنة';
+      case 'free':
+      default:
+        return 'مجاني';
+    }
+  }
+
+  static int subscriptionDurationDaysFor(String plan) {
+    switch (plan.trim()) {
+      case 'free_15_days':
+      case 'trial':
+        return 15;
+      case 'three_months':
+      case '3m':
+        return 90;
+      case 'six_months':
+      case '6m':
+        return 183;
+      case 'one_year':
+      case '1y':
+        return 365;
+      case 'free':
+      default:
+        return 0;
+    }
+  }
+
   static String officeName = '';
   static String officePhone = '';
   static String officeAddress = '';
@@ -510,8 +620,11 @@ class AppStore {
   static String sasUsername = '';
   static String subscriptionPlan = '';
   static String subscriptionPlanLabel = '';
+  static int subscriptionDurationDays = 0;
   static String subscriptionPrice = '';
   static String paymentMethod = 'master';
+  static bool subscriptionAutoExpire = true;
+  static String subscriptionLastPaymentId = '';
   static DateTime? subscriptionStartedAt;
   static DateTime? subscriptionEndsAt;
   static String subscriptionStatus = 'inactive';
@@ -520,6 +633,21 @@ class AppStore {
   static DateTime? lastSasSync;
   static int subscribersRevision = 0;
   static final List<PackagePlan> packages = [];
+
+  static void addPackage(PackagePlan package) {
+    final normalizedName = package.name.trim();
+    if (normalizedName.isEmpty) return;
+    final existing = packages.indexWhere((item) => item.name.trim().toLowerCase() == normalizedName.toLowerCase());
+    if (existing >= 0) {
+      packages[existing].price = package.price;
+      return;
+    }
+    packages.add(PackagePlan(name: normalizedName, price: package.price));
+  }
+
+  static void removePackage(PackagePlan package) {
+    packages.removeWhere((item) => item.name.trim().toLowerCase() == package.name.trim().toLowerCase());
+  }
   static final Map<String,String> messageTemplates = {
     'activation':activationTemplate,
     'extension':'مرحباً {name}، تم تمديد اشتراكك لدى {office} حتى {endDate}.',
@@ -574,6 +702,15 @@ class AppStore {
         subscribersRevisionKey: 0,
       },
       'packages': <String, dynamic>{},
+      'subscription': <String, dynamic>{
+        'plan': 'free',
+        'status': 'inactive',
+        'durationDays': 0,
+        'startDate': null,
+        'endDate': null,
+        'autoExpire': true,
+        'lastPaymentId': null,
+      },
       'messageTemplates': <String, dynamic>{
         'activation': activationTemplate,
         'extension': 'مرحباً {name}، تم تمديد اشتراكك لدى {office} حتى {endDate}.',
@@ -677,15 +814,18 @@ class AppStore {
         }
       }
 
-      if (agentData['packages'] is Map) {
-        packages.clear();
-        for (final entry in (Map<String, dynamic>.from(agentData['packages'])).entries) {
-          if (entry.value is Map) packages.add(PackagePlan.fromJson(Map<String, dynamic>.from(entry.value)));
-        }
-        await p.setString('packages', jsonEncode(packages.map((e)=>e.toJson()).toList()));
+      final packagesPayload = agentData['packages'];
+      final packagesListPayload = agentData['packagesList'];
+      if (packagesPayload != null || packagesListPayload != null) {
+        packages.applyPayload(packagesListPayload ?? packagesPayload);
+        await p.setString('packages', jsonEncode(_packagesListPayload()));
       } else {
         final localP = p.getString('packages');
-        if (localP != null) { try { packages.addAll((jsonDecode(localP) as List).map((e)=>PackagePlan.fromJson(Map<String,dynamic>.from(e)))); } catch (_) {} }
+        if (localP != null) {
+          try {
+            packages.applyPayload(jsonDecode(localP));
+          } catch (_) {}
+        }
       }
 
       if (agentData['messageTemplates'] is Map) {
@@ -699,6 +839,45 @@ class AppStore {
         if (localMt != null) { try { messageTemplates.addAll(Map<String,String>.from(jsonDecode(localMt))); } catch (_) {} }
         _migrateNearExpiryTemplate();
         await p.setString('messageTemplates', jsonEncode(messageTemplates));
+      }
+
+      if (agentData['subscription'] is Map) {
+        final subscription = Map<String, dynamic>.from(agentData['subscription']);
+        _applySubscriptionMap(subscription);
+        await p.setString('subscriptionPlan', subscriptionPlan);
+        await p.setString('subscriptionPlanLabel', subscriptionPlanLabel);
+        await p.setInt('subscriptionDurationDays', subscriptionDurationDays);
+        await p.setString('subscriptionPrice', subscriptionPrice);
+        await p.setString('paymentMethod', paymentMethod);
+        await p.setBool('subscriptionAutoExpire', subscriptionAutoExpire);
+        await p.setString('subscriptionLastPaymentId', subscriptionLastPaymentId);
+        await p.setString('subscriptionStatus', subscriptionStatus);
+        if (subscriptionStartedAt != null) {
+          await p.setString('subscriptionStartedAt', subscriptionStartedAt!.toIso8601String());
+        }
+        if (subscriptionEndsAt != null) {
+          await p.setString('subscriptionEndsAt', subscriptionEndsAt!.toIso8601String());
+        }
+      } else {
+        final legacyPlan = p.getString('subscriptionPlan') ?? '';
+        final legacyStarted = p.getString('subscriptionStartedAt') ?? '';
+        final legacyEnded = p.getString('subscriptionEndsAt') ?? '';
+        if (legacyPlan.isNotEmpty) subscriptionPlan = legacyPlan;
+        subscriptionPlanLabel = p.getString('subscriptionPlanLabel') ?? subscriptionPlanLabel;
+        if (subscriptionPlan.isNotEmpty) {
+          subscriptionPlanLabel = subscriptionPlanLabelFor(subscriptionPlan);
+        }
+        subscriptionDurationDays = p.getInt('subscriptionDurationDays') ?? subscriptionDurationDays;
+        subscriptionPrice = p.getString('subscriptionPrice') ?? subscriptionPrice;
+        paymentMethod = p.getString('paymentMethod') ?? paymentMethod;
+        subscriptionAutoExpire = p.getBool('subscriptionAutoExpire') ?? subscriptionAutoExpire;
+        subscriptionLastPaymentId = p.getString('subscriptionLastPaymentId') ?? subscriptionLastPaymentId;
+        subscriptionStatus = p.getString('subscriptionStatus') ?? subscriptionStatus;
+        subscriptionStartedAt = _parseDateTime(legacyStarted) ?? subscriptionStartedAt;
+        subscriptionEndsAt = _parseDateTime(legacyEnded) ?? subscriptionEndsAt;
+        if (subscriptionPlan.isNotEmpty && subscriptionStartedAt != null && subscriptionEndsAt == null) {
+          subscriptionEndsAt = subscriptionStartedAt!.add(_subscriptionDurationForPlan(subscriptionPlan));
+        }
       }
 
       if (agentData['profile'] is Map) {
@@ -725,21 +904,6 @@ class AppStore {
         }
         if (profile['sasUsername'] != null) sasUsername = profile['sasUsername'].toString();
         if (profile['phone'] != null) officePhone = profile['phone'].toString().trim();
-        if (profile['subscriptionPlan'] != null) subscriptionPlan = profile['subscriptionPlan'].toString().trim();
-        if (profile['subscriptionPlanLabel'] != null) subscriptionPlanLabel = profile['subscriptionPlanLabel'].toString().trim();
-        if (profile['subscriptionPrice'] != null) subscriptionPrice = profile['subscriptionPrice'].toString().trim();
-        if (profile['paymentMethod'] != null) paymentMethod = profile['paymentMethod'].toString().trim();
-        final startRaw = profile['subscriptionStartDate'];
-        if (startRaw != null) {
-          subscriptionStartedAt = _parseDateTime(startRaw);
-        }
-        final endRaw = profile['subscriptionEndDate'];
-        if (endRaw != null) {
-          subscriptionEndsAt = _parseDateTime(endRaw);
-        }
-        if (subscriptionPlan.isNotEmpty && subscriptionStartedAt != null && subscriptionEndsAt == null) {
-          subscriptionEndsAt = subscriptionStartedAt!.add(_subscriptionDurationForPlan(subscriptionPlan));
-        }
         refreshSubscriptionStatus();
       }
 
@@ -817,10 +981,13 @@ class AppStore {
     subscribersRevision = 0;
     lastSasSync = null;
     sasUsername = '';
-    subscriptionPlan = '';
+    subscriptionPlan = 'free';
     subscriptionPlanLabel = '';
+    subscriptionDurationDays = 0;
     subscriptionPrice = '';
     paymentMethod = 'master';
+    subscriptionAutoExpire = true;
+    subscriptionLastPaymentId = '';
     subscriptionStartedAt = null;
     subscriptionEndsAt = null;
     subscriptionStatus = 'inactive';
@@ -840,6 +1007,16 @@ class AppStore {
       'lastSasSync',
       'packages',
       'messageTemplates',
+      'subscriptionPlan',
+      'subscriptionPlanLabel',
+      'subscriptionDurationDays',
+      'subscriptionPrice',
+      'paymentMethod',
+      'subscriptionAutoExpire',
+      'subscriptionLastPaymentId',
+      'subscriptionStatus',
+      'subscriptionStartedAt',
+      'subscriptionEndsAt',
       'subscribers',
       'subscribers_backup',
       'sas_server_url',
@@ -852,6 +1029,16 @@ class AppStore {
       'render_proxy_url',
       'subscribersRevision',
       'dailyTaskEvents',
+      'subscriptionPlan',
+      'subscriptionPlanLabel',
+      'subscriptionDurationDays',
+      'subscriptionPrice',
+      'paymentMethod',
+      'subscriptionAutoExpire',
+      'subscriptionLastPaymentId',
+      'subscriptionStatus',
+      'subscriptionStartedAt',
+      'subscriptionEndsAt',
       'agentFirstName',
       'agentLastName',
       'agentName',
@@ -888,6 +1075,16 @@ class AppStore {
     nextReceiptNumber = p.getInt('nextReceiptNumber') ?? 1;
     subscribersRevision = p.getInt(subscribersRevisionKey) ?? 0;
     lastSasSync = DateTime.tryParse(p.getString('lastSasSync') ?? '');
+    subscriptionPlan = p.getString('subscriptionPlan') ?? '';
+    subscriptionPlanLabel = p.getString('subscriptionPlanLabel') ?? '';
+    subscriptionDurationDays = p.getInt('subscriptionDurationDays') ?? 0;
+    subscriptionPrice = p.getString('subscriptionPrice') ?? '';
+    paymentMethod = p.getString('paymentMethod') ?? 'master';
+    subscriptionAutoExpire = p.getBool('subscriptionAutoExpire') ?? true;
+    subscriptionLastPaymentId = p.getString('subscriptionLastPaymentId') ?? '';
+    subscriptionStatus = p.getString('subscriptionStatus') ?? 'inactive';
+    subscriptionStartedAt = DateTime.tryParse(p.getString('subscriptionStartedAt') ?? '');
+    subscriptionEndsAt = DateTime.tryParse(p.getString('subscriptionEndsAt') ?? '');
     final eventsRaw = p.getString(dailyTaskEventsKey);
     dailyTaskEvents.clear();
     if (eventsRaw != null && eventsRaw.isNotEmpty) {
@@ -930,23 +1127,52 @@ class AppStore {
   }
 
   static Duration _subscriptionDurationForPlan(String plan) {
-    switch (plan) {
+    switch (plan.trim()) {
+      case 'free_15_days':
       case 'trial':
         return const Duration(days: 15);
+      case 'three_months':
       case '3m':
         return const Duration(days: 90);
+      case 'six_months':
       case '6m':
         return const Duration(days: 183);
+      case 'one_year':
       case '1y':
         return const Duration(days: 365);
       default:
-        return const Duration(days: 15);
+        return const Duration(days: 0);
     }
+  }
+
+  static Map<String, dynamic> _subscriptionMap() => {
+        'plan': subscriptionPlan.isNotEmpty ? subscriptionPlan : 'free',
+        'status': subscriptionStatus,
+        'durationDays': subscriptionDurationDays,
+        'startDate': subscriptionStartedAt?.toIso8601String(),
+        'endDate': subscriptionEndsAt?.toIso8601String(),
+        'autoExpire': subscriptionAutoExpire,
+        'lastPaymentId': subscriptionLastPaymentId,
+      };
+
+  static void _applySubscriptionMap(Map<String, dynamic> source) {
+    final planValue = (source['plan'] ?? '').toString().trim();
+    if (planValue.isNotEmpty) subscriptionPlan = planValue;
+    final statusValue = (source['status'] ?? '').toString().trim();
+    if (statusValue.isNotEmpty) subscriptionStatus = statusValue;
+    subscriptionDurationDays = int.tryParse((source['durationDays'] ?? 0).toString()) ?? subscriptionDurationDays;
+    subscriptionStartedAt = _parseDateTime(source['startDate']) ?? subscriptionStartedAt;
+    subscriptionEndsAt = _parseDateTime(source['endDate']) ?? subscriptionEndsAt;
+    if (source['autoExpire'] != null) {
+      subscriptionAutoExpire = source['autoExpire'] == true || source['autoExpire'].toString().toLowerCase() == 'true';
+    }
+    subscriptionLastPaymentId = (source['lastPaymentId'] ?? subscriptionLastPaymentId).toString();
+    subscriptionPlanLabel = subscriptionPlanLabelFor(subscriptionPlan);
   }
 
   static void refreshSubscriptionStatus({DateTime? now}) {
     final reference = now ?? DateTime.now();
-    if (subscriptionPlan.isEmpty) {
+    if (subscriptionPlan.isEmpty || subscriptionPlan == 'free') {
       subscriptionStatus = 'inactive';
       return;
     }
@@ -960,7 +1186,19 @@ class AppStore {
       }
     }
 
-    subscriptionStatus = reference.isAfter(subscriptionEndsAt!) ? 'expired' : 'active';
+    // Expire immediately when reaching the end instant (>= endDate).
+    subscriptionStatus = reference.isBefore(subscriptionEndsAt!) ? 'active' : 'expired';
+  }
+
+  static List<Map<String, dynamic>> _packagesListPayload() =>
+      packages.map((e) => e.toJson()).toList();
+
+  static Map<String, dynamic> _packagesMapPayload() {
+    final map = <String, dynamic>{};
+    for (var i = 0; i < packages.length; i++) {
+      map['pkg_$i'] = packages[i].toJson();
+    }
+    return map;
   }
 
   static Future<void> save() async {
@@ -984,6 +1222,16 @@ class AppStore {
     if (lastSasSync != null) await p.setString('lastSasSync', lastSasSync!.toIso8601String());
     await p.setString('packages', jsonEncode(packages.map((e)=>e.toJson()).toList()));
     await p.setString('messageTemplates', jsonEncode(messageTemplates));
+    await p.setString('subscriptionPlan', subscriptionPlan);
+    await p.setString('subscriptionPlanLabel', subscriptionPlanLabel);
+    await p.setInt('subscriptionDurationDays', subscriptionDurationDays);
+    await p.setString('subscriptionPrice', subscriptionPrice);
+    await p.setString('paymentMethod', paymentMethod);
+    await p.setBool('subscriptionAutoExpire', subscriptionAutoExpire);
+    await p.setString('subscriptionLastPaymentId', subscriptionLastPaymentId);
+    await p.setString('subscriptionStatus', subscriptionStatus);
+    if (subscriptionStartedAt != null) await p.setString('subscriptionStartedAt', subscriptionStartedAt!.toIso8601String());
+    if (subscriptionEndsAt != null) await p.setString('subscriptionEndsAt', subscriptionEndsAt!.toIso8601String());
     final encoded = jsonEncode(subscribers.map((e) => e.toJson()).toList());
     final previous = p.getString('subscribers');
     if (previous != null && previous.isNotEmpty) await p.setString('subscribers_backup', previous);
@@ -1007,21 +1255,14 @@ class AppStore {
         if (agentName.isNotEmpty) 'name': agentName,
         if (officePhone.trim().isNotEmpty) 'phone': officePhone.trim(),
         if (sasUsername.trim().isNotEmpty) 'sasUsername': sasUsername.trim(),
-        if (subscriptionPlan.isNotEmpty) 'subscriptionPlan': subscriptionPlan,
-        if (subscriptionPlanLabel.isNotEmpty) 'subscriptionPlanLabel': subscriptionPlanLabel,
-        if (subscriptionPrice.isNotEmpty) 'subscriptionPrice': subscriptionPrice,
-        'paymentMethod': paymentMethod,
-        'subscriptionStatus': subscriptionStatus,
-        'subscriptionStartDate': subscriptionStartedAt?.toIso8601String() ?? '',
-        'subscriptionEndDate': subscriptionEndsAt?.toIso8601String() ?? '',
         'status': sasUsername.trim().isNotEmpty ? 'active' : 'pending_sas',
         'updatedAt': ServerValue.timestamp,
       });
 
-      final packagesMap = <String, dynamic>{};
-      for (var i = 0; i < packages.length; i++) {
-        packagesMap['pkg_$i'] = packages[i].toJson();
-      }
+      await ref.child(subscriptionNodeKey).set(_subscriptionMap());
+
+      final packagesMap = _packagesMapPayload();
+      final packagesList = _packagesListPayload();
 
       // Write revision and subscribers in a single update to avoid
       // intermediate snapshots where revision is new but subscribers are old.
@@ -1042,6 +1283,7 @@ class AppStore {
       await ref.update(storePatch);
 
       await ref.child('packages').set(packagesMap);
+      await ref.child('packagesList').set(packagesList);
       await ref.child('messageTemplates').set(messageTemplates);
       debugPrint('Firebase save completed successfully');
     } catch (e) { debugPrint('Firebase save failed: $e'); }

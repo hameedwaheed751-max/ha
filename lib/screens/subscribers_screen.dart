@@ -365,6 +365,23 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
   }
 
+  Future<void> _sendActivationWhatsApp(Subscriber s) async {
+    final activationTemplate = AppStore.messageTemplates['activation'] ??
+        'مرحباً {name}، تم تفعيل اشتراكك لدى {office}. الباقة: {package} وتنتهي بتاريخ {endDate}.';
+
+    final result = await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
+      s,
+      message: '',
+      template: activationTemplate,
+    );
+
+    if (!result.success) {
+      debugPrint(
+        'Activation WhatsApp failed for ${s.name}: ${result.error ?? 'unknown'}',
+      );
+    }
+  }
+
 
   Future<void> phoneCall(Subscriber s) async {
     final phone = s.phone.trim();
@@ -387,16 +404,31 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   String _renderTemplate(String template, Subscriber s) {
     final paid = s.paid.toStringAsFixed(0);
     final remaining = s.remaining.toStringAsFixed(0);
+    final startDate = fmt(s.startDate);
+    final endDate = fmt(s.endDate);
+    final agentName = AppStore.officeName;
+    final whatsappNumber = AppStore.officePhone.trim();
     return template
         .replaceAll('{name}', s.name)
+        .replaceAll('{{customer_name}}', s.name)
       .replaceAll('{{الاسم المشترك}}', s.name)
         .replaceAll('{office}', AppStore.officeName)
+      .replaceAll('{{agent_name}}', agentName)
       .replaceAll('{{اسم الوكيل}}', AppStore.officeName)
         .replaceAll('{package}', s.packageDisplay)
+      .replaceAll('{{package_name}}', s.packageDisplay)
       .replaceAll('{{اسم الباقة}}', s.packageDisplay)
-      .replaceAll('{{تاريخ البدء}}', fmt(s.startDate))
+      .replaceAll('{{subscription_start}}', startDate)
+      .replaceAll('{{subscription_end}}', endDate)
+      .replaceAll('{{subscription_start_date}}', startDate)
+      .replaceAll('{{subscription_end_date}}', endDate)
+      .replaceAll('{{whatsapp_number}}', whatsappNumber)
+      .replaceAll('{{payment_date}}', s.paymentDate.isNotEmpty ? s.paymentDate : fmt(DateTime.now()))
+      .replaceAll('{{paid_amount}}', paid)
+      .replaceAll('{{remaining_amount}}', remaining)
+      .replaceAll('{{تاريخ البدء}}', startDate)
         .replaceAll('{endDate}', fmt(s.endDate))
-      .replaceAll('{{تاريخ الانتهاء}}', fmt(s.endDate))
+      .replaceAll('{{تاريخ الانتهاء}}', endDate)
       .replaceAll('{price}', s.price.toStringAsFixed(0))
       .replaceAll('{{مبلغ الاشتراك}}', s.price.toStringAsFixed(0))
       .replaceAll('{{المبلغ}}', remaining)
@@ -601,10 +633,19 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           Navigator.of(context).pop(); // إغلاق شاشة التحميل فقط
           loadingDialogShown = false;
         }
+
+        // إرسال إشعار تفعيل واتساب من التطبيق لضمان وصول رسالة
+        // تاريخ البداية وتاريخ الانتهاء حتى لو تعذر إشعار SAS الداخلي.
+        await _sendActivationWhatsApp(s);
+        if (!mounted) return;
+
         setState(() {
           selected = null;
           _filteredSubscribers = _buildFilteredSubscribers();
         });
+
+        _debt(s, autoOpenReceiptAfterSave: true);
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('✅ تم التفعيل وتحديث حالة المشترك تلقائياً'),
@@ -1260,6 +1301,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           );
           await AppStore.save();
           if(mounted) Navigator.pop(context);
+          await _sendActivationWhatsApp(s);
+          if (!mounted) return;
           if(mounted){
             setState((){});
             ScaffoldMessenger.of(context).showSnackBar(
@@ -1280,11 +1323,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
   }
 
-  void _debt(Subscriber s) {
+  void _debt(Subscriber s, {bool autoOpenReceiptAfterSave = false}) {
     final price = TextEditingController(text: s.price.toStringAsFixed(0));
-    final paid = TextEditingController();
-    final targetPaid = TextEditingController();
-    final date = TextEditingController(text: s.paymentDate);
+    final paid = TextEditingController(text: s.paid.toStringAsFixed(0));
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -1302,44 +1343,42 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   decoration: const InputDecoration(labelText: 'مبلغ الاشتراك', border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 8),
-                Text('الواصل الحالي: ${s.paid.toStringAsFixed(0)}'),
+                TextField(
+                  controller: price,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'مبلغ الاشتراك', border: OutlineInputBorder()),
+                ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: paid,
-                  keyboardType: TextInputType.number,
-                  onChanged: (_) => setLocal(() {}),
-                  decoration: const InputDecoration(labelText: 'مبلغ الدفعة الجزئية (اختياري)', border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: targetPaid,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   onChanged: (_) => setLocal(() {}),
-                  decoration: const InputDecoration(labelText: 'الواصل الجديد (تعديل مباشر)', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(labelText: 'الواصل', border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 8),
-                TextField(
-                  controller: date,
-                  readOnly: true,
-                  onTap: () async {
-                    final d = await showDatePicker(
-                      context: ctx,
-                      initialDate: DateTime.now(),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2100),
-                    );
-                    if (d != null) setLocal(() => date.text = fmt(d));
-                  },
-                  decoration: const InputDecoration(labelText: 'تاريخ التسديد', border: OutlineInputBorder(), suffixIcon: Icon(Icons.calendar_month)),
-                ),
-                const SizedBox(height: 10),
                 Builder(builder: (_) {
-                  final priceAmount = _parseAmount(price.text) ?? s.price;
-                  final directPaid = _parseAmount(targetPaid.text.trim());
-                  final paymentAmount = _parseAmount(paid.text) ?? 0;
-                  final nextPaid = directPaid ?? (s.paid + paymentAmount);
-                  final remaining = (priceAmount - nextPaid).clamp(0, double.infinity);
-                  return Text('المتبقي: ${remaining.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16));
+                  final priceAmount = _parseAmount(price.text.trim()) ?? s.price;
+                  final paidAmount = _parseAmount(paid.text.trim()) ?? s.paid;
+                  final targetPaidAmount = (paidAmount).clamp(0, priceAmount);
+                  final previewRemaining = (priceAmount - targetPaidAmount).clamp(0, double.infinity);
+                  return Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('مبلغ الاشتراك: ${priceAmount.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 6),
+                        Text('الواصل: ${targetPaidAmount.toStringAsFixed(0)}'),
+                        const SizedBox(height: 6),
+                        Text('المتبقي: ${previewRemaining.toStringAsFixed(0)}'),
+                      ],
+                    ),
+                  );
                 }),
               ],
             ),
@@ -1350,8 +1389,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   final oldPaid = s.paid;
                   final oldRemaining = s.remaining;
                   final newPrice = _parseAmount(price.text.trim());
-                  final amount = _parseAmount(paid.text.trim()) ?? 0;
-                  final directTargetPaid = _parseAmount(targetPaid.text.trim());
+                  final newPaidAmount = _parseAmount(paid.text.trim());
                   if (newPrice == null || newPrice < 0) {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -1360,46 +1398,43 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     }
                     return;
                   }
+                  if (newPaidAmount == null) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('أدخل قيمة الواصل')),
+                      );
+                    }
+                    return;
+                  }
 
                   s.price = newPrice;
                   s.normalizeDebtFields();
 
-                  final useDirectTarget = directTargetPaid != null;
-                  if (!useDirectTarget && amount <= 0) {
+                  final now = DateTime.now();
+                  final targetPaidAmount = newPaidAmount.clamp(0, newPrice).toDouble();
+                  final delta = s.adjustPaidToTarget(
+                    targetPaidAmount,
+                    at: now,
+                    increaseNote: 'تعديل الواصل من شاشة الديون',
+                    decreaseNote: 'تخفيض الواصل من شاشة الديون',
+                  );
+                  if (delta.abs() <= 0.0001) {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('أدخل دفعة جزئية أو عدّل الواصل مباشرة')), 
+                        const SnackBar(content: Text('لا يوجد تعديل فعلي على الديون')),
                       );
                     }
                     return;
                   }
 
-                  final now = DateTime.now();
-                  final targetPaidAmount = useDirectTarget
-                      ? directTargetPaid
-                      : (s.paid + amount);
-                  final delta = s.adjustPaidToTarget(
-                    targetPaidAmount,
-                    at: now,
-                    increaseNote: 'دفعة من شاشة الديون والحسابات',
-                    decreaseNote: 'تصحيح تخفيض من شاشة الديون والحسابات',
-                  );
-                  if (delta.abs() <= 0.0001) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('لا يوجد تعديل فعلي على الواصل')),
-                      );
-                    }
-                    return;
-                  }
-                          final receiptNumber = await AppStore.issueReceiptNumber(persist: false);
-                  s.registerInvoiceFromPayment(
+                  final receiptNumber = await AppStore.issueReceiptNumber(persist: false);
+                  final invoice = s.registerInvoiceFromPayment(
                     receiptNumber: receiptNumber,
-                    amount: delta,
+                    amount: delta.abs(),
                     at: now,
                     note: s.remaining <= 0.0001
-                        ? 'فاتورة تسديد كامل'
-                        : 'فاتورة تسديد جزئي',
+                        ? 'تعديل تسديد كامل'
+                        : 'تعديل تسديد جزئي',
                   );
 
                   if (delta > 0) {
@@ -1409,7 +1444,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                         subscriberUser: s.user,
                         subscriberName: s.name,
                         at: now,
-                        amount: delta,
+                        amount: delta.abs(),
                         remainingAfter: s.remaining,
                         note: s.remaining <= 0.0001
                             ? 'تسديد كامل'
@@ -1419,20 +1454,42 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     );
                   }
 
-                  s.paymentDate = date.text.trim().isEmpty ? fmt(now) : date.text.trim();
+                  s.paymentDate = fmt(now);
                   await AppStore.save();
+
+                  if (ctx.mounted) Navigator.pop(ctx);
+
+                  if (autoOpenReceiptAfterSave && mounted) {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ReceiptScreen(
+                          subscriber: s,
+                          invoice: invoice,
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (s.remaining > 0) {
+                    await RenderWhatsAppService.notifyDebtAdded(
+                      s,
+                      amountAdded: delta.abs(),
+                      remainingBalance: s.remaining,
+                      template: AppStore.messageTemplates['debt'],
+                    );
+                  }
+
                   await AutoNotificationService.notifyDebtSettledIfNeeded(
                     subscriber: s,
                     oldRemaining: oldRemaining,
                     newRemaining: s.remaining,
                   );
-                  if (ctx.mounted) Navigator.pop(ctx);
                   if (mounted) {
                     setState(() {});
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
-                          'تم الحفظ: الواصل ${oldPaid.toStringAsFixed(0)} -> ${s.paid.toStringAsFixed(0)} | '
+                          'تم الحفظ: الاشتراك ${newPrice.toStringAsFixed(0)} | الواصل ${oldPaid.toStringAsFixed(0)} -> ${s.paid.toStringAsFixed(0)} | '
                           'المتبقي ${oldRemaining.toStringAsFixed(0)} -> ${s.remaining.toStringAsFixed(0)}',
                         ),
                       ),

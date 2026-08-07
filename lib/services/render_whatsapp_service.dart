@@ -214,17 +214,17 @@ class RenderWhatsAppService {
     switch (type) {
       case WhatsAppNotificationType.subscriptionRenewed:
         return map['extension'] ??
-            'مرحباً {name}، تم تجديد اشتراكك بنجاح لدى {office} حتى {endDate}.';
+            'مرحباً {{customer_name}}،\n✅ تم تجديد اشتراكك بنجاح لدى {{agent_name}} حتى {{subscription_end_date}}.\n📦 الباقة: {{package_name}}\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المبلغ المتبقي: {{remaining_amount}} دينار عراقي\n📱 {{whatsapp_number}}';
       case WhatsAppNotificationType.subscriptionExpiresIn3Days:
         return map['nearExpiry'] ?? AppStore.nearExpiryTemplate;
       case WhatsAppNotificationType.subscriptionExpired:
         return map['expired'] ??
-            'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.';
+            'مرحباً {{customer_name}}،\n⚠️ اشتراكك لدى {{agent_name}} منتهي. يرجى التجديد لاستمرار الخدمة.\n📦 الباقة: {{package_name}}\n📅 تاريخ الانتهاء: {{subscription_end_date}}\n📱 {{whatsapp_number}}';
       case WhatsAppNotificationType.debtAdded:
-        return AppStore.debtTemplate;
+        return map['debt'] ?? AppStore.debtTemplate;
       case WhatsAppNotificationType.debtPaid:
         return map['debtPaid'] ??
-            'مرحباً {{الاسم المشترك}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ المسدد: {{المبلغ}} دينار عراقي\n📅 تاريخ التسديد: {{التاريخ}}\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{اسم الوكيل}}\n\nشكراً لاختياركم خدمتنا.';
+            'مرحباً {{customer_name}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المتبقي: {{remaining_amount}} دينار عراقي\n📅 تاريخ التسديد: {{payment_date}}\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
       case WhatsAppNotificationType.generalMessage:
         return '{message}';
       case WhatsAppNotificationType.broadcast:
@@ -245,49 +245,84 @@ class RenderWhatsAppService {
     final resolvedAmount = amount == null ? '' : amount.toStringAsFixed(0);
     final resolvedBalance = (balance ?? s.remaining).toStringAsFixed(0);
     final resolvedAgent = (agentName ?? AppStore.effectiveAgentName).trim();
+    final resolvedWhatsApp = normalizePhone(AppStore.officePhone.trim());
+    final resolvedStartDate = _fmt(s.startDate);
+    final resolvedEndDate = _fmt(expiryDate ?? s.endDate);
+    final resolvedDate = _fmt(DateTime.now());
 
     return {
       'name': s.name,
       'customerName': s.name,
+      'customer_name': s.name,
       'user': s.user,
       'office': AppStore.officeName,
       'package': resolvedPackage,
-      'startDate': _fmt(s.startDate),
-      'endDate': _fmt(expiryDate ?? s.endDate),
-      'expiryDate': _fmt(expiryDate ?? s.endDate),
+      'package_name': resolvedPackage,
+      'startDate': resolvedStartDate,
+      'subscription_start': resolvedStartDate,
+      'subscription_start_date': resolvedStartDate,
+      'endDate': resolvedEndDate,
+      'subscription_end': resolvedEndDate,
+      'subscription_end_date': resolvedEndDate,
+      'expiryDate': resolvedEndDate,
       'price': s.price.toStringAsFixed(0),
+      'subscription_amount': s.price.toStringAsFixed(0),
       'paid': s.paid.toStringAsFixed(0),
+      'paid_amount': s.paid.toStringAsFixed(0),
       'remaining': resolvedBalance,
       'balance': resolvedBalance,
+      'remaining_amount': resolvedBalance,
       'amount': resolvedAmount,
+      'debt_amount': resolvedAmount,
       'agentName': resolvedAgent,
-      'date': _fmt(DateTime.now()),
+      'agent_name': resolvedAgent,
+      'date': resolvedDate,
+      'payment_date': resolvedDate,
+      'whatsappNumber': resolvedWhatsApp,
+      'whatsapp_number': resolvedWhatsApp,
       'message': message ?? '',
     };
   }
 
   static String applyTemplate(String template, Map<String, String> variables) {
     var out = template;
-    for (final entry in variables.entries) {
-      out = out.replaceAll('{${entry.key}}', entry.value);
-    }
+
     // دعم القوالب العربية بصيغة {{...}} مع إبقاء الصيغة القديمة {key}.
-    out = out
-        .replaceAll('{{الاسم المشترك}}', variables['name'] ?? '')
-      .replaceAll('{{اسم المشترك}}', variables['name'] ?? '')
-      .replaceAll('{{الباقة}}', variables['package'] ?? '')
-      .replaceAll('{{اسم الباقة}}', variables['package'] ?? '')
-      .replaceAll('{{تاريخ بداية الاشتراك}}', variables['startDate'] ?? '')
-      .replaceAll('{{تاريخ البدء}}', variables['startDate'] ?? '')
-      .replaceAll('{{تاريخ انتهاء الاشتراك}}', variables['endDate'] ?? '')
-        .replaceAll('{{تاريخ الانتهاء}}', variables['endDate'] ?? '')
-      .replaceAll('{{مبلغ الاشتراك}}', variables['price'] ?? '')
-      .replaceAll('{{المبلغ}}', variables['amount'] ?? '')
-      .replaceAll('{{التاريخ}}', variables['date'] ?? '')
-      .replaceAll('{{الواصل}}', 'الواصل: ${variables['paid'] ?? ''}')
-      .replaceAll('{{المتبقي}}', 'المتبقي: ${variables['remaining'] ?? ''}')
-        .replaceAll('{{اسم الوكيل}}', (variables['agentName'] ?? variables['office'] ?? ''));
+    final explicitReplacements = <String, String>{
+      '{{الاسم المشترك}}': variables['name'] ?? '',
+      '{{اسم المشترك}}': variables['name'] ?? '',
+      '{{الباقة}}': variables['package'] ?? '',
+      '{{اسم الباقة}}': variables['package'] ?? '',
+      '{{تاريخ بداية الاشتراك}}': variables['startDate'] ?? '',
+      '{{تاريخ البدء}}': variables['startDate'] ?? '',
+      '{{تاريخ انتهاء الاشتراك}}': variables['endDate'] ?? '',
+      '{{تاريخ الانتهاء}}': variables['endDate'] ?? '',
+      '{{subscription_start}}': variables['subscription_start'] ?? variables['startDate'] ?? '',
+      '{{subscription_end}}': variables['subscription_end'] ?? variables['endDate'] ?? '',
+      '{{مبلغ الاشتراك}}': variables['price'] ?? '',
+      '{{المبلغ}}': variables['amount'] ?? '',
+      '{{التاريخ}}': variables['date'] ?? '',
+      '{{الواصل}}': variables['paid'] ?? '',
+      '{{المتبقي}}': variables['remaining'] ?? '',
+      '{{اسم الوكيل}}': variables['agentName'] ?? variables['office'] ?? '',
+    };
+
+    for (final entry in explicitReplacements.entries) {
+      out = out.replaceAll(entry.key, entry.value);
+    }
+
+    // دعم عام لأي placeholder عربي/إنجليزي بصيغة {{...}} أو {key} حتى لو وُجدت مسافات.
+    out = out.replaceAllMapped(
+      RegExp(r'\{\{\s*([^{}]+?)\s*\}\}|\{\s*([a-zA-Z][^{}]*?)\s*\}'),
+      (m) => _valueForPlaceholder((m.group(1) ?? m.group(2) ?? '').trim(), variables),
+    );
     return out;
+  }
+
+  static bool _hasTemplatePlaceholders(String text) {
+    final hasDouble = RegExp(r'\{\{\s*[^{}]+\s*\}\}').hasMatch(text);
+    final hasSingle = RegExp(r'\{\s*[a-zA-Z][^{}]*\s*\}').hasMatch(text);
+    return hasDouble || hasSingle;
   }
 
   static String _resolvePhoneNumberId() {
@@ -320,6 +355,17 @@ class RenderWhatsAppService {
     }
   }
 
+  static List<String> _templateNameCandidatesForType(WhatsAppNotificationType type) {
+    switch (type) {
+      case WhatsAppNotificationType.debtAdded:
+        return const <String>['debt_added', 'dept_paid', 'debt_paid'];
+      case WhatsAppNotificationType.debtPaid:
+        return const <String>['debt_paid', 'dept_paid', 'debt_added'];
+      default:
+        return <String>[_templateNameForType(type)];
+    }
+  }
+
   static List<String> _extractOrderedPlaceholders(String templateBody) {
     final matches = RegExp(r'\{\{\s*([^{}]+?)\s*\}\}|\{\s*([a-zA-Z][^{}]*?)\s*\}')
         .allMatches(templateBody);
@@ -345,6 +391,13 @@ class RenderWhatsAppService {
     Map<String, String> variables,
   ) {
     final key = _normalizePlaceholderKey(placeholder);
+    final explicitCandidates = <String>{
+      placeholder.trim(),
+      placeholder.trim().toLowerCase(),
+      placeholder.trim().replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_').trim().toLowerCase(),
+      placeholder.trim().replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '').trim().toLowerCase(),
+    }.where((value) => value.isNotEmpty).toSet();
+
     const aliases = <String, List<String>>{
       'name': <String>[
         'name',
@@ -366,6 +419,9 @@ class RenderWhatsAppService {
       'startDate': <String>[
         'startdate',
         'subscriptionstart',
+        'subscriptionstartdate',
+        'subscriptionstart_',
+        'subscriptionstartdate_',
         'تاريخالبدء',
         'تاريخالبدء',
         'بدءالاشتراك',
@@ -375,6 +431,9 @@ class RenderWhatsAppService {
         'enddate',
         'expirydate',
         'subscriptionend',
+        'subscriptionenddate',
+        'subscriptionend_',
+        'subscriptionenddate_',
         'تاريخالانتهاء',
         'تاريخالانتهاءالاشتراك',
         'تاريخانتهاءالاشتراك',
@@ -388,11 +447,13 @@ class RenderWhatsAppService {
       ],
       'paid': <String>[
         'paid',
+        'paidamount',
         'الواصل',
         'المبلغالواصل',
       ],
       'remaining': <String>[
         'remaining',
+        'remainingamount',
         'balance',
         'المتبقي',
         'المتبقى',
@@ -424,6 +485,12 @@ class RenderWhatsAppService {
         'اسمالمكتب',
         'اسممكتبالاشتراكات',
       ],
+      'whatsappNumber': <String>[
+        'whatsappnumber',
+        'phonenumber',
+        'officephone',
+        'رقمالواتساب',
+      ],
       'message': <String>[
         'message',
         'الرسالة',
@@ -433,7 +500,26 @@ class RenderWhatsAppService {
 
     for (final entry in aliases.entries) {
       if (entry.value.contains(key)) {
-        return (variables[entry.key] ?? '').trim();
+        final candidates = <String>{
+          entry.key,
+          entry.key.replaceAll(RegExp(r'(?<!^)([A-Z])'), '_\\1').toLowerCase(),
+          entry.key.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '').toLowerCase(),
+          ...explicitCandidates,
+        }.where((value) => value.isNotEmpty).toSet();
+
+        for (final candidate in candidates) {
+          final value = variables[candidate];
+          if (value != null && value.trim().isNotEmpty) {
+            return value.trim();
+          }
+        }
+      }
+    }
+
+    for (final candidate in explicitCandidates) {
+      final value = variables[candidate];
+      if (value != null && value.trim().isNotEmpty) {
+        return value.trim();
       }
     }
 
@@ -871,20 +957,50 @@ class RenderWhatsAppService {
     );
 
     final rendered = applyTemplate(tmpl, vars).trim();
-    final templateName = _templateNameForType(type);
-    final payload = _buildMetaTemplatePayload(
-      to: phone,
-      templateName: templateName,
-      templateBody: tmpl,
-      variables: vars,
-    );
-    return _sendCore(
+
+    // إذا كان النص مُجهزاً مسبقاً (بدون placeholders) نرسله كنص مباشر
+    // حتى لا يصل للعميل بصيغة {{...}} من قالب Meta بدون parameters.
+    if (!_hasTemplatePlaceholders(tmpl)) {
+      return _sendCore(
+        to: phone,
+        message: rendered,
+        eventType: type.eventType,
+        note: '${type.eventType}_plain',
+        forcePlainText: true,
+      );
+    }
+
+    final candidates = _templateNameCandidatesForType(type);
+    for (final candidate in candidates) {
+      final payload = _buildMetaTemplatePayload(
+        to: phone,
+        templateName: candidate,
+        templateBody: tmpl,
+        variables: vars,
+      );
+
+      final result = await _sendCore(
+        to: phone,
+        message: rendered,
+        eventType: type.eventType,
+        note: '${type.eventType}_$candidate',
+        templateName: candidate,
+        payloadOverride: payload,
+      );
+
+      if (result.success) {
+        return result;
+      }
+    }
+
+    // fallback نهائي كنص مباشر إذا فشل ربط قالب Meta.
+    return await _sendCore(
       to: phone,
       message: rendered,
       eventType: type.eventType,
-      note: type.eventType,
-      templateName: templateName,
-      payloadOverride: payload,
+      note: '${type.eventType}_plain_fallback',
+      forcePlainText: true,
+      maxAttempts: 1,
     );
   }
 
