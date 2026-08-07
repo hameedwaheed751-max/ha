@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:html' as html;
+import 'dart:js_util' as js_util;
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -156,10 +158,34 @@ class RenderWhatsAppService {
     'PROXY_TOKEN',
     defaultValue: '',
   );
-  static const String _proxyTokenOverride = String.fromEnvironment(
-    'SAS_PROXY_TOKEN',
-    defaultValue: '',
-  );
+  static String get _runtimeDefaultSendEndpoint {
+    if (kIsWeb) {
+      try {
+        final config = js_util.getProperty(html.window, '__APP_CONFIG__');
+        if (config != null) {
+          final value = js_util.getProperty(config, 'sasWebProxyUrl');
+          if (value is String && value.trim().isNotEmpty) {
+            return value.trim();
+          }
+        }
+      } catch (_) {}
+    }
+    return _defaultSendEndpoint;
+  }
+  static String get _runtimeEmbeddedApiKey {
+    if (kIsWeb) {
+      try {
+        final config = js_util.getProperty(html.window, '__APP_CONFIG__');
+        if (config != null) {
+          final value = js_util.getProperty(config, 'sasProxyToken');
+          if (value is String && value.trim().isNotEmpty) {
+            return value.trim();
+          }
+        }
+      } catch (_) {}
+    }
+    return _embeddedApiKey;
+  }
   static const String _metaApiBaseUrl = String.fromEnvironment(
     'META_WHATSAPP_API_URL',
     defaultValue: 'https://graph.facebook.com/v22.0',
@@ -633,10 +659,10 @@ class RenderWhatsAppService {
   static Future<(String endpoint, String apiKey)> loadConfig() async {
     final phoneNumberId = _resolvePhoneNumberId();
     if (phoneNumberId.isEmpty) {
-      final fallbackEndpoint = _coalesce(_defaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim().endsWith('/send-message')
-          ? _coalesce(_defaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim()
-          : '${_coalesce(_defaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim().replaceAll(RegExp(r'/+$'), '')}/send-message';
-      final fallbackToken = _coalesce(_embeddedApiKey, _legacyEmbeddedApiKey).trim();
+      final fallbackEndpoint = _coalesce(_runtimeDefaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim().endsWith('/send-message')
+          ? _coalesce(_runtimeDefaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim()
+          : '${_coalesce(_runtimeDefaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim().replaceAll(RegExp(r'/+$'), '')}/send-message';
+      final fallbackToken = _coalesce(_runtimeEmbeddedApiKey, _legacyEmbeddedApiKey).trim();
       return (fallbackEndpoint, fallbackToken);
     }
 
@@ -654,7 +680,7 @@ class RenderWhatsAppService {
   }
 
   static String _buildProxySendMessageEndpoint() {
-    final endpoint = _coalesce(_defaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim();
+    final endpoint = _coalesce(_runtimeDefaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim();
     if (endpoint.endsWith('/send-message')) return endpoint;
     return '${endpoint.replaceAll(RegExp(r'/+$'), '')}/send-message';
   }
@@ -762,7 +788,7 @@ class RenderWhatsAppService {
         apiKey.isNotEmpty;
 
     final resolvedApiKey = _coalesce(apiKey, '').trim();
-    final proxyToken = _coalesce(_proxyTokenOverride, _coalesce(_embeddedApiKey, _legacyEmbeddedApiKey)).trim();
+    final proxyToken = _coalesce(_runtimeEmbeddedApiKey, _legacyEmbeddedApiKey).trim();
     if (resolvedApiKey.isNotEmpty) {
       headers['Authorization'] = 'Bearer $resolvedApiKey';
       if (!usesMetaTemplate) {

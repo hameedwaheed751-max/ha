@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:html' as html;
+import 'dart:js_util' as js_util;
 import 'dart:math';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:crypto/crypto.dart';
@@ -282,6 +284,20 @@ class SasApiService {
     'SAS_WEB_PROXY_URL',
     defaultValue: 'https://ha-0cs7.onrender.com',
   );
+  static String get _runtimeWebProxyBaseRaw {
+    if (kIsWeb) {
+      try {
+        final config = js_util.getProperty(html.window, '__APP_CONFIG__');
+        if (config != null) {
+          final value = js_util.getProperty(config, 'sasWebProxyUrl');
+          if (value is String && value.trim().isNotEmpty) {
+            return value.trim();
+          }
+        }
+      } catch (_) {}
+    }
+    return _webProxyBaseRaw;
+  }
   static const bool _useProxyOnWeb = bool.fromEnvironment(
     'SAS_USE_PROXY',
     defaultValue: true,
@@ -290,6 +306,20 @@ class SasApiService {
     'SAS_PROXY_TOKEN',
     defaultValue: '',
   );
+  static String get _runtimeProxyToken {
+    if (kIsWeb) {
+      try {
+        final config = js_util.getProperty(html.window, '__APP_CONFIG__');
+        if (config != null) {
+          final value = js_util.getProperty(config, 'sasProxyToken');
+          if (value is String && value.trim().isNotEmpty) {
+            return value.trim();
+          }
+        }
+      } catch (_) {}
+    }
+    return _proxyToken;
+  }
   static const String _legacyProxyToken = String.fromEnvironment(
     'PROXY_TOKEN',
     defaultValue: '',
@@ -314,7 +344,7 @@ class SasApiService {
   String get _webProxyBase {
     var proxy = settings.webProxyUrl.trim().isNotEmpty
         ? settings.webProxyUrl.trim()
-        : _webProxyBaseRaw.trim();
+        : _runtimeWebProxyBaseRaw.trim();
     while (proxy.endsWith('/')) {
       proxy = proxy.substring(0, proxy.length - 1);
     }
@@ -448,8 +478,8 @@ class SasApiService {
   void _addProxyTarget(Map<String, String> headers) {
     if (kIsWeb && !useDirectConnection && !_directFallback) {
       headers['X-SAS-Target'] = _sasOrigin.isNotEmpty ? _sasOrigin : _sasInputNormalized;
-      final effectiveProxyToken = _proxyToken.trim().isNotEmpty
-          ? _proxyToken.trim()
+      final effectiveProxyToken = _runtimeProxyToken.trim().isNotEmpty
+          ? _runtimeProxyToken.trim()
           : _legacyProxyToken.trim();
       if (effectiveProxyToken.isNotEmpty) {
         headers['X-Proxy-Token'] = effectiveProxyToken;
