@@ -1,3 +1,4 @@
 [build]
-  publish = "build/web"
+  publish = "flutter build_web --dart-define=SAS_PROXY_TOKEN=104199 --dart-define=SAS_WEB_PROXY_URL=https://ha-0cs7.onrender.com
+"
   command = "bash scripts/build_web_netlify.sh"
