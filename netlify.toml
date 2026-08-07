@@ -1,24 +1,3 @@
 [build]
   publish = "build/web"
-  command = """
-  set -e
-
-  export PATH="$HOME/flutter/bin:$PATH"
-  export PATH="$HOME/flutter/bin/cache/dart-sdk/bin:$PATH"
-
-  if [ ! -d "$HOME/flutter" ]; then
-    git clone https://github.com/flutter/flutter.git -b stable --depth 1 "$HOME/flutter"
-  fi
-
-  flutter --version
-  flutter config --enable-web
-  flutter config --no-analytics
-  flutter pub get
-
-  echo "Using SAS_PROXY_TOKEN from Netlify env: ${SAS_PROXY_TOKEN:+set}"
-  echo "Using SAS_WEB_PROXY_URL from Netlify env: ${SAS_WEB_PROXY_URL:+set}"
-
-  flutter build web --release \
-    --dart-define=SAS_PROXY_TOKEN="${SAS_PROXY_TOKEN}" \
-    --dart-define=SAS_WEB_PROXY_URL="${SAS_WEB_PROXY_URL}"
-  """
+  command = "bash scripts/build_web_netlify.sh"
