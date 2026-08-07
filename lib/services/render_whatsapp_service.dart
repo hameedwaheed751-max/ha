@@ -153,7 +153,11 @@ class RenderWhatsAppService {
     defaultValue: '',
   );
   static const String _legacyEmbeddedApiKey = String.fromEnvironment(
-  'PROXY_TOKEN',
+    'PROXY_TOKEN',
+    defaultValue: '',
+  );
+  static const String _proxyTokenOverride = String.fromEnvironment(
+    'SAS_PROXY_TOKEN',
     defaultValue: '',
   );
   static const String _metaApiBaseUrl = String.fromEnvironment(
@@ -758,13 +762,18 @@ class RenderWhatsAppService {
         apiKey.isNotEmpty;
 
     final resolvedApiKey = _coalesce(apiKey, '').trim();
+    final proxyToken = _coalesce(_proxyTokenOverride, _coalesce(_embeddedApiKey, _legacyEmbeddedApiKey)).trim();
     if (resolvedApiKey.isNotEmpty) {
       headers['Authorization'] = 'Bearer $resolvedApiKey';
       if (!usesMetaTemplate) {
-        headers['x-api-key'] = resolvedApiKey;
-        headers['x-proxy-token'] = resolvedApiKey;
-        headers['x-sas-proxy-token'] = resolvedApiKey;
+        headers['x-api-key'] = proxyToken.isNotEmpty ? proxyToken : resolvedApiKey;
+        headers['x-proxy-token'] = proxyToken.isNotEmpty ? proxyToken : resolvedApiKey;
+        headers['x-sas-proxy-token'] = proxyToken.isNotEmpty ? proxyToken : resolvedApiKey;
       }
+    } else if (proxyToken.isNotEmpty) {
+      headers['x-api-key'] = proxyToken;
+      headers['x-proxy-token'] = proxyToken;
+      headers['x-sas-proxy-token'] = proxyToken;
     }
 
     if (endpoint.isEmpty) {
