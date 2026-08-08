@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models.dart';
@@ -370,6 +372,28 @@ class _AlertsScreenState extends State<AlertsScreen> {
                         title: Text('${log.eventType} • ${log.sent}/${log.total}'),
                         subtitle: Text('${_fmtLogTime(log.at)}${log.note.isEmpty ? '' : ' • ${log.note}'}'),
                         trailing: Text('فشل ${log.failed}'),
+                        onTap: log.ok || log.responseBody == null
+                            ? null
+                            : () => showDialog<void>(
+                                  context: ctx,
+                                  builder: (detailsContext) => Directionality(
+                                    textDirection: TextDirection.rtl,
+                                    child: AlertDialog(
+                                      title: Text('تفاصيل الخطأ ${log.statusCode ?? ''}'),
+                                      content: SelectableText(
+                                        JsonEncoder.withIndent('  ')
+                                            .convert(log.responseBody),
+                                        textDirection: TextDirection.ltr,
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(detailsContext),
+                                          child: const Text('إغلاق'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                       );
                     },
                   ),

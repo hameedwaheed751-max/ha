@@ -751,6 +751,38 @@ class RenderWhatsAppService {
     await prefs.remove(logsKey);
   }
 
+  static String _metaErrorMessage(
+    Map<String, dynamic> responseBody,
+    int statusCode,
+  ) {
+    final proxyError = responseBody['error'];
+    final details = responseBody['details'];
+    final metaError = details is Map ? details['error'] : null;
+    final error = metaError is Map
+        ? metaError
+        : proxyError is Map
+            ? proxyError
+            : null;
+
+    if (error is Map) {
+      final errorData = error['error_data'];
+      final detailText = errorData is Map
+          ? (errorData['details'] ?? '').toString().trim()
+          : '';
+      final message = (error['message'] ?? '').toString().trim();
+      final code = (error['code'] ?? '').toString().trim();
+      final parts = <String>[
+        if (code.isNotEmpty) 'Meta $code',
+        if (message.isNotEmpty) message,
+        if (detailText.isNotEmpty && detailText != message) detailText,
+      ];
+      if (parts.isNotEmpty) return parts.join(': ');
+    }
+
+    final message = proxyError?.toString().trim() ?? '';
+    return message.isNotEmpty ? message : 'HTTP $statusCode';
+  }
+
   static Future<RenderSingleWhatsAppResult> _sendCore({
     required String to,
     required String message,
@@ -908,7 +940,7 @@ class RenderWhatsAppService {
           );
         }
 
-        final errorMessage = (data['error'] ?? 'HTTP ${response.statusCode}').toString();
+        final errorMessage = _metaErrorMessage(data, response.statusCode);
         if (data.isNotEmpty) {
           debugPrint('Render WhatsApp Meta error JSON:\n${const JsonEncoder.withIndent('  ').convert(data)}');
         } else {
