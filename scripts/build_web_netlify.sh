@@ -22,6 +22,7 @@ if [ -z "${SAS_PROXY_TOKEN:-}" ] || [ -z "${SAS_WEB_PROXY_URL:-}" ]; then
   exit 1
 fi
 
+mkdir -p web
 cat > web/runtime_config.js <<EOF
 window.__APP_CONFIG__ = {
   sasProxyToken: "${SAS_PROXY_TOKEN}",
@@ -32,3 +33,6 @@ EOF
 flutter build web --release \
   --dart-define=SAS_PROXY_TOKEN="${SAS_PROXY_TOKEN}" \
   --dart-define=SAS_WEB_PROXY_URL="${SAS_WEB_PROXY_URL}"
+
+mkdir -p build/web
+cp web/runtime_config.js build/web/runtime_config.js
