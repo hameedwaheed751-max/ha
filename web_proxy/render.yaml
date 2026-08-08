@@ -2,6 +2,7 @@ services:
   - type: web
     name: netagent-sas-proxy
     env: node
+    branch: master
     plan: free
     buildCommand: npm install --omit=dev
     startCommand: npm start
