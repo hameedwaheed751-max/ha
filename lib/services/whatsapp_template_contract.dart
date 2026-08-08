@@ -14,6 +14,17 @@ class WhatsAppTemplateParameter {
       };
 }
 
+const List<String> canonicalMetaVariableNames = <String>[
+  'customer_name',
+  'package_name',
+  'paid_amount',
+  'remaining_amount',
+  'subscription_start',
+  'subscription_end',
+  'agent_name',
+  'whatsapp_number',
+];
+
 const Map<String, List<String>> metaTemplateParameterNames =
     <String, List<String>>{
   'activated': <String>[

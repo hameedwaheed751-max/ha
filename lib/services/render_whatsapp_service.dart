@@ -599,6 +599,13 @@ class RenderWhatsAppService {
     return const <String>[];
   }
 
+  static Map<String, String> _canonicalTemplateVariables(
+    Map<String, String> variables,
+  ) => <String, String>{
+        for (final name in canonicalMetaVariableNames)
+          name: variables[name]?.trim() ?? '',
+      };
+
   static Future<(String endpoint, String apiKey)> loadConfig() async {
     final phoneNumberId = _resolvePhoneNumberId();
     if (phoneNumberId.isEmpty) {
@@ -738,6 +745,7 @@ class RenderWhatsAppService {
     int maxAttempts = _maxAttempts,
     String? templateName,
     Map<String, dynamic>? payloadOverride,
+    Map<String, String>? templateVariables,
     bool forcePlainText = false,
   }) async {
     final normalizedPhone = normalizePhone(to);
@@ -817,6 +825,7 @@ class RenderWhatsAppService {
                 'templateName': templateNameValue,
                 'language': languageCode.isEmpty ? 'ar' : languageCode,
                 'parameters': params,
+                'templateVariables': templateVariables ?? const <String, String>{},
               };
             }
 
@@ -888,6 +897,10 @@ class RenderWhatsAppService {
           details: data.isNotEmpty ? data : {'raw': response.body},
           statusCode: response.statusCode,
         );
+
+        if (response.statusCode >= 400 && response.statusCode < 500) {
+          break;
+        }
 
       } catch (e) {
         await _appendAttemptLog(
@@ -973,6 +986,7 @@ class RenderWhatsAppService {
       note: '${type.eventType}_$templateName',
       templateName: templateName,
       payloadOverride: payload,
+      templateVariables: _canonicalTemplateVariables(vars),
     );
   }
 

@@ -12,6 +12,11 @@ const PHONE_NUMBER_ID = String(process.env.PHONE_NUMBER_ID || '').trim();
 const WHATSAPP_PHONE_NUMBER_ID = String(process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
 const WHATSAPP_VERIFY_TOKEN = String(process.env.WHATSAPP_VERIFY_TOKEN || '').trim();
 const WHATSAPP_API_VERSION = String(process.env.WHATSAPP_API_VERSION || 'v22.0').trim();
+const WHATSAPP_BUSINESS_ACCOUNT_ID = String(
+  process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || process.env.WABA_ID || ''
+).trim();
+const RENDER_GIT_COMMIT = String(process.env.RENDER_GIT_COMMIT || '').trim();
+let discoveredWhatsAppBusinessAccountId = WHATSAPP_BUSINESS_ACCOUNT_ID;
 const DEFAULT_TARGET_URL = String(process.env.SAS_TARGET_URL || '').trim();
 const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 5 * 1024 * 1024);
 const DISABLE_PROXY_AUTH = process.env.DISABLE_PROXY_AUTH === '1' || process.env.ALLOW_UNAUTHENTICATED_PROXY === '1';
@@ -513,7 +518,12 @@ async function sendWhatsAppText(to, message) {
   }
 
   if (!response.ok) {
-    const err = new Error('WhatsApp API request failed');
+    const metaCode = Number(parsed?.error?.code) || 0;
+    const err = new Error(
+      metaCode === 131047
+        ? 'Free-form WhatsApp text is blocked outside the 24-hour customer service window; use an approved template'
+        : 'WhatsApp API request failed'
+    );
     err.statusCode = response.status;
     err.details = parsed;
     throw err;
@@ -522,13 +532,127 @@ async function sendWhatsAppText(to, message) {
   return parsed;
 }
 
-async function sendWhatsAppTemplate(to, templateName, languageCode = 'ar', parameters = []) {
+const templateContractCache = new Map();
+const TEMPLATE_CONTRACT_TTL_MS = 5 * 60 * 1000;
+
+async function fetchMetaJson(path, accessToken) {
+  const endpoint = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${path}`;
+  const response = await fetch(endpoint, {
+    headers: {Authorization: `Bearer ${accessToken}`},
+  });
+  const raw = await response.text();
+  let parsed;
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    parsed = {raw};
+  }
+
+  if (!response.ok) {
+    const err = new Error('Failed to read WhatsApp template definition from Meta');
+    err.statusCode = response.status;
+    err.details = parsed;
+    throw err;
+  }
+  return parsed;
+}
+
+async function resolveWhatsAppBusinessAccountId(phoneNumberId, accessToken) {
+  if (discoveredWhatsAppBusinessAccountId) {
+    return discoveredWhatsAppBusinessAccountId;
+  }
+
+  const phone = await fetchMetaJson(
+    `${encodeURIComponent(phoneNumberId)}?fields=whatsapp_business_account`,
+    accessToken
+  );
+  const accountId = String(phone?.whatsapp_business_account?.id || '').trim();
+  if (!accountId) {
+    const err = new Error(
+      'Set WHATSAPP_BUSINESS_ACCOUNT_ID on Render so approved template variables can be verified'
+    );
+    err.statusCode = 500;
+    throw err;
+  }
+  discoveredWhatsAppBusinessAccountId = accountId;
+  return accountId;
+}
+
+async function getApprovedTemplateContract(templateName, languageCode, phoneNumberId, accessToken) {
+  const cacheKey = `${templateName}:${languageCode}`;
+  const cached = templateContractCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < TEMPLATE_CONTRACT_TTL_MS) {
+    return cached.contract;
+  }
+
+  const accountId = await resolveWhatsAppBusinessAccountId(phoneNumberId, accessToken);
+  const query = new URLSearchParams({
+    name: templateName,
+    fields: 'name,language,status,parameter_format,components',
+    limit: '100',
+  });
+  const response = await fetchMetaJson(
+    `${encodeURIComponent(accountId)}/message_templates?${query.toString()}`,
+    accessToken
+  );
+  const template = (Array.isArray(response?.data) ? response.data : []).find(
+    (item) => String(item?.name || '') === templateName &&
+      String(item?.language || '').toLowerCase() === languageCode.toLowerCase() &&
+      String(item?.status || '').toUpperCase() === 'APPROVED'
+  );
+  if (!template) {
+    const err = new Error(`Approved Meta template ${templateName}/${languageCode} was not found`);
+    err.statusCode = 400;
+    err.details = {templateName, languageCode};
+    throw err;
+  }
+
+  const body = (Array.isArray(template.components) ? template.components : []).find(
+    (component) => String(component?.type || '').toUpperCase() === 'BODY'
+  );
+  const bodyText = String(body?.text || '');
+  const names = Array.from(
+    bodyText.matchAll(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g),
+    (match) => match[1]
+  );
+  const uniqueNames = Array.from(new Set(names));
+  const parameterFormat = String(template.parameter_format || '').toUpperCase();
+  if (parameterFormat && parameterFormat !== 'NAMED') {
+    const err = new Error(`Meta template ${templateName} must use NAMED parameters`);
+    err.statusCode = 400;
+    err.details = {templateName, parameterFormat};
+    throw err;
+  }
+  if (uniqueNames.length === 0) {
+    const err = new Error(`Meta template ${templateName} has no recognized named BODY variables`);
+    err.statusCode = 400;
+    err.details = {templateName, bodyText};
+    throw err;
+  }
+
+  const contract = {names: uniqueNames, bodyText};
+  templateContractCache.set(cacheKey, {at: Date.now(), contract});
+  console.log('[whatsapp] approved template contract:', JSON.stringify({
+    templateName,
+    languageCode,
+    parameterNames: uniqueNames,
+  }));
+  return contract;
+}
+
+async function sendWhatsAppTemplate(
+  to,
+  templateName,
+  languageCode = 'ar',
+  parameters = [],
+  templateVariables = {}
+) {
   const accessToken = WHATSAPP_ACCESS_TOKEN || WHATSAPP_TOKEN;
   const phoneNumberId = WHATSAPP_PHONE_NUMBER_ID || PHONE_NUMBER_ID;
   const cleanTo = String(to || '').replace(/\D/g, '').trim();
   const name = String(templateName || '').trim();
   const lang = String(languageCode || 'ar').trim() || 'ar';
-  const bodyParameters = Array.isArray(parameters)
+  const suppliedParameters = Array.isArray(parameters)
     ? parameters.map((parameter, index) => {
         const text = parameter && typeof parameter === 'object'
           ? String(parameter.text || parameter.value || '').trim()
@@ -567,6 +691,27 @@ async function sendWhatsAppTemplate(to, templateName, languageCode = 'ar', param
     err.statusCode = 400;
     throw err;
   }
+
+  const canonicalValues = templateVariables && typeof templateVariables === 'object'
+    ? Object.fromEntries(
+        Object.entries(templateVariables).map(([key, value]) => [key, String(value || '').trim()])
+      )
+    : {};
+  const contract = await getApprovedTemplateContract(name, lang, phoneNumberId, accessToken);
+  const bodyParameters = contract.names.map((parameterName) => {
+    const text = canonicalValues[parameterName] ||
+      suppliedParameters.find((parameter) => parameter.parameter_name === parameterName)?.text ||
+      '';
+    if (!text) {
+      const err = new Error(
+        `No application value is available for Meta variable ${parameterName} in ${name}`
+      );
+      err.statusCode = 400;
+      err.details = {templateName: name, parameterName, expectedParameters: contract.names};
+      throw err;
+    }
+    return {type: 'text', parameter_name: parameterName, text};
+  });
 
   const endpoint = `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`;
   const payload = {
@@ -674,6 +819,9 @@ function handleRequest(req, res) {
       proxyAuthBypassed: DISABLE_PROXY_AUTH,
       hasAllowlist: TARGET_ALLOWLIST.length > 0,
       routes: ['/health', '/healthz', '/ping-target', '/whatsapp/send', '/sas/*', '/login', '/admin/api/*', '/api/*', '/index.php/*'],
+      commit: RENDER_GIT_COMMIT || null,
+      hasWhatsAppBusinessAccountId: Boolean(WHATSAPP_BUSINESS_ACCOUNT_ID),
+      hasDiscoveredWhatsAppBusinessAccountId: Boolean(discoveredWhatsAppBusinessAccountId),
     });
     return;
   }
@@ -710,6 +858,10 @@ function handleRequest(req, res) {
           const rawBody = await readRawBody(req, MAX_BODY_BYTES);
           try {
             const parsed = rawBody ? JSON.parse(rawBody) : {};
+            const webhookAccountId = String(parsed?.entry?.[0]?.id || '').trim();
+            if (webhookAccountId) {
+              discoveredWhatsAppBusinessAccountId = webhookAccountId;
+            }
             console.log('[webhook] WhatsApp event body JSON:', JSON.stringify(parsed));
           } catch (_) {
             console.log('[webhook] WhatsApp event body RAW:', rawBody);
@@ -806,6 +958,9 @@ function handleRequest(req, res) {
         const templateName = String(body.templateName || '').trim();
         const language = String(body.language || 'ar').trim() || 'ar';
         const parameters = Array.isArray(body.parameters) ? body.parameters : [];
+        const templateVariables = body.templateVariables && typeof body.templateVariables === 'object'
+          ? body.templateVariables
+          : {};
 
         console.log('[send-message] incoming payload:', JSON.stringify({
           to,
@@ -813,6 +968,7 @@ function handleRequest(req, res) {
           templateName,
           language,
           parametersCount: parameters.length,
+          templateVariables: Object.keys(templateVariables),
         }));
 
         if (!to) {
@@ -821,7 +977,7 @@ function handleRequest(req, res) {
         }
 
         const apiResult = templateName
-          ? await sendWhatsAppTemplate(to, templateName, language, parameters)
+          ? await sendWhatsAppTemplate(to, templateName, language, parameters, templateVariables)
           : await sendWhatsAppText(to, message);
         const messageId = apiResult?.messages?.[0]?.id || apiResult?.message_id || '';
 
@@ -872,6 +1028,9 @@ function handleRequest(req, res) {
         const templateName = String(body.templateName || '').trim();
         const language = String(body.language || 'ar').trim() || 'ar';
         const parameters = Array.isArray(body.parameters) ? body.parameters : [];
+        const templateVariables = body.templateVariables && typeof body.templateVariables === 'object'
+          ? body.templateVariables
+          : {};
 
         console.log('[whatsapp/send] incoming payload:', JSON.stringify({
           to,
@@ -879,6 +1038,7 @@ function handleRequest(req, res) {
           templateName,
           language,
           parametersCount: parameters.length,
+          templateVariables: Object.keys(templateVariables),
         }));
 
         if (!to) {
@@ -887,7 +1047,7 @@ function handleRequest(req, res) {
         }
 
         const apiResult = templateName
-          ? await sendWhatsAppTemplate(to, templateName, language, parameters)
+          ? await sendWhatsAppTemplate(to, templateName, language, parameters, templateVariables)
           : await sendWhatsAppText(to, message);
         sendJson(req, res, 200, apiResult);
       } catch (error) {
