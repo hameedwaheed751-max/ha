@@ -13,7 +13,9 @@ const WHATSAPP_PHONE_NUMBER_ID = String(process.env.WHATSAPP_PHONE_NUMBER_ID || 
 const WHATSAPP_VERIFY_TOKEN = String(process.env.WHATSAPP_VERIFY_TOKEN || '').trim();
 const WHATSAPP_API_VERSION = String(process.env.WHATSAPP_API_VERSION || 'v22.0').trim();
 const WHATSAPP_BUSINESS_ACCOUNT_ID = String(
-  process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || process.env.WABA_ID || ''
+  process.env.WHATSAPP_BUSINESS_ACCOUNT_ID ||
+    process.env.WABA_ID ||
+    '2247793002705802'
 ).trim();
 const RENDER_GIT_COMMIT = String(process.env.RENDER_GIT_COMMIT || '').trim();
 let discoveredWhatsAppBusinessAccountId = WHATSAPP_BUSINESS_ACCOUNT_ID;

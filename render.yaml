@@ -14,6 +14,8 @@ services:
         value: "1"
       - key: SAS_TARGET_ALLOWLIST
         value: ""
+      - key: WHATSAPP_BUSINESS_ACCOUNT_ID
+        value: "2247793002705802"
       # Required for WhatsApp Cloud API webhook verification
       # - key: WHATSAPP_VERIFY_TOKEN
       #   value: your-verify-token

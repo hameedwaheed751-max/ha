@@ -15,6 +15,8 @@ services:
       # السماح بأي هوست SAS (غيّر هذا إلى نطاق SAS الخاص بك لمزيد من الأمان)
       - key: SAS_TARGET_ALLOWLIST
         value: ""
+      - key: WHATSAPP_BUSINESS_ACCOUNT_ID
+        value: "2247793002705802"
       # اختياري: حدد رابط SAS الافتراضي حتى لا تحتاج لإرساله من التطبيق
       # - key: SAS_TARGET_URL
       #   value: https://sas.speednet-iq.com
