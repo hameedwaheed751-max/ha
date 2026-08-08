@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
+import 'whatsapp_template_contract.dart';
 
 enum WhatsAppNotificationType {
   subscriptionActivated,
@@ -264,7 +265,7 @@ class RenderWhatsAppService {
         return map['debt'] ?? AppStore.debtTemplate;
       case WhatsAppNotificationType.debtPaid:
         return map['debtPaid'] ??
-            'مرحباً {{customer_name}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المتبقي: {{remaining_amount}} دينار عراقي\n📅 تاريخ التسديد: {{payment_date}}\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
+            'مرحباً {{customer_name}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المتبقي: {{remaining_amount}} دينار عراقي\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
       case WhatsAppNotificationType.generalMessage:
         return '{message}';
       case WhatsAppNotificationType.broadcast:
@@ -276,13 +277,14 @@ class RenderWhatsAppService {
     Subscriber s, {
     String? message,
     double? amount,
+    double? paidAmount,
     double? balance,
     String? packageName,
     DateTime? expiryDate,
     String? agentName,
   }) {
     final resolvedPackage = (packageName ?? s.packageDisplay).trim();
-    final resolvedAmount = amount == null ? '' : amount.toStringAsFixed(0);
+    final resolvedAmount = amount?.toStringAsFixed(0);
     final resolvedBalance = (balance ?? s.remaining).toStringAsFixed(0);
     final resolvedAgent = (agentName ?? AppStore.effectiveAgentName).trim();
     final resolvedWhatsApp = normalizePhone(AppStore.officePhone.trim());
@@ -308,12 +310,12 @@ class RenderWhatsAppService {
       'price': s.price.toStringAsFixed(0),
       'subscription_amount': s.price.toStringAsFixed(0),
       'paid': s.paid.toStringAsFixed(0),
-      'paid_amount': s.paid.toStringAsFixed(0),
+      'paid_amount': (paidAmount ?? s.paid).toStringAsFixed(0),
       'remaining': resolvedBalance,
       'balance': resolvedBalance,
       'remaining_amount': resolvedBalance,
-      'amount': resolvedAmount,
-      'debt_amount': resolvedAmount,
+      'amount': resolvedAmount ?? resolvedBalance,
+      'debt_amount': resolvedAmount ?? resolvedBalance,
       'agentName': resolvedAgent,
       'agent_name': resolvedAgent,
       'date': resolvedDate,
@@ -537,79 +539,17 @@ class RenderWhatsAppService {
     return (variables[placeholder] ?? '').trim();
   }
 
-  static List<String> _bodyParametersForTemplate(
-    String templateName,
-    Map<String, String> variables,
-  ) {
-    switch (templateName) {
-      case 'activated':
-        return <String>[
-          variables['customer_name']?.trim() ?? '',
-          variables['package_name']?.trim() ?? '',
-          variables['paid_amount']?.trim() ?? '',
-          variables['remaining_amount']?.trim() ?? '',
-          variables['subscription_start']?.trim() ?? '',
-          variables['subscription_end']?.trim() ?? '',
-          variables['agent_name']?.trim() ?? '',
-          variables['whatsapp_number']?.trim() ?? '',
-        ];
-      case 'expiring':
-        return <String>[
-          variables['name']?.trim() ?? '',
-          variables['endDate']?.trim() ?? '',
-        ];
-      case 'debt_added':
-      case 'debt_paid':
-        return <String>[
-          variables['name']?.trim() ?? '',
-          variables['amount']?.trim() ?? '',
-          variables['date']?.trim() ?? '',
-        ];
-      default:
-        return const <String>[];
-    }
-  }
-
-  static const List<String> _activatedParameterNames = <String>[
-    'customer_name',
-    'package_name',
-    'paid_amount',
-    'remaining_amount',
-    'subscription_start',
-    'subscription_end',
-    'agent_name',
-    'whatsapp_number',
-  ];
-
   static Map<String, dynamic> _buildMetaTemplatePayload({
     required String to,
     required String templateName,
     required Map<String, String> variables,
   }) {
-    final params = _bodyParametersForTemplate(templateName, variables);
-    final parameterNames = templateName == 'activated'
-        ? _activatedParameterNames
-        : const <String>[];
+    final parameters = buildMetaTemplateParameters(templateName, variables);
 
     debugPrint(
-      'Render WhatsApp template parameters for $templateName: ${jsonEncode(params)}',
+      'Render WhatsApp template parameters for $templateName: '
+      '${jsonEncode(parameters.map((parameter) => parameter.toMetaJson()).toList())}',
     );
-
-    final components = <Map<String, dynamic>>[];
-    if (params.isNotEmpty) {
-      components.add({
-        'type': 'body',
-        'parameters': List<Map<String, dynamic>>.generate(
-          params.length,
-          (index) => <String, dynamic>{
-            'type': 'text',
-            if (index < parameterNames.length)
-              'parameter_name': parameterNames[index],
-            'text': params[index],
-          },
-        ),
-      });
-    }
 
     return {
       'messaging_product': 'whatsapp',
@@ -618,7 +558,14 @@ class RenderWhatsAppService {
       'template': {
         'name': templateName,
         'language': {'code': 'ar'},
-        if (components.isNotEmpty) 'components': components,
+        'components': [
+          {
+            'type': 'body',
+            'parameters': parameters
+                .map((parameter) => parameter.toMetaJson())
+                .toList(growable: false),
+          },
+        ],
       },
     };
   }
@@ -836,6 +783,12 @@ class RenderWhatsAppService {
         error: 'Missing Meta WhatsApp configuration. Set META_WHATSAPP_PHONE_NUMBER_ID and META_WHATSAPP_ACCESS_TOKEN.',
       );
     }
+    if (!forcePlainText && payloadOverride == null) {
+      return const RenderSingleWhatsAppResult(
+        success: false,
+        error: 'A canonical named-parameter payload is required for Meta templates',
+      );
+    }
 
     final payload = (forcePlainText)
       ? <String, dynamic>{
@@ -843,46 +796,28 @@ class RenderWhatsAppService {
         'message': cleanMessage,
         }
       : usesMetaTemplate
-        ? (payloadOverride ?? <String, dynamic>{
-            'messaging_product': 'whatsapp',
-            'to': normalizedPhone,
-            'type': 'template',
-            'template': {
-              'name': templateName ?? 'activated',
-              'language': {'code': 'ar'},
-              'components': [
-                {
-                  'type': 'body',
-                  'parameters': [
-                    {'type': 'text', 'text': cleanMessage},
-                  ],
-                },
-              ],
-            },
-          })
+        ? payloadOverride!
         : () {
-            if (payloadOverride != null) {
-              final templateMap = payloadOverride['template'];
-              final templateNameValue =
-                  templateMap is Map ? (templateMap['name'] ?? '').toString().trim() : '';
-              final languageCode = templateMap is Map
-                  ? ((templateMap['language'] is Map
-                          ? (templateMap['language'] as Map)['code']
-                          : null) ??
-                      'ar')
-                      .toString()
-                      .trim()
-                  : 'ar';
-              final params = _extractTemplateBodyParameters(payloadOverride);
-              if (templateNameValue.isNotEmpty) {
-                return <String, dynamic>{
-                  'to': normalizedPhone,
-                  'message': cleanMessage,
-                  'templateName': templateNameValue,
-                  'language': languageCode.isEmpty ? 'ar' : languageCode,
-                  'parameters': params,
-                };
-              }
+            final templateMap = payloadOverride!['template'];
+            final templateNameValue =
+                templateMap is Map ? (templateMap['name'] ?? '').toString().trim() : '';
+            final languageCode = templateMap is Map
+                ? ((templateMap['language'] is Map
+                        ? (templateMap['language'] as Map)['code']
+                        : null) ??
+                    'ar')
+                    .toString()
+                    .trim()
+                : 'ar';
+            final params = _extractTemplateBodyParameters(payloadOverride);
+            if (templateNameValue.isNotEmpty) {
+              return <String, dynamic>{
+                'to': normalizedPhone,
+                'message': cleanMessage,
+                'templateName': templateNameValue,
+                'language': languageCode.isEmpty ? 'ar' : languageCode,
+                'parameters': params,
+              };
             }
 
             return <String, dynamic>{
@@ -989,6 +924,7 @@ class RenderWhatsAppService {
     String? template,
     String? message,
     double? amount,
+    double? paidAmount,
     double? balance,
     String? packageName,
     DateTime? expiryDate,
@@ -1007,6 +943,7 @@ class RenderWhatsAppService {
       subscriber,
       message: message,
       amount: amount,
+      paidAmount: paidAmount,
       balance: balance,
       packageName: packageName,
       expiryDate: expiryDate,
@@ -1015,11 +952,19 @@ class RenderWhatsAppService {
 
     final rendered = applyTemplate(tmpl, vars).trim();
     final templateName = _templateNameForType(type);
-    final payload = _buildMetaTemplatePayload(
-      to: phone,
-      templateName: templateName,
-      variables: vars,
-    );
+    late final Map<String, dynamic> payload;
+    try {
+      payload = _buildMetaTemplatePayload(
+        to: phone,
+        templateName: templateName,
+        variables: vars,
+      );
+    } on StateError catch (error) {
+      return RenderSingleWhatsAppResult(
+        success: false,
+        error: error.message,
+      );
+    }
 
     return _sendCore(
       to: phone,
@@ -1101,6 +1046,7 @@ class RenderWhatsAppService {
       subscriber: subscriber,
       template: template,
       amount: amountPaid,
+      paidAmount: amountPaid,
       balance: remainingBalance,
     );
   }

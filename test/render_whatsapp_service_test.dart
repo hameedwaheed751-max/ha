@@ -3,22 +3,25 @@ import 'package:untitled/models.dart';
 import 'package:untitled/services/render_whatsapp_service.dart';
 
 void main() {
-  test('uses the supported English-style debt placeholders in the default template', () {
+  test('uses the canonical Meta debt placeholders in the default template', () {
     expect(AppStore.debtTemplate, contains('{{customer_name}}'));
-    expect(AppStore.debtTemplate, contains('{{amount}}'));
-    expect(AppStore.debtTemplate, contains('{{date}}'));
+    expect(AppStore.debtTemplate, contains('{{paid_amount}}'));
+    expect(AppStore.debtTemplate, contains('{{remaining_amount}}'));
     expect(AppStore.debtTemplate, contains('{{agent_name}}'));
+    expect(AppStore.debtTemplate, contains('{{whatsapp_number}}'));
 
     final rendered = RenderWhatsAppService.applyTemplate(AppStore.debtTemplate, {
       'customer_name': 'أحمد',
-      'amount': '25000',
-      'date': '07/08/2026',
+      'paid_amount': '25000',
+      'remaining_amount': '5000',
       'agent_name': 'مكتب بغداد',
+      'whatsapp_number': '9647900000000',
     });
 
     expect(rendered, contains('مرحبا أحمد'));
-    expect(rendered, contains('المبلغ: 25000 دينار عراقي'));
-    expect(rendered, contains('التاريخ: 07/08/2026'));
+    expect(rendered, contains('المبلغ الواصل: 25000 دينار عراقي'));
+    expect(rendered, contains('المبلغ المتبقي: 5000 دينار عراقي'));
     expect(rendered, contains('مكتب بغداد'));
+    expect(rendered, contains('9647900000000'));
   });
 }

@@ -561,11 +561,11 @@ class AppStore {
     static const String activationTemplate =
       'مرحباً {{customer_name}}،\n✅ تم تفعيل اشتراك الإنترنت بنجاح.\n📦 الباقة: {{package_name}}\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المبلغ المتبقي: {{remaining_amount}} دينار عراقي\n📅 يبدأ الاشتراك: {{subscription_start}}\n📅 ينتهي الاشتراك: {{subscription_end}}\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
       static const String debtPaidTemplate =
-        'مرحباً {{customer_name}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المتبقي: {{remaining_amount}} دينار عراقي\n📅 تاريخ التسديد: {{payment_date}}\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
+        'مرحباً {{customer_name}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المتبقي: {{remaining_amount}} دينار عراقي\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
         static const String debtTemplate =
-          'مرحبا {{customer_name}}\nتم تسجيل مبلغ دين جديد على حسابك\nالمبلغ: {{amount}} دينار عراقي\nالتاريخ: {{date}}\nللاستفسار يرجى التواصل مع :\n{{agent_name}}';
+          'مرحبا {{customer_name}}\nتم تسجيل مبلغ دين جديد على حسابك\nالمبلغ الواصل: {{paid_amount}} دينار عراقي\nالمبلغ المتبقي: {{remaining_amount}} دينار عراقي\nللاستفسار يرجى التواصل مع:\n{{agent_name}}\n{{whatsapp_number}}';
   static const String nearExpiryTemplate =
-      'مرحباً {{customer_name}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📦 الباقة: {{package_name}}\n📅 تاريخ الانتهاء: {{subscription_end_date}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
+      'مرحباً {{customer_name}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📦 الباقة: {{package_name}}\n📅 تاريخ الانتهاء: {{subscription_end}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
   static final List<Subscriber> subscribers = [];
   static final List<DailyTaskEvent> dailyTaskEvents = [];
   static String agentFirstName = '';
@@ -673,13 +673,9 @@ class AppStore {
     messageTemplates['nearExpiry'] = nearExpiryTemplate;
     messageTemplates['activation'] = activationTemplate;
 
-    final currentDebtPaid = (messageTemplates['debtPaid'] ?? '').trim();
-    if (currentDebtPaid.isEmpty) {
-      messageTemplates['debtPaid'] = debtPaidTemplate;
-    }
-
-    // Always normalize debt template to the canonical approved wording.
+    // Always normalize debt templates to the canonical approved wording.
     messageTemplates['debt'] = debtTemplate;
+    messageTemplates['debtPaid'] = debtPaidTemplate;
   }
 
   /// مسار Firebase الأساسي للوكيل: agents/{uid}

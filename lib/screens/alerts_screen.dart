@@ -142,10 +142,9 @@ class _AlertsScreenState extends State<AlertsScreen> {
               template: rendered,
             );
           } else if (type == 'activated') {
-            single = await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
+            single = await RenderWhatsAppService.notifySubscriptionActivated(
               s,
-              message: rendered,
-              template: '{message}',
+              template: rendered,
             );
           } else {
             single = await RenderWhatsAppService.notifyGeneralMessageToSubscriber(

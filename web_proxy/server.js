@@ -529,22 +529,31 @@ async function sendWhatsAppTemplate(to, templateName, languageCode = 'ar', param
   const name = String(templateName || '').trim();
   const lang = String(languageCode || 'ar').trim() || 'ar';
   const bodyParameters = Array.isArray(parameters)
-    ? parameters
-        .map((parameter) => {
-          if (parameter && typeof parameter === 'object') {
-            const text = String(parameter.text || parameter.value || '').trim();
-            const parameterName = String(
+    ? parameters.map((parameter, index) => {
+        const text = parameter && typeof parameter === 'object'
+          ? String(parameter.text || parameter.value || '').trim()
+          : '';
+        const parameterName = parameter && typeof parameter === 'object'
+          ? String(
               parameter.parameterName || parameter.parameter_name || parameter.name || ''
-            ).trim();
-            return {
-              type: 'text',
-              ...(parameterName ? {parameter_name: parameterName} : {}),
-              text,
-            };
-          }
-          return {type: 'text', text: String(parameter || '').trim()};
-        })
-        .filter((parameter) => parameter.text.length > 0)
+            ).trim()
+          : '';
+
+        if (!parameterName || !text) {
+          const err = new Error(
+            `Template parameter ${index + 1} requires non-empty parameter_name and text`
+          );
+          err.statusCode = 400;
+          err.details = {templateName: name, parameterIndex: index};
+          throw err;
+        }
+
+        return {
+          type: 'text',
+          parameter_name: parameterName,
+          text,
+        };
+      })
     : [];
 
   if (!phoneNumberId || !accessToken) {
