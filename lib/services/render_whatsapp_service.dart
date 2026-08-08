@@ -652,31 +652,6 @@ class RenderWhatsAppService {
     return const <String>[];
   }
 
-  static bool _shouldRetryTemplateWithoutParams(Map<String, dynamic> responseBody) {
-    final encoded = jsonEncode(responseBody);
-    return encoded.contains('132000') &&
-        encoded.contains('expected number of params (0)');
-  }
-
-  static Map<String, dynamic> _withoutTemplateParams(Map<String, dynamic> payload) {
-    final updated = Map<String, dynamic>.from(payload);
-
-    if (updated.containsKey('parameters')) {
-      updated['parameters'] = <String>[];
-    }
-
-    final template = updated['template'];
-    if (template is Map) {
-      final updatedTemplate = Map<String, dynamic>.from(
-        Map<String, dynamic>.from(template.cast<Object?, Object?>()),
-      );
-      updatedTemplate.remove('components');
-      updated['template'] = updatedTemplate;
-    }
-
-    return updated;
-  }
-
   static Future<(String endpoint, String apiKey)> loadConfig() async {
     final phoneNumberId = _resolvePhoneNumberId();
     if (phoneNumberId.isEmpty) {
@@ -885,8 +860,7 @@ class RenderWhatsAppService {
           }();
 
     RenderSingleWhatsAppResult? lastFailure;
-    var currentPayload = Map<String, dynamic>.from(payload);
-    var retriedWithoutParams = false;
+    final currentPayload = Map<String, dynamic>.from(payload);
 
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -948,16 +922,6 @@ class RenderWhatsAppService {
           statusCode: response.statusCode,
         );
 
-        final shouldRetryWithoutParams =
-            !retriedWithoutParams && _shouldRetryTemplateWithoutParams(lastFailure.details ?? const <String, dynamic>{});
-        if (shouldRetryWithoutParams) {
-          retriedWithoutParams = true;
-          currentPayload = _withoutTemplateParams(currentPayload);
-          debugPrint(
-            'Render WhatsApp retrying template without parameters after 132000 mismatch.',
-          );
-          continue;
-        }
       } catch (e) {
         await _appendAttemptLog(
           eventType: eventType,

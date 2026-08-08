@@ -610,26 +610,6 @@ async function sendWhatsAppTemplate(to, templateName, languageCode = 'ar', param
   return parsed;
 }
 
-async function sendWhatsAppTemplateWithFallback(to, templateName, languageCode = 'ar', parameters = []) {
-  try {
-    return await sendWhatsAppTemplate(to, templateName, languageCode, parameters);
-  } catch (error) {
-    const detailsText = JSON.stringify(error?.details || {});
-    const expectsZeroParams =
-      Number(error?.statusCode) === 400 &&
-      detailsText.includes('expected number of params (0)');
-
-    if (!expectsZeroParams || !Array.isArray(parameters) || parameters.length === 0) {
-      throw error;
-    }
-
-    console.warn(
-      `[whatsapp] template ${templateName} rejected ${parameters.length} params, retrying without body parameters`
-    );
-    return await sendWhatsAppTemplate(to, templateName, languageCode, []);
-  }
-}
-
 function handleHtmlError(req, res, upstreamRes, targetBaseUrl, sasPath) {
   const MAX_CAPTURE_BYTES = 256 * 1024;
   const chunks = [];
@@ -832,7 +812,7 @@ function handleRequest(req, res) {
         }
 
         const apiResult = templateName
-          ? await sendWhatsAppTemplateWithFallback(to, templateName, language, parameters)
+          ? await sendWhatsAppTemplate(to, templateName, language, parameters)
           : await sendWhatsAppText(to, message);
         const messageId = apiResult?.messages?.[0]?.id || apiResult?.message_id || '';
 
@@ -898,7 +878,7 @@ function handleRequest(req, res) {
         }
 
         const apiResult = templateName
-          ? await sendWhatsAppTemplateWithFallback(to, templateName, language, parameters)
+          ? await sendWhatsAppTemplate(to, templateName, language, parameters)
           : await sendWhatsAppText(to, message);
         sendJson(req, res, 200, apiResult);
       } catch (error) {
