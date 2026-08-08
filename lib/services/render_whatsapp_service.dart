@@ -354,12 +354,6 @@ class RenderWhatsAppService {
     return out;
   }
 
-  static bool _hasTemplatePlaceholders(String text) {
-    final hasDouble = RegExp(r'\{\{\s*[^{}]+\s*\}\}').hasMatch(text);
-    final hasSingle = RegExp(r'\{\s*[a-zA-Z][^{}]*\s*\}').hasMatch(text);
-    return hasDouble || hasSingle;
-  }
-
   static String _resolvePhoneNumberId() {
     return _metaPhoneNumberId.trim().isNotEmpty
         ? _metaPhoneNumberId.trim()
@@ -388,30 +382,6 @@ class RenderWhatsAppService {
       case WhatsAppNotificationType.broadcast:
         return 'activated';
     }
-  }
-
-  static List<String> _templateNameCandidatesForType(WhatsAppNotificationType type) {
-    switch (type) {
-      case WhatsAppNotificationType.debtAdded:
-        return const <String>['debt_added', 'dept_paid', 'debt_paid'];
-      case WhatsAppNotificationType.debtPaid:
-        return const <String>['debt_paid', 'dept_paid', 'debt_added'];
-      default:
-        return <String>[_templateNameForType(type)];
-    }
-  }
-
-  static List<String> _extractOrderedPlaceholders(String templateBody) {
-    final matches = RegExp(r'\{\{\s*([^{}]+?)\s*\}\}|\{\s*([a-zA-Z][^{}]*?)\s*\}')
-        .allMatches(templateBody);
-    final ordered = <String>[];
-    for (final match in matches) {
-      final placeholder = (match.group(1) ?? match.group(2) ?? '').trim();
-      if (placeholder.isNotEmpty) {
-        ordered.add(placeholder);
-      }
-    }
-    return ordered;
   }
 
   static String _normalizePlaceholderKey(String placeholder) {
@@ -562,27 +532,39 @@ class RenderWhatsAppService {
   }
 
   static List<String> _bodyParametersForTemplate(
-    String templateBody,
+    String templateName,
     Map<String, String> variables,
   ) {
-    final placeholders = _extractOrderedPlaceholders(templateBody);
-    if (placeholders.isEmpty) {
-      final fallbackMessage = (variables['message'] ?? '').trim();
-      return fallbackMessage.isEmpty ? const <String>[] : <String>[fallbackMessage];
+    switch (templateName) {
+      case 'activated':
+        return <String>[
+          variables['name']?.trim() ?? '',
+          variables['package']?.trim() ?? '',
+          variables['endDate']?.trim() ?? '',
+        ];
+      case 'expiring':
+        return <String>[
+          variables['name']?.trim() ?? '',
+          variables['endDate']?.trim() ?? '',
+        ];
+      case 'debt_added':
+      case 'debt_paid':
+        return <String>[
+          variables['name']?.trim() ?? '',
+          variables['amount']?.trim() ?? '',
+          variables['date']?.trim() ?? '',
+        ];
+      default:
+        return const <String>[];
     }
-
-    return placeholders
-        .map((placeholder) => _valueForPlaceholder(placeholder, variables))
-        .toList();
   }
 
   static Map<String, dynamic> _buildMetaTemplatePayload({
     required String to,
     required String templateName,
-    required String templateBody,
     required Map<String, String> variables,
   }) {
-    final params = _bodyParametersForTemplate(templateBody, variables);
+    final params = _bodyParametersForTemplate(templateName, variables);
 
     debugPrint(
       'Render WhatsApp template parameters for $templateName: ${jsonEncode(params)}',
@@ -997,50 +979,20 @@ class RenderWhatsAppService {
     );
 
     final rendered = applyTemplate(tmpl, vars).trim();
+    final templateName = _templateNameForType(type);
+    final payload = _buildMetaTemplatePayload(
+      to: phone,
+      templateName: templateName,
+      variables: vars,
+    );
 
-    // إذا كان النص مُجهزاً مسبقاً (بدون placeholders) نرسله كنص مباشر
-    // حتى لا يصل للعميل بصيغة {{...}} من قالب Meta بدون parameters.
-    if (!_hasTemplatePlaceholders(tmpl)) {
-      return _sendCore(
-        to: phone,
-        message: rendered,
-        eventType: type.eventType,
-        note: '${type.eventType}_plain',
-        forcePlainText: true,
-      );
-    }
-
-    final candidates = _templateNameCandidatesForType(type);
-    for (final candidate in candidates) {
-      final payload = _buildMetaTemplatePayload(
-        to: phone,
-        templateName: candidate,
-        templateBody: tmpl,
-        variables: vars,
-      );
-
-      final result = await _sendCore(
-        to: phone,
-        message: rendered,
-        eventType: type.eventType,
-        note: '${type.eventType}_$candidate',
-        templateName: candidate,
-        payloadOverride: payload,
-      );
-
-      if (result.success) {
-        return result;
-      }
-    }
-
-    // fallback نهائي كنص مباشر إذا فشل ربط قالب Meta.
-    return await _sendCore(
+    return _sendCore(
       to: phone,
       message: rendered,
       eventType: type.eventType,
-      note: '${type.eventType}_plain_fallback',
-      forcePlainText: true,
-      maxAttempts: 1,
+      note: '${type.eventType}_$templateName',
+      templateName: templateName,
+      payloadOverride: payload,
     );
   }
 
