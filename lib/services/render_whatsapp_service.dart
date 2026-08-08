@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models.dart';
 
 enum WhatsAppNotificationType {
+  subscriptionActivated,
   subscriptionRenewed,
   subscriptionExpiresIn3Days,
   subscriptionExpired,
@@ -22,6 +23,8 @@ enum WhatsAppNotificationType {
 extension WhatsAppNotificationTypeX on WhatsAppNotificationType {
   String get eventType {
     switch (this) {
+      case WhatsAppNotificationType.subscriptionActivated:
+        return 'subscription_activated';
       case WhatsAppNotificationType.subscriptionRenewed:
         return 'subscription_renewed';
       case WhatsAppNotificationType.subscriptionExpiresIn3Days:
@@ -247,6 +250,8 @@ class RenderWhatsAppService {
   static String _templateForType(WhatsAppNotificationType type) {
     final map = AppStore.messageTemplates;
     switch (type) {
+      case WhatsAppNotificationType.subscriptionActivated:
+        return map['activation'] ?? AppStore.activationTemplate;
       case WhatsAppNotificationType.subscriptionRenewed:
         return map['extension'] ??
             'مرحباً {{customer_name}}،\n✅ تم تجديد اشتراكك بنجاح لدى {{agent_name}} حتى {{subscription_end_date}}.\n📦 الباقة: {{package_name}}\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المبلغ المتبقي: {{remaining_amount}} دينار عراقي\n📱 {{whatsapp_number}}';
@@ -368,6 +373,7 @@ class RenderWhatsAppService {
 
   static String _templateNameForType(WhatsAppNotificationType type) {
     switch (type) {
+      case WhatsAppNotificationType.subscriptionActivated:
       case WhatsAppNotificationType.subscriptionRenewed:
         return 'activated';
       case WhatsAppNotificationType.subscriptionExpiresIn3Days:
@@ -538,9 +544,14 @@ class RenderWhatsAppService {
     switch (templateName) {
       case 'activated':
         return <String>[
-          variables['name']?.trim() ?? '',
-          variables['package']?.trim() ?? '',
-          variables['endDate']?.trim() ?? '',
+          variables['customer_name']?.trim() ?? '',
+          variables['package_name']?.trim() ?? '',
+          variables['paid_amount']?.trim() ?? '',
+          variables['remaining_amount']?.trim() ?? '',
+          variables['subscription_start']?.trim() ?? '',
+          variables['subscription_end']?.trim() ?? '',
+          variables['agent_name']?.trim() ?? '',
+          variables['whatsapp_number']?.trim() ?? '',
         ];
       case 'expiring':
         return <String>[
@@ -559,12 +570,26 @@ class RenderWhatsAppService {
     }
   }
 
+  static const List<String> _activatedParameterNames = <String>[
+    'customer_name',
+    'package_name',
+    'paid_amount',
+    'remaining_amount',
+    'subscription_start',
+    'subscription_end',
+    'agent_name',
+    'whatsapp_number',
+  ];
+
   static Map<String, dynamic> _buildMetaTemplatePayload({
     required String to,
     required String templateName,
     required Map<String, String> variables,
   }) {
     final params = _bodyParametersForTemplate(templateName, variables);
+    final parameterNames = templateName == 'activated'
+        ? _activatedParameterNames
+        : const <String>[];
 
     debugPrint(
       'Render WhatsApp template parameters for $templateName: ${jsonEncode(params)}',
@@ -574,9 +599,15 @@ class RenderWhatsAppService {
     if (params.isNotEmpty) {
       components.add({
         'type': 'body',
-        'parameters': params
-            .map((value) => <String, dynamic>{'type': 'text', 'text': value})
-            .toList(),
+        'parameters': List<Map<String, dynamic>>.generate(
+          params.length,
+          (index) => <String, dynamic>{
+            'type': 'text',
+            if (index < parameterNames.length)
+              'parameter_name': parameterNames[index],
+            'text': params[index],
+          },
+        ),
       });
     }
 
@@ -592,7 +623,7 @@ class RenderWhatsAppService {
     };
   }
 
-  static List<String> _extractTemplateBodyTexts(Map<String, dynamic> payload) {
+  static List<dynamic> _extractTemplateBodyParameters(Map<String, dynamic> payload) {
     final template = payload['template'];
     if (template is! Map) return const <String>[];
     final components = template['components'];
@@ -603,11 +634,19 @@ class RenderWhatsAppService {
       if ((component['type'] ?? '').toString() != 'body') continue;
       final parameters = component['parameters'];
       if (parameters is! List) return const <String>[];
-      return parameters
-          .whereType<Map>()
-          .map((p) => (p['text'] ?? '').toString().trim())
-          .where((v) => v.isNotEmpty)
-          .toList();
+      return parameters.whereType<Map>().map((parameter) {
+        final text = (parameter['text'] ?? '').toString().trim();
+        final parameterName =
+            (parameter['parameter_name'] ?? '').toString().trim();
+        if (parameterName.isEmpty) return text;
+        return <String, String>{
+          'parameterName': parameterName,
+          'text': text,
+        };
+      }).where((value) {
+        if (value is String) return value.isNotEmpty;
+        return value is Map && (value['text'] ?? '').toString().isNotEmpty;
+      }).toList();
     }
 
     return const <String>[];
@@ -827,7 +866,7 @@ class RenderWhatsAppService {
                       .toString()
                       .trim()
                   : 'ar';
-              final params = _extractTemplateBodyTexts(payloadOverride);
+              final params = _extractTemplateBodyParameters(payloadOverride);
               if (templateNameValue.isNotEmpty) {
                 return <String, dynamic>{
                   'to': normalizedPhone,
@@ -1002,6 +1041,17 @@ class RenderWhatsAppService {
   }) {
     return _notifyByType(
       type: WhatsAppNotificationType.subscriptionRenewed,
+      subscriber: subscriber,
+      template: template,
+    );
+  }
+
+  static Future<RenderSingleWhatsAppResult> notifySubscriptionActivated(
+    Subscriber subscriber, {
+    String? template,
+  }) {
+    return _notifyByType(
+      type: WhatsAppNotificationType.subscriptionActivated,
       subscriber: subscriber,
       template: template,
     );

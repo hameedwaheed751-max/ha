@@ -530,9 +530,21 @@ async function sendWhatsAppTemplate(to, templateName, languageCode = 'ar', param
   const lang = String(languageCode || 'ar').trim() || 'ar';
   const bodyParameters = Array.isArray(parameters)
     ? parameters
-        .map((p) => String(p || '').trim())
-        .filter((p) => p.length > 0)
-        .map((p) => ({type: 'text', text: p}))
+        .map((parameter) => {
+          if (parameter && typeof parameter === 'object') {
+            const text = String(parameter.text || parameter.value || '').trim();
+            const parameterName = String(
+              parameter.parameterName || parameter.parameter_name || parameter.name || ''
+            ).trim();
+            return {
+              type: 'text',
+              ...(parameterName ? {parameter_name: parameterName} : {}),
+              text,
+            };
+          }
+          return {type: 'text', text: String(parameter || '').trim()};
+        })
+        .filter((parameter) => parameter.text.length > 0)
     : [];
 
   if (!phoneNumberId || !accessToken) {

@@ -369,9 +369,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     final activationTemplate = AppStore.messageTemplates['activation'] ??
         'مرحباً {name}، تم تفعيل اشتراكك لدى {office}. الباقة: {package} وتنتهي بتاريخ {endDate}.';
 
-    final result = await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
+    final result = await RenderWhatsAppService.notifySubscriptionActivated(
       s,
-      message: '',
       template: activationTemplate,
     );
 
