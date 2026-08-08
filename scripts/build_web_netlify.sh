@@ -22,6 +22,12 @@ if [ -z "${SAS_PROXY_TOKEN:-}" ] || [ -z "${SAS_WEB_PROXY_URL:-}" ]; then
   exit 1
 fi
 
+if [[ "$SAS_WEB_PROXY_URL" == *".onreder.com"* ]]; then
+  echo "Correcting misspelled Render hostname in SAS_WEB_PROXY_URL"
+  SAS_WEB_PROXY_URL="${SAS_WEB_PROXY_URL/.onreder.com/.onrender.com}"
+  export SAS_WEB_PROXY_URL
+fi
+
 mkdir -p web
 cat > web/runtime_config.js <<EOF
 window.__APP_CONFIG__ = {
