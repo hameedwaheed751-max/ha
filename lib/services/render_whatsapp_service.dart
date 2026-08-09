@@ -145,6 +145,7 @@ class WhatsAppSendLog {
 }
 
 class RenderWhatsAppService {
+  static const String clientBuild = 'whatsapp-template-v3';
   static const String endpointKey = 'render_whatsapp_endpoint';
   static const String sendMessageEndpointKey = 'render_send_message_endpoint';
   static const String apiKeyKey = 'render_whatsapp_api_key';
@@ -802,6 +803,7 @@ class RenderWhatsAppService {
       ? <String, dynamic>{
         'to': normalizedPhone,
         'message': cleanMessage,
+        'clientBuild': clientBuild,
         }
       : usesMetaTemplate
         ? payloadOverride!
@@ -822,6 +824,7 @@ class RenderWhatsAppService {
               return <String, dynamic>{
                 'to': normalizedPhone,
                 'message': cleanMessage,
+                'clientBuild': clientBuild,
                 'templateName': templateNameValue,
                 'language': languageCode.isEmpty ? 'ar' : languageCode,
                 'parameters': params,
@@ -832,6 +835,7 @@ class RenderWhatsAppService {
             return <String, dynamic>{
               'to': normalizedPhone,
               'message': cleanMessage,
+              'clientBuild': clientBuild,
             };
           }();
 

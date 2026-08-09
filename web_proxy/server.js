@@ -960,6 +960,7 @@ function handleRequest(req, res) {
         const templateName = String(body.templateName || '').trim();
         const language = String(body.language || 'ar').trim() || 'ar';
         const parameters = Array.isArray(body.parameters) ? body.parameters : [];
+        const clientBuild = String(body.clientBuild || 'legacy').trim() || 'legacy';
         const templateVariables = body.templateVariables && typeof body.templateVariables === 'object'
           ? body.templateVariables
           : {};
@@ -971,7 +972,17 @@ function handleRequest(req, res) {
           language,
           parametersCount: parameters.length,
           templateVariables: Object.keys(templateVariables),
+          clientBuild,
         }));
+
+        if (clientBuild === 'legacy') {
+          sendJson(req, res, 409, {
+            success: false,
+            error: 'The web app is outdated. Reload it after the latest Netlify deployment.',
+            requiredClientBuild: 'whatsapp-template-v3',
+          });
+          return;
+        }
 
         if (!to) {
           sendJson(req, res, 400, {error: '"to" is required'});
@@ -1030,6 +1041,7 @@ function handleRequest(req, res) {
         const templateName = String(body.templateName || '').trim();
         const language = String(body.language || 'ar').trim() || 'ar';
         const parameters = Array.isArray(body.parameters) ? body.parameters : [];
+        const clientBuild = String(body.clientBuild || 'legacy').trim() || 'legacy';
         const templateVariables = body.templateVariables && typeof body.templateVariables === 'object'
           ? body.templateVariables
           : {};
@@ -1041,7 +1053,16 @@ function handleRequest(req, res) {
           language,
           parametersCount: parameters.length,
           templateVariables: Object.keys(templateVariables),
+          clientBuild,
         }));
+
+        if (clientBuild === 'legacy') {
+          sendJson(req, res, 409, {
+            error: 'The web app is outdated. Reload it after the latest Netlify deployment.',
+            requiredClientBuild: 'whatsapp-template-v3',
+          });
+          return;
+        }
 
         if (!to) {
           sendJson(req, res, 400, {error: '"to" is required'});

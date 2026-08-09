@@ -14,6 +14,19 @@ flutter config --no-analytics
 flutter clean
 flutter pub get
 
+# Source assets only belong in web/. Generated files here can overwrite the
+# fresh compiler output when Flutter copies web assets into build/web.
+rm -f \
+  web/.last_build_id \
+  web/flutter.js \
+  web/flutter_service_worker.js \
+  web/main.dart.js \
+  web/version.json \
+  web/canvaskit.js web/canvaskit.js.symbols web/canvaskit.wasm \
+  web/skwasm.js web/skwasm.js.symbols web/skwasm.wasm \
+  web/skwasm_heavy.js web/skwasm_heavy.js.symbols web/skwasm_heavy.wasm \
+  web/wimp.js web/wimp.js.symbols web/wimp.wasm
+
 echo "Netlify SAS_PROXY_TOKEN present: ${SAS_PROXY_TOKEN:+yes}"
 echo "Netlify SAS_WEB_PROXY_URL present: ${SAS_WEB_PROXY_URL:+yes}"
 
@@ -36,7 +49,7 @@ window.__APP_CONFIG__ = {
 };
 EOF
 
-flutter build web --release \
+flutter build web --release --pwa-strategy=none \
   --dart-define=SAS_PROXY_TOKEN="${SAS_PROXY_TOKEN}" \
   --dart-define=SAS_WEB_PROXY_URL="${SAS_WEB_PROXY_URL}"
 
