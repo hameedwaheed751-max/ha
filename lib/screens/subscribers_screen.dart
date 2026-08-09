@@ -643,8 +643,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           _filteredSubscribers = _buildFilteredSubscribers();
         });
 
-        _debt(s, autoOpenReceiptAfterSave: true);
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('✅ تم التفعيل وتحديث حالة المشترك تلقائياً'),
