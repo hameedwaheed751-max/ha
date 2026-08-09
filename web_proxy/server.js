@@ -614,8 +614,8 @@ async function getApprovedTemplateContract(templateName, languageCode, phoneNumb
   );
   const bodyText = String(body?.text || '');
   const names = Array.from(
-    bodyText.matchAll(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g),
-    (match) => match[1]
+    bodyText.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g),
+    (match) => match[1].trim()
   );
   const uniqueNames = Array.from(new Set(names));
   const parameterFormat = String(template.parameter_format || '').toUpperCase();
@@ -700,8 +700,15 @@ async function sendWhatsAppTemplate(
       )
     : {};
   const contract = await getApprovedTemplateContract(name, lang, phoneNumberId, accessToken);
+  const metaVariableAliases = {
+    'اسم المشترك': 'customer_name',
+    'مبلغ الدين': 'debt_amount',
+    'التاريخ': 'notification_date',
+    'اسم الوكيل': 'agent_name',
+  };
   const bodyParameters = contract.names.map((parameterName) => {
-    const text = canonicalValues[parameterName] ||
+    const canonicalName = metaVariableAliases[parameterName] || parameterName;
+    const text = canonicalValues[canonicalName] ||
       suppliedParameters.find((parameter) => parameter.parameter_name === parameterName)?.text ||
       '';
     if (!text) {

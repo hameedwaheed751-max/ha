@@ -11,6 +11,8 @@ void main() {
     'subscription_end': '01/09/2026',
     'agent_name': 'الوكيل',
     'whatsapp_number': '9647900000000',
+    'debt_amount': '5000',
+    'notification_date': '24/08/2026',
   };
 
   test('activated uses all approved named Meta parameters in order', () {
@@ -57,24 +59,34 @@ void main() {
     expect(names, isNot(contains('subscription_end_date')));
   });
 
-  test('debt templates use canonical payment and balance parameters', () {
-    for (final templateName in <String>['debt_added', 'debt_paid']) {
-      final names = buildMetaTemplateParameters(templateName, values)
-          .map((parameter) => parameter.name)
-          .toList();
+  test('debt added matches the approved Arabic named Meta contract', () {
+    final parameters = buildMetaTemplateParameters('debt_added', values);
 
-      expect(
-        names,
-        <String>[
-          'customer_name',
-          'paid_amount',
-          'remaining_amount',
-          'agent_name',
-          'whatsapp_number',
-        ],
-      );
-      expect(names, isNot(containsAll(<String>['amount', 'date'])));
-    }
+    expect(
+      parameters.map((parameter) => parameter.name),
+      <String>['اسم المشترك', 'مبلغ الدين', 'التاريخ', 'اسم الوكيل'],
+    );
+    expect(
+      parameters.map((parameter) => parameter.text),
+      <String>['أحمد', '5000', '24/08/2026', 'الوكيل'],
+    );
+  });
+
+  test('debt paid keeps its canonical payment and balance contract', () {
+    final names = buildMetaTemplateParameters('debt_paid', values)
+        .map((parameter) => parameter.name)
+        .toList();
+
+    expect(
+      names,
+      <String>[
+        'customer_name',
+        'paid_amount',
+        'remaining_amount',
+        'agent_name',
+        'whatsapp_number',
+      ],
+    );
   });
 
   test('missing required values fail before sending an invalid template', () {

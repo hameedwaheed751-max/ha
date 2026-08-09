@@ -23,7 +23,16 @@ const List<String> canonicalMetaVariableNames = <String>[
   'subscription_end',
   'agent_name',
   'whatsapp_number',
+  'debt_amount',
+  'notification_date',
 ];
+
+const Map<String, String> metaParameterValueNames = <String, String>{
+  'اسم المشترك': 'customer_name',
+  'مبلغ الدين': 'debt_amount',
+  'التاريخ': 'notification_date',
+  'اسم الوكيل': 'agent_name',
+};
 
 const Map<String, List<String>> metaTemplateParameterNames =
     <String, List<String>>{
@@ -45,11 +54,10 @@ const Map<String, List<String>> metaTemplateParameterNames =
     'whatsapp_number',
   ],
   'debt_added': <String>[
-    'customer_name',
-    'paid_amount',
-    'remaining_amount',
-    'agent_name',
-    'whatsapp_number',
+    'اسم المشترك',
+    'مبلغ الدين',
+    'التاريخ',
+    'اسم الوكيل',
   ],
   'debt_paid': <String>[
     'customer_name',
@@ -74,7 +82,8 @@ List<WhatsAppTemplateParameter> buildMetaTemplateParameters(
   }
 
   return names.map((name) {
-    final value = variables[name]?.trim() ?? '';
+    final valueName = metaParameterValueNames[name] ?? name;
+    final value = variables[valueName]?.trim() ?? '';
     if (value.isEmpty) {
       throw StateError(
         'Meta template "$templateName" requires a non-empty "$name" value',

@@ -321,6 +321,7 @@ class RenderWhatsAppService {
       'agent_name': resolvedAgent,
       'date': resolvedDate,
       'payment_date': resolvedDate,
+      'notification_date': resolvedDate,
       'whatsappNumber': resolvedWhatsApp,
       'whatsapp_number': resolvedWhatsApp,
       'message': message ?? '',
@@ -1048,7 +1049,7 @@ class RenderWhatsAppService {
       type: WhatsAppNotificationType.debtAdded,
       subscriber: subscriber,
       template: template,
-      amount: amountAdded,
+      amount: amountAdded > 0 ? amountAdded : remainingBalance,
       balance: remainingBalance,
     );
   }
