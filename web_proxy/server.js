@@ -613,10 +613,12 @@ async function getApprovedTemplateContract(templateName, languageCode, phoneNumb
     (component) => String(component?.type || '').toUpperCase() === 'BODY'
   );
   const bodyText = String(body?.text || '');
-  const names = Array.from(
-    bodyText.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g),
-    (match) => match[1].trim()
-  );
+  const namedExamples = Array.isArray(body?.example?.body_text_named_params)
+    ? body.example.body_text_named_params
+    : [];
+  const names = namedExamples
+    .map((example) => String(example?.param_name || '').trim())
+    .filter((name) => name.length > 0);
   const uniqueNames = Array.from(new Set(names));
   const parameterFormat = String(template.parameter_format || '').toUpperCase();
   if (parameterFormat && parameterFormat !== 'NAMED') {
@@ -625,10 +627,12 @@ async function getApprovedTemplateContract(templateName, languageCode, phoneNumb
     err.details = {templateName, parameterFormat};
     throw err;
   }
-  if (uniqueNames.length === 0) {
-    const err = new Error(`Meta template ${templateName} has no recognized named BODY variables`);
+  if (uniqueNames.length === 0 && /\{\{[^{}]+\}\}/.test(bodyText)) {
+    const err = new Error(
+      `Meta template ${templateName} contains placeholder text but Meta compiled zero BODY parameters`
+    );
     err.statusCode = 400;
-    err.details = {templateName, bodyText};
+    err.details = {templateName, parameterFormat, bodyText};
     throw err;
   }
 
@@ -705,15 +709,8 @@ async function sendWhatsAppTemplate(
       )
     : {};
   const contract = await getApprovedTemplateContract(name, lang, phoneNumberId, accessToken);
-  const metaVariableAliases = {
-    'اسم المشترك': 'customer_name',
-    'مبلغ الدين': 'debt_amount',
-    'التاريخ': 'notification_date',
-    'اسم الوكيل': 'agent_name',
-  };
   const bodyParameters = contract.names.map((parameterName) => {
-    const canonicalName = metaVariableAliases[parameterName] || parameterName;
-    const text = canonicalValues[canonicalName] ||
+    const text = canonicalValues[parameterName] ||
       suppliedParameters.find((parameter) => parameter.parameter_name === parameterName)?.text ||
       '';
     if (!text) {

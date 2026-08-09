@@ -385,7 +385,7 @@ class RenderWhatsAppService {
       case WhatsAppNotificationType.subscriptionExpired:
         return 'expiring';
       case WhatsAppNotificationType.debtAdded:
-        return 'debt_added';
+        return 'debt_paid';
       case WhatsAppNotificationType.debtPaid:
         return 'debt_paid';
       case WhatsAppNotificationType.generalMessage:

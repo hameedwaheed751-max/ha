@@ -59,20 +59,14 @@ void main() {
     expect(names, isNot(contains('subscription_end_date')));
   });
 
-  test('debt added matches the approved Arabic named Meta contract', () {
-    final parameters = buildMetaTemplateParameters('debt_added', values);
-
+  test('invalid debt added Meta template is not exposed for sending', () {
     expect(
-      parameters.map((parameter) => parameter.name),
-      <String>['اسم المشترك', 'مبلغ الدين', 'التاريخ', 'اسم الوكيل'],
-    );
-    expect(
-      parameters.map((parameter) => parameter.text),
-      <String>['أحمد', '5000', '24/08/2026', 'الوكيل'],
+      () => buildMetaTemplateParameters('debt_added', values),
+      throwsArgumentError,
     );
   });
 
-  test('debt paid keeps its canonical payment and balance contract', () {
+  test('approved debt reminder uses its compiled Meta contract', () {
     final names = buildMetaTemplateParameters('debt_paid', values)
         .map((parameter) => parameter.name)
         .toList();
@@ -81,10 +75,8 @@ void main() {
       names,
       <String>[
         'customer_name',
-        'paid_amount',
         'remaining_amount',
         'agent_name',
-        'whatsapp_number',
       ],
     );
   });
