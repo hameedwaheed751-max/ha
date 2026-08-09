@@ -1027,6 +1027,57 @@ function handleRequest(req, res) {
     return;
   }
 
+  if (parsedHealthUrl.pathname === '/whatsapp/template-contract') {
+    if (req.method !== 'GET') {
+      sendJson(req, res, 405, {error: 'Method Not Allowed'});
+      return;
+    }
+
+    (async () => {
+      try {
+        const templateName = String(
+          parsedHealthUrl.searchParams.get('name') || ''
+        ).trim();
+        const language = String(
+          parsedHealthUrl.searchParams.get('language') || 'ar'
+        ).trim() || 'ar';
+        const accessToken = WHATSAPP_ACCESS_TOKEN || WHATSAPP_TOKEN;
+        const phoneNumberId = WHATSAPP_PHONE_NUMBER_ID || PHONE_NUMBER_ID;
+
+        if (!templateName) {
+          sendJson(req, res, 400, {error: 'Template name is required'});
+          return;
+        }
+        if (!phoneNumberId || !accessToken) {
+          sendJson(req, res, 500, {error: 'Missing WhatsApp configuration'});
+          return;
+        }
+
+        templateContractCache.delete(`${templateName}:${language}`);
+        const contract = await getApprovedTemplateContract(
+          templateName,
+          language,
+          phoneNumberId,
+          accessToken
+        );
+        sendJson(req, res, 200, {
+          templateName,
+          language,
+          parameterNames: contract.names,
+          bodyText: contract.bodyText,
+        });
+      } catch (error) {
+        const status = Number(error?.statusCode) || 500;
+        const payload = {error: error?.message || 'Internal Server Error'};
+        if (error && error.details !== undefined) {
+          payload.details = error.details;
+        }
+        sendJson(req, res, status, payload);
+      }
+    })();
+    return;
+  }
+
   if (parsedHealthUrl.pathname === '/whatsapp/send') {
     if (req.method !== 'POST') {
       sendJson(req, res, 405, {error: 'Method Not Allowed'});
