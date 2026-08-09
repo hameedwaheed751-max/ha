@@ -1056,12 +1056,35 @@ function handleRequest(req, res) {
         const accessToken = WHATSAPP_ACCESS_TOKEN || WHATSAPP_TOKEN;
         const phoneNumberId = WHATSAPP_PHONE_NUMBER_ID || PHONE_NUMBER_ID;
 
-        if (!templateName) {
-          sendJson(req, res, 400, {error: 'Template name is required'});
-          return;
-        }
         if (!phoneNumberId || !accessToken) {
           sendJson(req, res, 500, {error: 'Missing WhatsApp configuration'});
+          return;
+        }
+
+        if (!templateName) {
+          const accountId = await resolveWhatsAppBusinessAccountId(phoneNumberId, accessToken);
+          const query = new URLSearchParams({
+            fields: 'name,language,status,parameter_format,components',
+            limit: '100',
+          });
+          const response = await fetchMetaJson(
+            `${encodeURIComponent(accountId)}/message_templates?${query.toString()}`,
+            accessToken
+          );
+          const templates = (Array.isArray(response?.data) ? response.data : []).map((template) => {
+            const body = (Array.isArray(template?.components) ? template.components : []).find(
+              (component) => String(component?.type || '').toUpperCase() === 'BODY'
+            );
+            return {
+              name: template?.name,
+              language: template?.language,
+              status: template?.status,
+              parameterFormat: template?.parameter_format || null,
+              bodyText: body?.text || '',
+              bodyExample: body?.example || null,
+            };
+          });
+          sendJson(req, res, 200, {templates});
           return;
         }
 
