@@ -632,7 +632,12 @@ async function getApprovedTemplateContract(templateName, languageCode, phoneNumb
     throw err;
   }
 
-  const contract = {names: uniqueNames, bodyText};
+  const contract = {
+    names: uniqueNames,
+    bodyText,
+    parameterFormat,
+    bodyExample: body?.example || null,
+  };
   templateContractCache.set(cacheKey, {at: Date.now(), contract});
   console.log('[whatsapp] approved template contract:', JSON.stringify({
     templateName,
@@ -1071,6 +1076,8 @@ function handleRequest(req, res) {
           templateName,
           language,
           parameterNames: contract.names,
+          parameterFormat: contract.parameterFormat,
+          bodyExample: contract.bodyExample,
           bodyText: contract.bodyText,
         });
       } catch (error) {
