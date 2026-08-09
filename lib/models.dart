@@ -726,6 +726,7 @@ class AppStore {
         'debtPaid': debtPaidTemplate,
       },
       'subscribers': <dynamic>[],
+      'debts': <String, dynamic>{},
       'sas': <String, dynamic>{
         'serverUrl': '',
         'username': '',
@@ -1130,6 +1131,12 @@ class AppStore {
       await p.setString('messageTemplates', jsonEncode(messageTemplates));
       await _loadSubscribers(p);
     }
+
+    try {
+      await _syncDebtsNodeToFirebase();
+    } catch (e) {
+      debugPrint('Firebase debts backfill failed: $e');
+    }
   }
 
   static DateTime? _parseDateTime(dynamic value) {
@@ -1282,6 +1289,40 @@ class AppStore {
     return map;
   }
 
+  static Map<String, dynamic> buildDebtsPayload() {
+    final debts = <String, dynamic>{};
+    for (final subscriber in subscribers) {
+      if (subscriber.remaining <= 0.0001) continue;
+
+      final identity = subscriber.sasId.trim().isNotEmpty
+          ? 'sas:${subscriber.sasId.trim()}'
+          : 'user:${subscriber.user.trim()}';
+      final key = base64Url.encode(utf8.encode(identity)).replaceAll('=', '');
+      debts[key] = <String, dynamic>{
+        'user': subscriber.user,
+        'sasId': subscriber.sasId,
+        'name': subscriber.name,
+        'phone': subscriber.phone,
+        'package': subscriber.packageDisplay,
+        'subscriptionAmount': subscriber.price,
+        'paidAmount': subscriber.paid,
+        'remainingAmount': subscriber.remaining,
+        'paymentDate': subscriber.paymentDate,
+        'payments': subscriber.payments.map((payment) => payment.toJson()).toList(),
+      };
+    }
+    return debts;
+  }
+
+  static Future<void> _syncDebtsNodeToFirebase() async {
+    if (!_isLoggedIn) return;
+    final debtsPayload = buildDebtsPayload();
+    await _agentRef
+        .child('debts')
+        .set(debtsPayload.isEmpty ? null : debtsPayload)
+        .timeout(const Duration(seconds: 10));
+  }
+
   static Future<void> save() async {
     if (!_isLoggedIn) debugPrint('AppStore.save: User not logged in, saving locally only');
     final p = await SharedPreferences.getInstance();
@@ -1346,6 +1387,7 @@ class AppStore {
 
       final packagesMap = _packagesMapPayload();
       final packagesList = _packagesListPayload();
+      final debtsPayload = buildDebtsPayload();
 
       // Write revision and subscribers in a single update to avoid
       // intermediate snapshots where revision is new but subscribers are old.
@@ -1359,6 +1401,7 @@ class AppStore {
         'settings/nextReceiptNumber': nextReceiptNumber,
         'settings/$subscribersRevisionKey': subscribersRevision,
         'subscribers': subscribers.map((e) => e.toJson()).toList(),
+        'debts': debtsPayload.isEmpty ? null : debtsPayload,
       };
       if (lastSasSync != null) {
         storePatch['settings/lastSasSync'] = lastSasSync!.toIso8601String();
