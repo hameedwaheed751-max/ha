@@ -661,8 +661,12 @@ async function sendWhatsAppTemplate(
   const accessToken = WHATSAPP_ACCESS_TOKEN || WHATSAPP_TOKEN;
   const phoneNumberId = WHATSAPP_PHONE_NUMBER_ID || PHONE_NUMBER_ID;
   const cleanTo = String(to || '').replace(/\D/g, '').trim();
-  const name = String(templateName || '').trim();
+  const requestedName = String(templateName || '').trim();
+  const name = requestedName === 'debt_added' ? 'debt_paid' : requestedName;
   const lang = String(languageCode || 'ar').trim() || 'ar';
+  if (name !== requestedName) {
+    console.log(`[whatsapp] rerouted template ${requestedName} to ${name}`);
+  }
   const suppliedParameters = Array.isArray(parameters)
     ? parameters.map((parameter, index) => {
         const text = parameter && typeof parameter === 'object'
