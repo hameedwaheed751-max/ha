@@ -2,8 +2,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:untitled/models.dart';
 
 void main() {
-  setUp(AppStore.subscribers.clear);
-  tearDown(AppStore.subscribers.clear);
+  setUp(() {
+    AppStore.subscribers.clear();
+    AppStore.dailyTaskEvents.clear();
+  });
+  tearDown(() {
+    AppStore.subscribers.clear();
+    AppStore.dailyTaskEvents.clear();
+  });
 
   test('prefers SAS package values when available', () {
     final subscriber = Subscriber(
@@ -165,5 +171,33 @@ void main() {
     expect(subscriber.remaining, 20000);
     expect(subscriber.paymentDate, '10/08/2026');
     expect(subscriber.payments, hasLength(1));
+  });
+
+  test('merges Firebase daily tasks without duplicates across devices', () {
+    final localEvent = DailyTaskEvent(
+      type: 'activation',
+      subscriberUser: 'user1',
+      subscriberName: 'Local User',
+      at: DateTime(2026, 8, 10, 9),
+      amount: 10000,
+    );
+    final remoteEvent = DailyTaskEvent(
+      type: 'debt_payment',
+      subscriberUser: 'user2',
+      subscriberName: 'Remote User',
+      at: DateTime(2026, 8, 10, 10),
+      amount: 5000,
+      remainingAfter: 15000,
+    );
+    AppStore.dailyTaskEvents.add(localEvent);
+
+    AppStore.applyDailyTaskEventsPayload({
+      'duplicate': localEvent.toJson(),
+      'remote': remoteEvent.toJson(),
+    });
+
+    expect(AppStore.dailyTaskEvents, hasLength(2));
+    expect(AppStore.dailyTaskEvents.first.subscriberUser, 'user2');
+    expect(AppStore.buildDailyTaskEventsPayload(), hasLength(2));
   });
 }

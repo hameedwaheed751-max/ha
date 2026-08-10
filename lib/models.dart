@@ -727,6 +727,7 @@ class AppStore {
       },
       'subscribers': <dynamic>[],
       'debts': <String, dynamic>{},
+      dailyTaskEventsKey: <String, dynamic>{},
       'sas': <String, dynamic>{
         'serverUrl': '',
         'username': '',
@@ -939,6 +940,8 @@ class AppStore {
           jsonEncode(subscribers.map((subscriber) => subscriber.toJson()).toList()),
         );
       }
+      applyDailyTaskEventsPayload(agentData[dailyTaskEventsKey]);
+      await _persistDailyTaskEventsLocally(p);
     } catch (e) {
       debugPrint('Firebase pull failed: $e');
       final p = await SharedPreferences.getInstance();
@@ -1142,6 +1145,11 @@ class AppStore {
     } catch (e) {
       debugPrint('Firebase debts backfill failed: $e');
     }
+    try {
+      await _syncDailyTaskEventsToFirebase();
+    } catch (e) {
+      debugPrint('Firebase daily tasks backfill failed: $e');
+    }
   }
 
   static DateTime? _parseDateTime(dynamic value) {
@@ -1319,6 +1327,65 @@ class AppStore {
     return debts;
   }
 
+  static String _dailyTaskEventKey(DailyTaskEvent event) {
+    final identity = <String>[
+      event.at.toUtc().toIso8601String(),
+      event.type,
+      event.subscriberUser.trim().toLowerCase(),
+      event.subscriberName.trim().toLowerCase(),
+      event.amount.toStringAsFixed(4),
+      event.remainingAfter.toStringAsFixed(4),
+      event.note,
+    ].join('|');
+    return base64Url.encode(utf8.encode(identity)).replaceAll('=', '');
+  }
+
+  static Map<String, dynamic> buildDailyTaskEventsPayload() {
+    _trimDailyTaskEvents();
+    return <String, dynamic>{
+      for (final event in dailyTaskEvents)
+        _dailyTaskEventKey(event): event.toJson(),
+    };
+  }
+
+  static void applyDailyTaskEventsPayload(dynamic payload) {
+    if (payload is! Map) return;
+
+    final eventsByKey = <String, DailyTaskEvent>{
+      for (final event in dailyTaskEvents) _dailyTaskEventKey(event): event,
+    };
+    for (final rawEvent in payload.values) {
+      if (rawEvent is! Map) continue;
+      final event = DailyTaskEvent.fromJson(
+        Map<String, dynamic>.from(rawEvent),
+      );
+      eventsByKey[_dailyTaskEventKey(event)] = event;
+    }
+    dailyTaskEvents
+      ..clear()
+      ..addAll(eventsByKey.values);
+    dailyTaskEvents.sort((a, b) => b.at.compareTo(a.at));
+    _trimDailyTaskEvents();
+  }
+
+  static Future<void> _persistDailyTaskEventsLocally(
+    SharedPreferences preferences,
+  ) async {
+    await preferences.setString(
+      dailyTaskEventsKey,
+      jsonEncode(dailyTaskEvents.map((event) => event.toJson()).toList()),
+    );
+  }
+
+  static Future<void> _syncDailyTaskEventsToFirebase() async {
+    if (!_isLoggedIn) return;
+    final payload = buildDailyTaskEventsPayload();
+    if (payload.isEmpty) return;
+    await _agentRef.child(dailyTaskEventsKey).update(payload).timeout(
+          const Duration(seconds: 10),
+        );
+  }
+
   static void applyDebtsPayload(dynamic payload) {
     if (payload is! Map) return;
 
@@ -1435,6 +1502,7 @@ class AppStore {
       final packagesMap = _packagesMapPayload();
       final packagesList = _packagesListPayload();
       final debtsPayload = buildDebtsPayload();
+      final dailyTasksPayload = buildDailyTaskEventsPayload();
 
       // Write revision and subscribers in a single update to avoid
       // intermediate snapshots where revision is new but subscribers are old.
@@ -1449,6 +1517,8 @@ class AppStore {
         'settings/$subscribersRevisionKey': subscribersRevision,
         'subscribers': subscribers.map((e) => e.toJson()).toList(),
         'debts': debtsPayload.isEmpty ? null : debtsPayload,
+        for (final entry in dailyTasksPayload.entries)
+          '$dailyTaskEventsKey/${entry.key}': entry.value,
       };
       if (lastSasSync != null) {
         storePatch['settings/lastSasSync'] = lastSasSync!.toIso8601String();
@@ -1538,6 +1608,8 @@ class AppStore {
               debugPrint('Realtime: ignored stale subscribers snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision');
             }
           }
+          applyDailyTaskEventsPayload(agentData[dailyTaskEventsKey]);
+          await _persistDailyTaskEventsLocally(p);
           debugPrint('Realtime agent data updated');
         } catch (e) { debugPrint('Realtime update error: $e'); }
       });
@@ -1569,10 +1641,13 @@ class AppStore {
     _trimDailyTaskEvents();
     if (!persist) return;
     final p = await SharedPreferences.getInstance();
-    await p.setString(
-      dailyTaskEventsKey,
-      jsonEncode(dailyTaskEvents.map((e) => e.toJson()).toList()),
-    );
+    await _persistDailyTaskEventsLocally(p);
+    if (_isLoggedIn) {
+      await _agentRef
+          .child('$dailyTaskEventsKey/${_dailyTaskEventKey(event)}')
+          .set(event.toJson())
+          .timeout(const Duration(seconds: 10));
+    }
   }
 
   static Future<int> issueReceiptNumber({bool persist = true}) async {
