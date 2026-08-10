@@ -126,4 +126,44 @@ void main() {
     expect(debt['remainingAmount'], 20000);
     expect(debt['payments'], hasLength(1));
   });
+
+  test('applies Firebase debts to subscribers loaded on another device', () {
+    final subscriber = Subscriber(
+      user: 'debtor1',
+      name: 'Debtor',
+      phone: '',
+      address: '',
+      ip: '',
+      type: 'Gold',
+      price: 0,
+      paid: 0,
+      startDate: DateTime(2026, 8, 1),
+      endDate: DateTime(2026, 9, 1),
+    );
+    AppStore.subscribers.add(subscriber);
+
+    AppStore.applyDebtsPayload({
+      'remote-debt': {
+        'user': 'DEBTOR1',
+        'sasId': '',
+        'subscriptionAmount': 30000,
+        'paidAmount': 10000,
+        'remainingAmount': 20000,
+        'paymentDate': '10/08/2026',
+        'payments': [
+          {
+            'amount': 10000,
+            'at': DateTime(2026, 8, 10).toIso8601String(),
+            'note': 'دفعة أولى',
+          },
+        ],
+      },
+    });
+
+    expect(subscriber.price, 30000);
+    expect(subscriber.paid, 10000);
+    expect(subscriber.remaining, 20000);
+    expect(subscriber.paymentDate, '10/08/2026');
+    expect(subscriber.payments, hasLength(1));
+  });
 }

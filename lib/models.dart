@@ -796,11 +796,14 @@ class AppStore {
       final p = await SharedPreferences.getInstance();
 
       int remoteRevision = 0;
+      final localRevisionBeforePull = subscribersRevision;
+      final allowRemoteBootstrap =
+          localRevisionBeforePull == 0 && subscribers.isEmpty;
       if (agentData['settings'] is Map) {
         final settings = Map<String, dynamic>.from(agentData['settings']);
         remoteRevision = int.tryParse((settings[subscribersRevisionKey] ?? 0).toString()) ?? 0;
-        final allowBootstrap = subscribersRevision == 0 && subscribers.isEmpty;
-        final shouldApplyRemoteSettings = remoteRevision >= subscribersRevision || allowBootstrap;
+        final shouldApplyRemoteSettings =
+            remoteRevision >= localRevisionBeforePull || allowRemoteBootstrap;
 
         if (shouldApplyRemoteSettings) {
           if (settings['officeName'] != null) { officeName = settings['officeName'].toString(); await p.setString('officeName', officeName); }
@@ -815,10 +818,6 @@ class AppStore {
           debugPrint('Skip stale Firebase settings snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision');
         }
 
-        if (remoteRevision > subscribersRevision) {
-          subscribersRevision = remoteRevision;
-          await p.setInt(subscribersRevisionKey, subscribersRevision);
-        }
       }
 
       final packagesPayload = agentData['packages'];
@@ -921,8 +920,7 @@ class AppStore {
       }
 
       if (agentData['subscribers'] != null) {
-        final allowBootstrap = subscribersRevision == 0 && subscribers.isEmpty;
-        if (remoteRevision > subscribersRevision || allowBootstrap) {
+        if (remoteRevision > localRevisionBeforePull || allowRemoteBootstrap) {
           final rawJson = jsonEncode(agentData['subscribers']);
           await p.setString('subscribers', rawJson);
           if (remoteRevision > 0) {
@@ -934,6 +932,13 @@ class AppStore {
         }
       }
       await _loadSubscribers(p);
+      if (remoteRevision > localRevisionBeforePull || allowRemoteBootstrap) {
+        applyDebtsPayload(agentData['debts']);
+        await p.setString(
+          'subscribers',
+          jsonEncode(subscribers.map((subscriber) => subscriber.toJson()).toList()),
+        );
+      }
     } catch (e) {
       debugPrint('Firebase pull failed: $e');
       final p = await SharedPreferences.getInstance();
@@ -1314,6 +1319,48 @@ class AppStore {
     return debts;
   }
 
+  static void applyDebtsPayload(dynamic payload) {
+    if (payload is! Map) return;
+
+    for (final rawDebt in payload.values) {
+      if (rawDebt is! Map) continue;
+      final debt = Map<String, dynamic>.from(rawDebt);
+      final sasId = (debt['sasId'] ?? '').toString().trim();
+      final user = (debt['user'] ?? '').toString().trim().toLowerCase();
+      final index = subscribers.indexWhere((subscriber) {
+        if (sasId.isNotEmpty && subscriber.sasId.trim() == sasId) return true;
+        return user.isNotEmpty && subscriber.user.trim().toLowerCase() == user;
+      });
+      if (index < 0) continue;
+
+      final subscriber = subscribers[index];
+      final subscriptionAmount =
+          (debt['subscriptionAmount'] as num?)?.toDouble();
+      final paidAmount = (debt['paidAmount'] as num?)?.toDouble();
+      if (subscriptionAmount != null && paidAmount != null) {
+        subscriber.setDebtAmounts(
+          subscriptionAmount: subscriptionAmount,
+          paidAmount: paidAmount,
+        );
+      }
+      subscriber.paymentDate =
+          (debt['paymentDate'] ?? subscriber.paymentDate).toString();
+
+      final paymentsPayload = debt['payments'];
+      if (paymentsPayload is List) {
+        subscriber.payments = paymentsPayload
+            .whereType<Map>()
+            .map((payment) => PaymentRecord.fromJson(
+                  Map<String, dynamic>.from(payment),
+                ))
+            .toList();
+        if (subscriber.payments.isNotEmpty) {
+          subscriber.reconcilePaidFromPayments();
+        }
+      }
+    }
+  }
+
   static Future<void> _syncDebtsNodeToFirebase() async {
     if (!_isLoggedIn) return;
     final debtsPayload = buildDebtsPayload();
@@ -1428,11 +1475,14 @@ class AppStore {
           final p = await SharedPreferences.getInstance();
 
           int remoteRevision = 0;
+          final localRevisionBeforeEvent = subscribersRevision;
+          final allowRemoteBootstrap =
+              localRevisionBeforeEvent == 0 && subscribers.isEmpty;
           if (agentData['settings'] is Map) {
             final settings = Map<String, dynamic>.from(agentData['settings']);
             remoteRevision = int.tryParse((settings[subscribersRevisionKey] ?? 0).toString()) ?? 0;
-            final allowBootstrap = subscribersRevision == 0 && subscribers.isEmpty;
-            final shouldApplyRemoteSettings = remoteRevision >= subscribersRevision || allowBootstrap;
+            final shouldApplyRemoteSettings =
+                remoteRevision >= localRevisionBeforeEvent || allowRemoteBootstrap;
 
             if (shouldApplyRemoteSettings) {
               if (settings['officeName'] != null) { officeName = settings['officeName'].toString(); await p.setString('officeName', officeName); }
@@ -1447,10 +1497,6 @@ class AppStore {
               debugPrint('Realtime: ignored stale settings snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision');
             }
 
-            if (remoteRevision > subscribersRevision) {
-              subscribersRevision = remoteRevision;
-              await p.setInt(subscribersRevisionKey, subscribersRevision);
-            }
           }
           if (agentData['packages'] is Map) {
             applyPackagesPayload(
@@ -1473,8 +1519,7 @@ class AppStore {
             if (profile['sasUsername'] != null) sasUsername = profile['sasUsername'].toString();
           }
           if (agentData['subscribers'] != null) {
-            final allowBootstrap = subscribersRevision == 0 && subscribers.isEmpty;
-            if (remoteRevision > subscribersRevision || allowBootstrap) {
+            if (remoteRevision > localRevisionBeforeEvent || allowRemoteBootstrap) {
               final rawJson = jsonEncode(agentData['subscribers']);
               await p.setString('subscribers', rawJson);
               if (remoteRevision > 0) {
@@ -1482,6 +1527,13 @@ class AppStore {
                 await p.setInt(subscribersRevisionKey, subscribersRevision);
               }
               await _loadSubscribers(p);
+              applyDebtsPayload(agentData['debts']);
+              await p.setString(
+                'subscribers',
+                jsonEncode(
+                  subscribers.map((subscriber) => subscriber.toJson()).toList(),
+                ),
+              );
             } else {
               debugPrint('Realtime: ignored stale subscribers snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision');
             }
