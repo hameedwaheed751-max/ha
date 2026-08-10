@@ -1070,11 +1070,6 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       }
       s.paymentDate = paymentDate;
       await AppStore.save();
-      await AutoNotificationService.notifyDebtSettledIfNeeded(
-        subscriber: s,
-        oldRemaining: oldRemaining,
-        newRemaining: s.remaining,
-      );
       if (mounted) setState(() {});
       if (mounted) {
         final afterPaid = s.paid;
@@ -1155,11 +1150,6 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
     );
     s.paymentDate = _date(now);
     await AppStore.save();
-    await AutoNotificationService.notifyDebtSettledIfNeeded(
-      subscriber: s,
-      oldRemaining: before,
-      newRemaining: s.remaining,
-    );
     if (mounted) setState(() {});
   }
 

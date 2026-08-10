@@ -5,7 +5,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
-import '../services/auto_notification_service.dart';
 import '../services/render_whatsapp_service.dart';
 import 'add_subscriber_screen.dart';
 import 'receipt_screen.dart';
@@ -368,19 +367,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   Future<void> _sendActivationWhatsApp(Subscriber s) async {
     final activationTemplate = AppStore.messageTemplates['activation'] ??
         'مرحباً {name}، تم تفعيل اشتراكك لدى {office}. الباقة: {package} وتنتهي بتاريخ {endDate}.';
-
     final result = await RenderWhatsAppService.notifySubscriptionActivated(
       s,
       template: activationTemplate,
     );
-
     if (!result.success) {
       debugPrint(
         'Activation WhatsApp failed for ${s.name}: ${result.error ?? 'unknown'}',
       );
     }
   }
-
 
   Future<void> phoneCall(Subscriber s) async {
     final phone = s.phone.trim();
@@ -633,8 +629,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           loadingDialogShown = false;
         }
 
-        // إرسال إشعار تفعيل واتساب من التطبيق لضمان وصول رسالة
-        // تاريخ البداية وتاريخ الانتهاء حتى لو تعذر إشعار SAS الداخلي.
         await _sendActivationWhatsApp(s);
         if (!mounted) return;
 
@@ -1115,11 +1109,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       }
                       if (mounted) setState(() {});
 
-                      // Keep renewal success independent from WhatsApp availability.
-                      RenderWhatsAppService.dispatchInBackground(
-                        _sendRenewalWhatsAppMessage(s),
-                      );
-
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -1157,17 +1146,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         },
       ),
     );
-  }
-
-  Future<void> _sendRenewalWhatsAppMessage(Subscriber s) async {
-    final result = await RenderWhatsAppService.notifySubscriptionRenewed(
-      s,
-      template: AppStore.messageTemplates['extension'],
-    );
-
-    if (!result.success) {
-      debugPrint('Renewal WhatsApp send failed: ${result.error ?? 'unknown'}');
-    }
   }
 
   Future<void> _changePackage(Subscriber s) async {
@@ -1467,20 +1445,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     );
                   }
 
-                  if (s.remaining > 0) {
-                    await RenderWhatsAppService.notifyDebtAdded(
-                      s,
-                      amountAdded: delta.abs(),
-                      remainingBalance: s.remaining,
-                      template: AppStore.messageTemplates['debt'],
-                    );
-                  }
-
-                  await AutoNotificationService.notifyDebtSettledIfNeeded(
-                    subscriber: s,
-                    oldRemaining: oldRemaining,
-                    newRemaining: s.remaining,
-                  );
                   if (mounted) {
                     setState(() {});
                     ScaffoldMessenger.of(context).showSnackBar(
