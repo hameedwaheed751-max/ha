@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 
+enum _DailyTaskFilter { all, activation, payment, debtAdded }
+
 class TodayTasksScreen extends StatefulWidget {
   const TodayTasksScreen({super.key});
 
@@ -11,6 +13,7 @@ class TodayTasksScreen extends StatefulWidget {
 
 class _TodayTasksScreenState extends State<TodayTasksScreen> {
   DateTime _selectedDate = DateTime.now();
+  _DailyTaskFilter _filter = _DailyTaskFilter.all;
 
   String _date(DateTime d) {
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
@@ -44,296 +47,376 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
   @override
   Widget build(BuildContext context) {
     final events = _eventsOfDay(_selectedDate);
-    final activationEvents = events.where((e) => e.type == 'activation').toList();
-    final debtPaymentEvents =
-        events.where((e) => e.type == 'debt_payment' && e.amount > 0).toList();
-    final debtAddedEvents =
-      events.where((e) => e.type == 'debt_added' && e.amount > 0).toList();
     final summary = DailyTaskSummary.fromEvents(
       events,
       amountOf: _eventAmount,
     );
+    final filteredEvents = events.where((event) {
+      return switch (_filter) {
+        _DailyTaskFilter.all => true,
+        _DailyTaskFilter.activation => event.type == 'activation',
+        _DailyTaskFilter.payment =>
+          event.type == 'debt_payment' && event.amount > 0,
+        _DailyTaskFilter.debtAdded =>
+          event.type == 'debt_added' && event.amount > 0,
+      };
+    }).toList();
 
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('المهام اليومية'),
-          centerTitle: true,
-          actions: [
-            IconButton(
-              tooltip: 'اختيار التاريخ',
-              icon: const Icon(Icons.date_range_outlined),
-              onPressed: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: _selectedDate,
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime(2100),
-                );
-                if (picked != null) {
-                  setState(() => _selectedDate = picked);
-                }
-              },
-            ),
-          ],
         ),
-        body: ListView(
-          padding: const EdgeInsets.all(12),
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    const Icon(Icons.today_outlined),
-                    const SizedBox(width: 8),
-                    Text(
-                      'التاريخ المحدد: ${_date(_selectedDate)}',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: _selectedDate,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2100),
-                        );
-                        if (picked != null) {
-                          setState(() => _selectedDate = picked);
-                        }
-                      },
-                      icon: const Icon(Icons.edit_calendar_outlined),
-                      label: const Text('تغيير'),
-                    ),
-                  ],
-                ),
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final horizontalPadding = constraints.maxWidth < 600 ? 12.0 : 24.0;
+            return SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                16,
+                horizontalPadding,
+                32,
               ),
-            ),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                child: Row(
-                  children: const [
-                    Icon(Icons.info_outline, size: 18),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'يتم تحديث التاريخ تلقائياً كل يوم، ويمكن الرجوع للسجل حتى آخر 30 يوم.',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _summaryCard(
-                  title: 'حالات التفعيل',
-                  value: summary.activationCases.toString(),
-                  icon: Icons.check_circle_outline,
-                  color: Colors.green,
-                ),
-                _summaryCard(
-                  title: 'حالات تسديد الديون',
-                  value: summary.debtPaymentCases.toString(),
-                  icon: Icons.paid_outlined,
-                  color: Colors.blue,
-                ),
-                _summaryCard(
-                  title: 'الواصل من التفعيل',
-                  value: _money(summary.activationCollected),
-                  icon: Icons.point_of_sale_outlined,
-                  color: Colors.teal,
-                ),
-                _summaryCard(
-                  title: 'الواصل من التسديد',
-                  value: _money(summary.debtPaymentsCollected),
-                  icon: Icons.account_balance_wallet_outlined,
-                  color: Colors.orange,
-                ),
-                _summaryCard(
-                  title: 'المجموع الواصل اليوم',
-                  value: _money(summary.totalCollected),
-                  icon: Icons.calculate_outlined,
-                  color: Colors.deepPurple,
-                ),
-                _summaryCard(
-                  title: 'المضاف إلى الديون',
-                  value: _money(summary.debtAddedTotal),
-                  icon: Icons.add_card_outlined,
-                  color: Colors.red,
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _sectionTitle('حالات التفعيل خلال اليوم'),
-            const SizedBox(height: 6),
-            if (activationEvents.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text('لا توجد حالات تفعيل في هذا التاريخ'),
-                ),
-              )
-            else
-              ...activationEvents.map((e) => Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.verified_outlined, color: Colors.green),
-                      title: Text(e.subscriberName),
-                      subtitle: Text('المستخدم: ${e.subscriberUser} | الوقت: ${_time(e.at)}'),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            'الواصل: ${_money(_eventAmount(e))}',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1180),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _reportHeader(summary),
+                      const SizedBox(height: 16),
+                      _summaryGrid(summary),
+                      const SizedBox(height: 24),
+                      _activityHeader(events.length),
+                      const SizedBox(height: 12),
+                      if (filteredEvents.isEmpty)
+                        _emptyState()
+                      else
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
                           ),
-                          if (e.note.trim().isNotEmpty)
-                            Text(
-                              e.note,
-                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                            ),
-                        ],
-                      ),
-                    ),
-                  )),
-            const SizedBox(height: 14),
-            _sectionTitle('حالات تسديد المبالغ المترتبة'),
-            const SizedBox(height: 6),
-            if (debtPaymentEvents.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text('لا توجد حالات تسديد ديون في هذا التاريخ'),
-                ),
-              )
-            else
-              ...debtPaymentEvents.map((e) {
-                final fullySettled = e.remainingAfter <= 0.0001;
-                return Card(
-                  child: ListTile(
-                    leading: Icon(
-                      fullySettled ? Icons.task_alt_outlined : Icons.payments_outlined,
-                      color: fullySettled ? Colors.green : Colors.blue,
-                    ),
-                    title: Text(e.subscriberName),
-                    subtitle: Text('المستخدم: ${e.subscriberUser} | الوقت: ${_time(e.at)}'),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          'الواصل: ${_money(e.amount)}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          fullySettled
-                              ? 'الحالة: مسدد بالكامل'
-                              : 'المتبقي: ${_money(e.remainingAfter)}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: fullySettled ? Colors.green.shade700 : Colors.grey.shade600,
+                          child: Column(
+                            children: [
+                              for (var i = 0; i < filteredEvents.length; i++) ...[
+                                _activityRow(filteredEvents[i]),
+                                if (i < filteredEvents.length - 1)
+                                  const Divider(height: 1, indent: 72),
+                              ],
+                            ],
                           ),
                         ),
-                      ],
-                    ),
+                    ],
                   ),
-                );
-              }),
-            const SizedBox(height: 14),
-            _sectionTitle('المبالغ المضافة إلى الديون'),
-            const SizedBox(height: 6),
-            if (debtAddedEvents.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text('لا توجد مبالغ مضافة إلى الديون في هذا التاريخ'),
                 ),
-              )
-            else
-              ...debtAddedEvents.map((e) => Card(
-                    child: ListTile(
-                      leading: const Icon(
-                        Icons.add_card_outlined,
-                        color: Colors.red,
-                      ),
-                      title: Text(e.subscriberName),
-                      subtitle: Text(
-                        'المستخدم: ${e.subscriberUser} | الوقت: ${_time(e.at)}'
-                        '${e.note.trim().isEmpty ? '' : '\n${e.note}'}',
-                      ),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            'المضاف: ${_money(e.amount)}',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            'المتبقي: ${_money(e.remainingAfter)}',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )),
-          ],
+              ),
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _sectionTitle(String text) {
-    return Text(
-      text,
-      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+    );
+    if (picked != null && mounted) setState(() => _selectedDate = picked);
+  }
+
+  Widget _reportHeader(DailyTaskSummary summary) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF12372A),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Wrap(
+        spacing: 24,
+        runSpacing: 18,
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'تقرير ${_date(_selectedDate)}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'إجمالي النقد الواصل خلال اليوم',
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.72)),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _money(summary.totalCollected),
+                style: const TextStyle(
+                  color: Color(0xFF7DE2B8),
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          OutlinedButton.icon(
+            onPressed: _pickDate,
+            icon: const Icon(Icons.calendar_month_outlined),
+            label: const Text('تغيير التاريخ'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.45)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _summaryCard({
+  Widget _summaryGrid(DailyTaskSummary summary) {
+    final items = [
+      ('حالات التفعيل', summary.activationCases.toString(), Icons.check_circle_outline, Colors.green),
+      ('حالات تسديد الديون', summary.debtPaymentCases.toString(), Icons.paid_outlined, Colors.blue),
+      ('الواصل من التفعيل', _money(summary.activationCollected), Icons.point_of_sale_outlined, Colors.teal),
+      ('الواصل من التسديد', _money(summary.debtPaymentsCollected), Icons.account_balance_wallet_outlined, Colors.orange),
+      ('المجموع الواصل اليوم', _money(summary.totalCollected), Icons.calculate_outlined, Colors.deepPurple),
+      ('المضاف إلى الديون', _money(summary.debtAddedTotal), Icons.add_card_outlined, Colors.red),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 920
+            ? 3
+            : constraints.maxWidth >= 520
+                ? 2
+                : 1;
+        final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final item in items)
+              SizedBox(
+                width: width,
+                child: _summaryTile(
+                  title: item.$1,
+                  value: item.$2,
+                  icon: item.$3,
+                  color: item.$4,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _summaryTile({
     required String title,
     required String value,
     required IconData icon,
     required Color color,
   }) {
     return Container(
-      width: 220,
-      padding: const EdgeInsets.all(12),
+      constraints: const BoxConstraints(minHeight: 112),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(14),
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
-          Icon(icon, color: color),
-          const SizedBox(width: 10),
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w700),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Text(
                   value,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _activityHeader(int count) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'سجل العمليات',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+            ),
+            Text(
+              '$count عملية',
+              style: const TextStyle(color: Color(0xFF64748B)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SegmentedButton<_DailyTaskFilter>(
+            segments: const [
+              ButtonSegment(value: _DailyTaskFilter.all, label: Text('الكل')),
+              ButtonSegment(value: _DailyTaskFilter.activation, label: Text('التفعيل')),
+              ButtonSegment(value: _DailyTaskFilter.payment, label: Text('التسديد')),
+              ButtonSegment(value: _DailyTaskFilter.debtAdded, label: Text('إضافة دين')),
+            ],
+            selected: {_filter},
+            onSelectionChanged: (value) => setState(() => _filter = value.first),
+            showSelectedIcon: false,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _activityRow(DailyTaskEvent event) {
+    final isActivation = event.type == 'activation';
+    final isPayment = event.type == 'debt_payment';
+    final color = isActivation
+        ? const Color(0xFF087F5B)
+        : isPayment
+            ? const Color(0xFF1769AA)
+            : const Color(0xFFC2413B);
+    final icon = isActivation
+        ? Icons.bolt_outlined
+        : isPayment
+            ? Icons.payments_outlined
+            : Icons.add_card_outlined;
+    final label = isActivation
+        ? 'تفعيل'
+        : isPayment
+            ? 'تسديد دين'
+            : 'إضافة دين';
+    final amountLabel = isPayment || isActivation ? 'الواصل' : 'المضاف';
+    final amount = _eventAmount(event);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: color, size: 21),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      event.subscriberName,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${event.subscriberUser}  •  ${_time(event.at)}'
+                  '${event.note.trim().isEmpty ? '' : '  •  ${event.note}'}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '$amountLabel: ${_money(amount)}',
+                style: TextStyle(color: color, fontWeight: FontWeight.w800),
+              ),
+              if (!isActivation)
+                Text(
+                  'المتبقي: ${_money(event.remainingAfter)}',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyState() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 44),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: const Column(
+        children: [
+          Icon(Icons.inbox_outlined, size: 38, color: Color(0xFF94A3B8)),
+          SizedBox(height: 10),
+          Text(
+            'لا توجد عمليات ضمن هذا التصنيف',
+            style: TextStyle(fontWeight: FontWeight.w700),
           ),
         ],
       ),
