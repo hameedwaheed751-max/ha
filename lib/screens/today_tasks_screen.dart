@@ -20,6 +20,19 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
     return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
+  String _money(double amount) => '${amount.toStringAsFixed(0)} د.ع';
+
+  double _eventAmount(DailyTaskEvent event) {
+    if (event.amount > 0 || event.type != 'activation') return event.amount;
+    final user = event.subscriberUser.trim().toLowerCase();
+    for (final subscriber in AppStore.subscribers) {
+      if (user.isNotEmpty && subscriber.user.trim().toLowerCase() == user) {
+        return subscriber.paid;
+      }
+    }
+    return 0;
+  }
+
   List<DailyTaskEvent> _eventsOfDay(DateTime day) {
     final events = AppStore.dailyTaskEvents
         .where((e) => AppStore.isSameDay(e.at, day))
@@ -34,19 +47,12 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
     final activationEvents = events.where((e) => e.type == 'activation').toList();
     final debtPaymentEvents =
         events.where((e) => e.type == 'debt_payment' && e.amount > 0).toList();
-
-    final activationCases = activationEvents.length;
-    final debtPaymentCases = debtPaymentEvents.length;
-
-    final activationCollected = activationEvents.fold<double>(
-      0,
-      (sum, e) => sum + e.amount,
+    final debtAddedEvents =
+      events.where((e) => e.type == 'debt_added' && e.amount > 0).toList();
+    final summary = DailyTaskSummary.fromEvents(
+      events,
+      amountOf: _eventAmount,
     );
-    final paymentsCollected = debtPaymentEvents.fold<double>(
-      0,
-      (sum, e) => sum + e.amount,
-    );
-    final totalCollected = activationCollected + paymentsCollected;
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -129,33 +135,39 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
               children: [
                 _summaryCard(
                   title: 'حالات التفعيل',
-                  value: activationCases.toString(),
+                  value: summary.activationCases.toString(),
                   icon: Icons.check_circle_outline,
                   color: Colors.green,
                 ),
                 _summaryCard(
                   title: 'حالات تسديد الديون',
-                  value: debtPaymentCases.toString(),
+                  value: summary.debtPaymentCases.toString(),
                   icon: Icons.paid_outlined,
                   color: Colors.blue,
                 ),
                 _summaryCard(
                   title: 'الواصل من التفعيل',
-                  value: activationCollected.toStringAsFixed(0),
+                  value: _money(summary.activationCollected),
                   icon: Icons.point_of_sale_outlined,
                   color: Colors.teal,
                 ),
                 _summaryCard(
                   title: 'الواصل من التسديد',
-                  value: paymentsCollected.toStringAsFixed(0),
+                  value: _money(summary.debtPaymentsCollected),
                   icon: Icons.account_balance_wallet_outlined,
                   color: Colors.orange,
                 ),
                 _summaryCard(
                   title: 'المجموع الواصل اليوم',
-                  value: totalCollected.toStringAsFixed(0),
+                  value: _money(summary.totalCollected),
                   icon: Icons.calculate_outlined,
                   color: Colors.deepPurple,
+                ),
+                _summaryCard(
+                  title: 'المضاف إلى الديون',
+                  value: _money(summary.debtAddedTotal),
+                  icon: Icons.add_card_outlined,
+                  color: Colors.red,
                 ),
               ],
             ),
@@ -180,7 +192,7 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            'الواصل: ${e.amount.toStringAsFixed(0)}',
+                            'الواصل: ${_money(_eventAmount(e))}',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           if (e.note.trim().isNotEmpty)
@@ -218,13 +230,13 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          'الواصل: ${e.amount.toStringAsFixed(0)}',
+                          'الواصل: ${_money(e.amount)}',
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                         Text(
                           fullySettled
                               ? 'الحالة: مسدد بالكامل'
-                              : 'المتبقي: ${e.remainingAfter.toStringAsFixed(0)}',
+                              : 'المتبقي: ${_money(e.remainingAfter)}',
                           style: TextStyle(
                             fontSize: 11,
                             color: fullySettled ? Colors.green.shade700 : Colors.grey.shade600,
@@ -235,6 +247,47 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
                   ),
                 );
               }),
+            const SizedBox(height: 14),
+            _sectionTitle('المبالغ المضافة إلى الديون'),
+            const SizedBox(height: 6),
+            if (debtAddedEvents.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('لا توجد مبالغ مضافة إلى الديون في هذا التاريخ'),
+                ),
+              )
+            else
+              ...debtAddedEvents.map((e) => Card(
+                    child: ListTile(
+                      leading: const Icon(
+                        Icons.add_card_outlined,
+                        color: Colors.red,
+                      ),
+                      title: Text(e.subscriberName),
+                      subtitle: Text(
+                        'المستخدم: ${e.subscriberUser} | الوقت: ${_time(e.at)}'
+                        '${e.note.trim().isEmpty ? '' : '\n${e.note}'}',
+                      ),
+                      trailing: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            'المضاف: ${_money(e.amount)}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            'المتبقي: ${_money(e.remainingAfter)}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )),
           ],
         ),
       ),

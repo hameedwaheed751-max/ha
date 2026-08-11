@@ -303,21 +303,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     return double.tryParse((value ?? '').toString().replaceAll(',', '').trim()) ?? 0;
   }
 
-  double _activationReceivedAmount(dynamic response) {
-    if (response is! Map) return 0;
-    for (final key in const [
-      'money_collected',
-      'required_amount',
-      'amount',
-      'user_price',
-      'price',
-      'total',
-    ]) {
-      final v = _toNum(response[key]);
-      if (v > 0) return v;
-    }
-    final data = response['data'];
-    if (data is Map) {
+  double _activationReceivedAmount(dynamic response, Subscriber subscriber) {
+    if (response is Map) {
       for (final key in const [
         'money_collected',
         'required_amount',
@@ -326,11 +313,25 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         'price',
         'total',
       ]) {
-        final v = _toNum(data[key]);
+        final v = _toNum(response[key]);
         if (v > 0) return v;
       }
+      final data = response['data'];
+      if (data is Map) {
+        for (final key in const [
+          'money_collected',
+          'required_amount',
+          'amount',
+          'user_price',
+          'price',
+          'total',
+        ]) {
+          final v = _toNum(data[key]);
+          if (v > 0) return v;
+        }
+      }
     }
-    return 0;
+    return subscriber.paid > 0 ? subscriber.paid : 0;
   }
 
   Future<void> whatsapp(Subscriber s, {String? message}) async {
@@ -575,7 +576,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       s.points++;
       _setStartDateAsActivationDay(s);
 
-      final activationAmount = _activationReceivedAmount(activationResponse);
+      final activationAmount = _activationReceivedAmount(activationResponse, s);
       await AppStore.addDailyTaskEvent(
         DailyTaskEvent(
           type: 'activation',
@@ -1268,7 +1269,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               subscriberUser: s.user,
               subscriberName: s.name,
               at: DateTime.now(),
-              amount: _activationReceivedAmount(activationResponse),
+              amount: _activationReceivedAmount(activationResponse, s),
               remainingAfter: s.remaining,
               note: 'تفعيل بعد تغيير الباقة',
             ),
@@ -1319,12 +1320,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 ),
                 const SizedBox(height: 8),
                 TextField(
-                  controller: price,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'مبلغ الاشتراك', border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 8),
-                TextField(
                   controller: paid,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   onChanged: (_) => setLocal(() {}),
@@ -1361,6 +1356,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
               FilledButton(
                 onPressed: () async {
+                  final oldPrice = s.price;
                   final oldPaid = s.paid;
                   final oldRemaining = s.remaining;
                   final newPrice = _parseAmount(price.text.trim());
@@ -1424,6 +1420,22 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                         note: s.remaining <= 0.0001
                             ? 'تسديد كامل'
                             : 'تسديد جزئي',
+                      ),
+                      persist: false,
+                    );
+                  }
+
+                  final addedDebt = newPrice - oldPrice;
+                  if (addedDebt > 0.0001) {
+                    await AppStore.addDailyTaskEvent(
+                      DailyTaskEvent(
+                        type: 'debt_added',
+                        subscriberUser: s.user,
+                        subscriberName: s.name,
+                        at: now,
+                        amount: addedDebt,
+                        remainingAfter: s.remaining,
+                        note: 'إضافة مبلغ من شاشة ديون المشترك',
                       ),
                       persist: false,
                     );

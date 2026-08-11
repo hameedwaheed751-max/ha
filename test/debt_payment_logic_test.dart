@@ -25,7 +25,9 @@ void main() {
     expect(applied, 30);
     expect(s.paid, 50);
     expect(s.remaining, 50);
-    expect(s.payments.length, 1);
+    expect(s.payments.length, 2);
+    expect(s.paymentsTotal, 50);
+    expect(s.payments.last.amount, 30);
   });
 
   test('partial payment cannot exceed remaining', () {
@@ -36,7 +38,9 @@ void main() {
     expect(applied, 10);
     expect(s.paid, 100);
     expect(s.remaining, 0);
-    expect(s.payments.length, 1);
+    expect(s.payments.length, 2);
+    expect(s.paymentsTotal, 100);
+    expect(s.payments.last.amount, 10);
   });
 
   test('setDebtAmounts clamps paid to subscription amount', () {
@@ -81,5 +85,73 @@ void main() {
     expect(s.monthlyPaidTotals['2026-08'], 80);
     expect(s.monthlyInvoiceTotals['2026-07'], 150);
     expect(s.monthlyInvoiceTotals['2026-08'], 80);
+  });
+
+  test('adding debt then paying part keeps all balances consistent', () {
+    final s = _subscriber(price: 100, paid: 20);
+
+    s.price += 50;
+    s.normalizeDebtFields();
+    final applied = s.applyPartialPayment(30, at: DateTime(2026, 8, 11));
+
+    expect(s.price, 150);
+    expect(s.paid, 50);
+    expect(s.remaining, 100);
+    expect(applied, 30);
+  });
+
+  test('daily summary separates added debt from collected cash', () {
+    final events = <DailyTaskEvent>[
+      DailyTaskEvent(
+        type: 'activation',
+        subscriberUser: 'u1',
+        subscriberName: 'User 1',
+        at: DateTime(2026, 8, 11, 9),
+        amount: 25000,
+      ),
+      DailyTaskEvent(
+        type: 'debt_payment',
+        subscriberUser: 'u2',
+        subscriberName: 'User 2',
+        at: DateTime(2026, 8, 11, 10),
+        amount: 5000,
+        remainingAfter: 10000,
+      ),
+      DailyTaskEvent(
+        type: 'debt_added',
+        subscriberUser: 'u2',
+        subscriberName: 'User 2',
+        at: DateTime(2026, 8, 11, 11),
+        amount: 7000,
+        remainingAfter: 17000,
+      ),
+    ];
+
+    final summary = DailyTaskSummary.fromEvents(events);
+
+    expect(summary.activationCases, 1);
+    expect(summary.debtPaymentCases, 1);
+    expect(summary.activationCollected, 25000);
+    expect(summary.debtPaymentsCollected, 5000);
+    expect(summary.totalCollected, 30000);
+    expect(summary.debtAddedTotal, 7000);
+  });
+
+  test('daily summary can recover a legacy zero activation amount', () {
+    final event = DailyTaskEvent(
+      type: 'activation',
+      subscriberUser: 'u1',
+      subscriberName: 'User 1',
+      at: DateTime(2026, 8, 11),
+      amount: 0,
+    );
+
+    final summary = DailyTaskSummary.fromEvents(
+      [event],
+      amountOf: (_) => 20000,
+    );
+
+    expect(summary.activationCollected, 20000);
+    expect(summary.totalCollected, 20000);
   });
 }

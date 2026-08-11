@@ -1061,9 +1061,40 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
               ? (payNow ? 'فاتورة تسديد كامل' : 'فاتورة تعديل زيادة الواصل')
               : 'فاتورة تصحيح تخفيض الواصل',
         );
+        if (delta > 0) {
+          await AppStore.addDailyTaskEvent(
+            DailyTaskEvent(
+              type: 'debt_payment',
+              subscriberUser: s.user,
+              subscriberName: s.name,
+              at: now,
+              amount: delta,
+              remainingAfter: s.remaining,
+              note: s.remaining <= 0.0001
+                  ? 'تسديد كامل من قائمة الديون'
+                  : 'تسديد جزئي من قائمة الديون',
+            ),
+            persist: false,
+          );
+        }
         paymentDate = _date(now);
       } else if (parsedRemaining >= 0 && (parsedPrice - parsedRemaining - oldPaid).abs() > 0.0001) {
         paymentDate = _date(now);
+      }
+      final addedDebt = parsedPrice - oldPrice;
+      if (addedDebt > 0.0001) {
+        await AppStore.addDailyTaskEvent(
+          DailyTaskEvent(
+            type: 'debt_added',
+            subscriberUser: s.user,
+            subscriberName: s.name,
+            at: now,
+            amount: addedDebt,
+            remainingAfter: s.remaining,
+            note: 'إضافة مبلغ من تعديل الديون',
+          ),
+          persist: false,
+        );
       }
       if (s.paid <= 0) {
         paymentDate = '';
@@ -1087,6 +1118,91 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
         await _openReceipt(s);
       }
     }
+  }
+
+  Future<void> _addDebtAmount(Subscriber s) async {
+    final amountController = TextEditingController();
+    final amount = await showDialog<double>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: Text('إضافة مبلغ - ${s.name}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('مبلغ الاشتراك: ${s.price.toStringAsFixed(0)} د.ع'),
+              Text('الواصل: ${s.paid.toStringAsFixed(0)} د.ع'),
+              Text(
+                'المتبقي: ${s.remaining.toStringAsFixed(0)} د.ع',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: amountController,
+                autofocus: true,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'المبلغ المراد إضافته',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                _parseAmount(amountController.text.trim()),
+              ),
+              child: const Text('إضافة'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (amount == null) return;
+    if (!amount.isFinite || amount <= 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('أدخل مبلغاً صحيحاً أكبر من صفر')),
+        );
+      }
+      return;
+    }
+
+    final now = DateTime.now();
+    s.price += amount;
+    s.normalizeDebtFields();
+    await AppStore.addDailyTaskEvent(
+      DailyTaskEvent(
+        type: 'debt_added',
+        subscriberUser: s.user,
+        subscriberName: s.name,
+        at: now,
+        amount: amount,
+        remainingAfter: s.remaining,
+        note: 'إضافة مبلغ من قائمة الديون',
+      ),
+      persist: false,
+    );
+    await AppStore.save();
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'تمت إضافة ${amount.toStringAsFixed(0)} د.ع | '
+          'المتبقي ${s.remaining.toStringAsFixed(0)} د.ع',
+        ),
+      ),
+    );
   }
 
   Future<void> _partialPayment(Subscriber s) async {
@@ -1147,6 +1263,20 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       amount: applied,
       at: now,
       note: s.remaining <= 0.0001 ? 'فاتورة تسديد كامل' : 'فاتورة تسديد جزئي',
+    );
+    await AppStore.addDailyTaskEvent(
+      DailyTaskEvent(
+        type: 'debt_payment',
+        subscriberUser: s.user,
+        subscriberName: s.name,
+        at: now,
+        amount: applied,
+        remainingAfter: s.remaining,
+        note: s.remaining <= 0.0001
+            ? 'تسديد كامل من قائمة الديون'
+            : 'تسديد جزئي من قائمة الديون',
+      ),
+      persist: false,
     );
     s.paymentDate = _date(now);
     await AppStore.save();
@@ -1608,6 +1738,8 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                                   if (mounted) setState(() {});
                                 },
                                 onEdit: _editDebt,
+                                onAddAmount: _addDebtAmount,
+                                onPartialPayment: _partialPayment,
                                 onReminder: _sendReminder,
                                 onReceipt: _openReceipt,
                               ),
@@ -1631,6 +1763,8 @@ class _DebtsDataSource extends DataTableSource {
     required this.data,
     required this.onNameTap,
     required this.onEdit,
+    required this.onAddAmount,
+    required this.onPartialPayment,
     required this.onReminder,
     required this.onReceipt,
   });
@@ -1638,6 +1772,8 @@ class _DebtsDataSource extends DataTableSource {
   final List<Subscriber> data;
   final Future<void> Function(Subscriber) onNameTap;
   final void Function(Subscriber) onEdit;
+  final void Function(Subscriber) onAddAmount;
+  final void Function(Subscriber) onPartialPayment;
   final void Function(Subscriber) onReminder;
   final void Function(Subscriber) onReceipt;
 
@@ -1696,10 +1832,68 @@ class _DebtsDataSource extends DataTableSource {
           runSpacing: 4,
           alignment: WrapAlignment.center,
           children: [
-            IconButton(
-              tooltip: 'تعديل',
-              onPressed: () => onEdit(subscriber),
-              icon: const Icon(Icons.edit, size: 18, color: Colors.blueGrey),
+            PopupMenuButton<String>(
+              tooltip: 'العمليات',
+              icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
+              onSelected: (value) {
+                switch (value) {
+                  case 'edit':
+                    onEdit(subscriber);
+                  case 'add_amount':
+                    onAddAmount(subscriber);
+                  case 'partial_payment':
+                    onPartialPayment(subscriber);
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem<String>(
+                  enabled: false,
+                  child: Text(
+                    'مبلغ الاشتراك: ${subscriber.price.toStringAsFixed(0)} د.ع',
+                  ),
+                ),
+                PopupMenuItem<String>(
+                  enabled: false,
+                  child: Text(
+                    'الواصل: ${subscriber.paid.toStringAsFixed(0)} د.ع',
+                  ),
+                ),
+                PopupMenuItem<String>(
+                  enabled: false,
+                  child: Text(
+                    'المتبقي: ${subscriber.remaining.toStringAsFixed(0)} د.ع',
+                    style: const TextStyle(
+                      color: Colors.red,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem<String>(
+                  value: 'edit',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('تعديل المبالغ'),
+                  ),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'add_amount',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.add_card_outlined),
+                    title: Text('إضافة مبلغ'),
+                  ),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'partial_payment',
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.payments_outlined),
+                    title: Text('تسديد جزء من المبلغ'),
+                  ),
+                ),
+              ],
             ),
             IconButton(
               tooltip: 'تنبيه',

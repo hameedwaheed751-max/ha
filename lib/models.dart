@@ -96,6 +96,56 @@ class DailyTaskEvent {
       );
 }
 
+class DailyTaskSummary {
+  const DailyTaskSummary({
+    required this.activationCases,
+    required this.debtPaymentCases,
+    required this.activationCollected,
+    required this.debtPaymentsCollected,
+    required this.debtAddedTotal,
+  });
+
+  final int activationCases;
+  final int debtPaymentCases;
+  final double activationCollected;
+  final double debtPaymentsCollected;
+  final double debtAddedTotal;
+
+  double get totalCollected => activationCollected + debtPaymentsCollected;
+
+  factory DailyTaskSummary.fromEvents(
+    Iterable<DailyTaskEvent> events, {
+    double Function(DailyTaskEvent event)? amountOf,
+  }) {
+    var activationCases = 0;
+    var debtPaymentCases = 0;
+    var activationCollected = 0.0;
+    var debtPaymentsCollected = 0.0;
+    var debtAddedTotal = 0.0;
+
+    for (final event in events) {
+      final amount = amountOf?.call(event) ?? event.amount;
+      if (event.type == 'activation') {
+        activationCases++;
+        if (amount > 0) activationCollected += amount;
+      } else if (event.type == 'debt_payment' && amount > 0) {
+        debtPaymentCases++;
+        debtPaymentsCollected += amount;
+      } else if (event.type == 'debt_added' && amount > 0) {
+        debtAddedTotal += amount;
+      }
+    }
+
+    return DailyTaskSummary(
+      activationCases: activationCases,
+      debtPaymentCases: debtPaymentCases,
+      activationCollected: activationCollected,
+      debtPaymentsCollected: debtPaymentsCollected,
+      debtAddedTotal: debtAddedTotal,
+    );
+  }
+}
+
 class Subscriber {
   Subscriber({
     required this.user,
