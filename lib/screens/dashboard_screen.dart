@@ -1485,15 +1485,24 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       }
       return _debtSortAsc ? c : -c;
     });
+    final totalSubscriptions = sortedDebts.fold<double>(
+      0,
+      (total, subscriber) => total + subscriber.price,
+    );
+    final totalPaid = sortedDebts.fold<double>(
+      0,
+      (total, subscriber) => total + subscriber.paid,
+    );
+    final totalRemaining = sortedDebts.fold<double>(
+      0,
+      (total, subscriber) => total + subscriber.remaining,
+    );
 
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('الديون والحسابات'),
-          centerTitle: true,
-          backgroundColor: greenSoft,
-          foregroundColor: green,
           actions: [
             IconButton(
               tooltip: 'تصدير Excel',
@@ -1509,8 +1518,73 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
             controller: _verticalScrollController,
             padding: EdgeInsets.zero,
             children: [
+              Container(
+                margin: const EdgeInsets.fromLTRB(12, 16, 12, 12),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF12372A),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Wrap(
+                  spacing: 24,
+                  runSpacing: 14,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'نظرة عامة على الديون',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'إجمالي المبلغ المتبقي',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.72),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${totalRemaining.toStringAsFixed(0)} د.ع',
+                          style: const TextStyle(
+                            color: Color(0xFFFFB4AB),
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.22),
+                        ),
+                      ),
+                      child: Text(
+                        '$debtorsCount مشترك مديون',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                 child: TextField(
                   controller: _debtSearchC,
                   onChanged: (v) => setState(() => _debtQuery = v),
@@ -1529,15 +1603,15 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                     filled: true,
                     fillColor: Colors.white,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: green.withValues(alpha: 0.35)),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: green.withValues(alpha: 0.35)),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: green, width: 2),
                     ),
                     isDense: true,
@@ -1545,7 +1619,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                 child: Row(
                   children: ['الكل', 'غير مسدد', 'تسديد جزئي'].map((f) {
                     return Expanded(
@@ -1565,38 +1639,59 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(children: [
-                            const Text('عدد المدينين', style: TextStyle(fontSize: 12)),
-                            const SizedBox(height: 8),
-                            Text('$debtorsCount',
-                                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.red)),
-                          ]),
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final columns = constraints.maxWidth >= 900
+                        ? 4
+                        : constraints.maxWidth >= 520
+                            ? 2
+                            : 1;
+                    final width =
+                        (constraints.maxWidth - (columns - 1) * 10) / columns;
+                    return Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        SizedBox(
+                          width: width,
+                          child: _debtMetricTile(
+                            title: 'مبالغ الاشتراكات',
+                            value: '${totalSubscriptions.toStringAsFixed(0)} د.ع',
+                            icon: Icons.receipt_long_outlined,
+                            color: Colors.blue,
+                          ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Card(
-                        color: greenSoft.withValues(alpha: 0.45),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(children: [
-                            const Text('مجموع الديون', style: TextStyle(fontSize: 12)),
-                            const SizedBox(height: 8),
-                            Text('${sortedDebts.fold<double>(0, (v, s) => v + s.remaining).toStringAsFixed(0)} د.ع',
-                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red)),
-                          ]),
+                        SizedBox(
+                          width: width,
+                          child: _debtMetricTile(
+                            title: 'إجمالي الواصل',
+                            value: '${totalPaid.toStringAsFixed(0)} د.ع',
+                            icon: Icons.payments_outlined,
+                            color: Colors.green,
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
+                        SizedBox(
+                          width: width,
+                          child: _debtMetricTile(
+                            title: 'إجمالي المتبقي',
+                            value: '${totalRemaining.toStringAsFixed(0)} د.ع',
+                            icon: Icons.money_off_csred_outlined,
+                            color: Colors.red,
+                          ),
+                        ),
+                        SizedBox(
+                          width: width,
+                          child: _debtMetricTile(
+                            title: 'عدد المدينين',
+                            value: '$debtorsCount',
+                            icon: Icons.people_outline,
+                            color: Colors.orange,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
               if (sortedDebts.isEmpty)
@@ -1607,10 +1702,13 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
               else
                 Card(
                   margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: const BorderSide(color: Color(0xFFE2E8F0)),
+                  ),
+                  elevation: 0,
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(8),
                     child: Scrollbar(
                       controller: _horizontalScrollController,
                       thumbVisibility: true,
@@ -1753,6 +1851,63 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _debtMetricTile({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 104),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
