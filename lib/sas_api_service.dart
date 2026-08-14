@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:html' as html;
-import 'dart:js_util' as js_util;
 import 'dart:math';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:crypto/crypto.dart';
@@ -13,6 +11,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'sas_http_overrides.dart'
     if (dart.library.io) 'sas_http_overrides_io.dart';
+import 'services/runtime_app_config.dart';
 
 class SasSettings {
   static const _serverKey = 'sas_server_url';
@@ -285,18 +284,7 @@ class SasApiService {
     defaultValue: 'https://ha-0cs7.onrender.com',
   );
   static String get _runtimeWebProxyBaseRaw {
-    if (kIsWeb) {
-      try {
-        final config = js_util.getProperty(html.window, '__APP_CONFIG__');
-        if (config != null) {
-          final value = js_util.getProperty(config, 'sasWebProxyUrl');
-          if (value is String && value.trim().isNotEmpty) {
-            return value.trim();
-          }
-        }
-      } catch (_) {}
-    }
-    return _webProxyBaseRaw;
+    return readRuntimeAppConfig('sasWebProxyUrl') ?? _webProxyBaseRaw;
   }
   static const bool _useProxyOnWeb = bool.fromEnvironment(
     'SAS_USE_PROXY',
@@ -307,18 +295,7 @@ class SasApiService {
     defaultValue: '',
   );
   static String get _runtimeProxyToken {
-    if (kIsWeb) {
-      try {
-        final config = js_util.getProperty(html.window, '__APP_CONFIG__');
-        if (config != null) {
-          final value = js_util.getProperty(config, 'sasProxyToken');
-          if (value is String && value.trim().isNotEmpty) {
-            return value.trim();
-          }
-        }
-      } catch (_) {}
-    }
-    return _proxyToken;
+    return readRuntimeAppConfig('sasProxyToken') ?? _proxyToken;
   }
   static const String _legacyProxyToken = String.fromEnvironment(
     'PROXY_TOKEN',

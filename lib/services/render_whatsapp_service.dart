@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:html' as html;
-import 'dart:js_util' as js_util;
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
+import 'runtime_app_config.dart';
 import 'whatsapp_template_contract.dart';
 
 enum WhatsAppNotificationType {
@@ -164,32 +163,10 @@ class RenderWhatsAppService {
     defaultValue: '',
   );
   static String get _runtimeDefaultSendEndpoint {
-    if (kIsWeb) {
-      try {
-        final config = js_util.getProperty(html.window, '__APP_CONFIG__');
-        if (config != null) {
-          final value = js_util.getProperty(config, 'sasWebProxyUrl');
-          if (value is String && value.trim().isNotEmpty) {
-            return value.trim();
-          }
-        }
-      } catch (_) {}
-    }
-    return _defaultSendEndpoint;
+    return readRuntimeAppConfig('sasWebProxyUrl') ?? _defaultSendEndpoint;
   }
   static String get _runtimeEmbeddedApiKey {
-    if (kIsWeb) {
-      try {
-        final config = js_util.getProperty(html.window, '__APP_CONFIG__');
-        if (config != null) {
-          final value = js_util.getProperty(config, 'sasProxyToken');
-          if (value is String && value.trim().isNotEmpty) {
-            return value.trim();
-          }
-        }
-      } catch (_) {}
-    }
-    return _embeddedApiKey;
+    return readRuntimeAppConfig('sasProxyToken') ?? _embeddedApiKey;
   }
   static const String _metaApiBaseUrl = String.fromEnvironment(
     'META_WHATSAPP_API_URL',

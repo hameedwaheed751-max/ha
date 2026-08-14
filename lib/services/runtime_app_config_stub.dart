@@ -1,0 +1,1 @@
+String? readRuntimeAppConfig(String key) => null;
