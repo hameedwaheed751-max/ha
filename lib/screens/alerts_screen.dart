@@ -180,8 +180,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
         SnackBar(
           content: Text(
             ok
-                ? 'تم الإرسال التلقائي عبر Render: $sent / $total'
-                : 'اكتمل الإرسال مع أخطاء: ناجح $sent، فشل $failed من $total',
+                ? 'قبلت Meta طلبات الإرسال: $sent / $total. التسليم النهائي يظهر عبر Webhook.'
+                : 'اكتمل الإرسال مع أخطاء: قبلت Meta عدد $sent، وفشل $failed من $total',
           ),
           duration: const Duration(seconds: 5),
         ),
@@ -371,14 +371,18 @@ class _AlertsScreenState extends State<AlertsScreen> {
                         title: Text('${log.eventType} • ${log.sent}/${log.total}'),
                         subtitle: Text('${_fmtLogTime(log.at)}${log.note.isEmpty ? '' : ' • ${log.note}'}'),
                         trailing: Text('فشل ${log.failed}'),
-                        onTap: log.ok || log.responseBody == null
+                        onTap: log.responseBody == null
                             ? null
                             : () => showDialog<void>(
                                   context: ctx,
                                   builder: (detailsContext) => Directionality(
                                     textDirection: TextDirection.rtl,
                                     child: AlertDialog(
-                                      title: Text('تفاصيل الخطأ ${log.statusCode ?? ''}'),
+                                      title: Text(
+                                        log.ok
+                                            ? 'رد Meta ${log.statusCode ?? ''}'
+                                            : 'تفاصيل الخطأ ${log.statusCode ?? ''}',
+                                      ),
                                       content: SelectableText(
                                         JsonEncoder.withIndent('  ')
                                             .convert(log.responseBody),

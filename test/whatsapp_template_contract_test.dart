@@ -15,8 +15,8 @@ void main() {
     'notification_date': '24/08/2026',
   };
 
-  test('activated uses all approved named Meta parameters in order', () {
-    final parameters = buildMetaTemplateParameters('activated', values);
+  test('activated_utilit uses all approved named Meta parameters in order', () {
+    final parameters = buildMetaTemplateParameters('activated_utility', values);
 
     expect(
       parameters.map((parameter) => parameter.name),
@@ -67,7 +67,7 @@ void main() {
   });
 
   test('approved debt reminder uses its compiled Meta contract', () {
-    final names = buildMetaTemplateParameters('debt_paid', values)
+    final names = buildMetaTemplateParameters('paid_utility', values)
         .map((parameter) => parameter.name)
         .toList();
 
@@ -84,7 +84,7 @@ void main() {
   test('missing required values fail before sending an invalid template', () {
     expect(
       () => buildMetaTemplateParameters(
-        'activated',
+        'activated_utility',
         <String, String>{...values, 'customer_name': ''},
       ),
       throwsStateError,

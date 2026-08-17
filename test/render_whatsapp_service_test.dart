@@ -3,6 +3,16 @@ import 'package:untitled/models.dart';
 import 'package:untitled/services/render_whatsapp_service.dart';
 
 void main() {
+  test('normalizes common Iraqi WhatsApp phone formats', () {
+    const expected = '9647900000000';
+
+    expect(RenderWhatsAppService.normalizePhone('0790 000 0000'), expected);
+    expect(RenderWhatsAppService.normalizePhone('+964 790 000 0000'), expected);
+    expect(RenderWhatsAppService.normalizePhone('00964 790 000 0000'), expected);
+    expect(RenderWhatsAppService.normalizePhone('790 000 0000'), expected);
+    expect(RenderWhatsAppService.normalizePhone('96407900000000'), expected);
+  });
+
   test('uses the canonical Meta debt placeholders in the default template', () {
     expect(AppStore.debtTemplate, contains('{{customer_name}}'));
     expect(AppStore.debtTemplate, contains('{{paid_amount}}'));

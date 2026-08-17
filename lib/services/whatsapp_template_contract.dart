@@ -29,7 +29,7 @@ const List<String> canonicalMetaVariableNames = <String>[
 
 const Map<String, List<String>> metaTemplateParameterNames =
     <String, List<String>>{
-  'activated': <String>[
+  'activated_utility': <String>[
     'customer_name',
     'package_name',
     'paid_amount',
@@ -46,7 +46,7 @@ const Map<String, List<String>> metaTemplateParameterNames =
     'agent_name',
     'whatsapp_number',
   ],
-  'debt_paid': <String>[
+  'paid_utility': <String>[
     'customer_name',
     'remaining_amount',
     'agent_name',

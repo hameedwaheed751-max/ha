@@ -34,7 +34,7 @@ extension WhatsAppNotificationTypeX on WhatsAppNotificationType {
       case WhatsAppNotificationType.debtAdded:
         return 'debt_added';
       case WhatsAppNotificationType.debtPaid:
-        return 'debt_paid';
+        return 'paid_utility';
       case WhatsAppNotificationType.generalMessage:
         return 'general_single';
       case WhatsAppNotificationType.broadcast:
@@ -355,6 +355,7 @@ class RenderWhatsAppService {
   static String _templateNameForType(WhatsAppNotificationType type) {
     switch (type) {
       case WhatsAppNotificationType.subscriptionActivated:
+        return 'activated_utility';
       case WhatsAppNotificationType.subscriptionRenewed:
         return 'activated';
       case WhatsAppNotificationType.subscriptionExpiresIn3Days:
@@ -362,9 +363,9 @@ class RenderWhatsAppService {
       case WhatsAppNotificationType.subscriptionExpired:
         return 'expiring';
       case WhatsAppNotificationType.debtAdded:
-        return 'debt_paid';
+        return 'paid_utility';
       case WhatsAppNotificationType.debtPaid:
-        return 'debt_paid';
+        return 'paid_utility';
       case WhatsAppNotificationType.generalMessage:
       case WhatsAppNotificationType.broadcast:
         return 'activated';
@@ -616,7 +617,10 @@ class RenderWhatsAppService {
 
   static String normalizePhone(String phone) {
     var n = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (n.startsWith('00')) n = n.substring(2);
+    if (n.startsWith('9640')) n = '964${n.substring(4)}';
     if (n.startsWith('0')) n = '964${n.substring(1)}';
+    if (n.length == 10 && n.startsWith('7')) n = '964$n';
     return n;
   }
 
@@ -850,7 +854,9 @@ class RenderWhatsAppService {
           to: normalizedPhone,
           attempt: attempt,
           ok: success,
-          note: success ? (note.isEmpty ? 'Delivered' : note) : 'HTTP ${response.statusCode}',
+          note: success
+              ? (note.isEmpty ? 'Accepted by Meta' : 'Accepted by Meta • $note')
+              : 'HTTP ${response.statusCode}',
           endpoint: endpoint,
           requestBody: currentPayload,
           responseBody: data.isNotEmpty ? data : {'raw': response.body},
