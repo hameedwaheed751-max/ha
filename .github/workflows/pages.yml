@@ -1,4 +1,4 @@
-name: Deploy GitHub Pages
+name: Deploy Flutter Web to GitHub Pages
 
 on:
   push:
@@ -11,29 +11,36 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: pages
-  cancel-in-progress: true
-
 jobs:
   deploy:
+    runs-on: ubuntu-latest
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
-    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build Flutter Web
+        run: flutter build web --release --base-href /ha/
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload site
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload Flutter Web
+        uses: actions/upload-pages-artifact@v4
         with:
-          path: .
+          path: build/web
 
       - name: Deploy to GitHub Pages
         id: deployment
