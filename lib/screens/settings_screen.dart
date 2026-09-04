@@ -86,6 +86,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
               TextField(controller: address, decoration: dec('عنوان المكتب')),
               const SizedBox(height: 12),
               TextField(controller: footer, maxLines: 2, decoration: dec('ملاحظة أسفل الوصل')),
+              const SizedBox(height: 16),
+              Card(
+                child: SwitchListTile(
+                  value: AppStore.isDarkMode,
+                  onChanged: (_) {
+                    AppStore.toggleTheme();
+                    setState(() {});
+                  },
+                  secondary: Icon(
+                    AppStore.isDarkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+                  ),
+                  title: const Text('الوضع الداكن', style: TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: Text(AppStore.isDarkMode ? 'المظهر الداكن مفعّل' : 'المظهر الفاتح مفعّل'),
+                ),
+              ),
               const SizedBox(height: 20),
               SizedBox(
                 height: 52,

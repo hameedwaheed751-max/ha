@@ -20,7 +20,9 @@ class _AlertsScreenState extends State<AlertsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadLogs();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadLogs();
+    });
   }
 
   Future<void> _loadLogs() async {
@@ -43,22 +45,22 @@ class _AlertsScreenState extends State<AlertsScreen> {
     final remaining = s.remaining.toStringAsFixed(0);
     return template
         .replaceAll('{name}', s.name)
-      .replaceAll('{{الاسم المشترك}}', s.name)
+        .replaceAll('{{الاسم المشترك}}', s.name)
         .replaceAll('{user}', s.user)
         .replaceAll('{office}', AppStore.officeName)
-      .replaceAll('{{اسم الوكيل}}', AppStore.officeName)
-      .replaceAll('{package}', s.packageDisplay)
-      .replaceAll('{{اسم الباقة}}', s.packageDisplay)
-      .replaceAll('{{تاريخ البدء}}', fmt(s.startDate))
+        .replaceAll('{{اسم الوكيل}}', AppStore.officeName)
+        .replaceAll('{package}', s.packageDisplay)
+        .replaceAll('{{اسم الباقة}}', s.packageDisplay)
+        .replaceAll('{{تاريخ البدء}}', fmt(s.startDate))
         .replaceAll('{endDate}', fmt(s.endDate))
-      .replaceAll('{{تاريخ الانتهاء}}', fmt(s.endDate))
+        .replaceAll('{{تاريخ الانتهاء}}', fmt(s.endDate))
         .replaceAll('{price}', s.price.toStringAsFixed(0))
-      .replaceAll('{{مبلغ الاشتراك}}', s.price.toStringAsFixed(0))
-          .replaceAll('{{المبلغ}}', remaining)
-      .replaceAll('{paid}', paid)
-      .replaceAll('{{الواصل}}', 'الواصل: $paid')
-      .replaceAll('{remaining}', remaining)
-      .replaceAll('{{المتبقي}}', 'المتبقي: $remaining');
+        .replaceAll('{{مبلغ الاشتراك}}', s.price.toStringAsFixed(0))
+        .replaceAll('{{المبلغ}}', remaining)
+        .replaceAll('{paid}', paid)
+        .replaceAll('{{الواصل}}', 'الواصل: $paid')
+        .replaceAll('{remaining}', remaining)
+        .replaceAll('{{المتبقي}}', 'المتبقي: $remaining');
   }
 
   List<Subscriber> _recipients(String type) {
@@ -95,17 +97,19 @@ class _AlertsScreenState extends State<AlertsScreen> {
   Future<void> _sendAutomaticCampaign(
     String type,
     List<Subscriber> recipients,
-    String template,
-    {
-      String eventType = 'manual_campaign',
-      String note = '',
-    }
-  ) async {
-    final valid = recipients.where((s) => normalizePhone(s.phone).isNotEmpty).toList();
+    String template, {
+    String eventType = 'manual_campaign',
+    String note = '',
+  }) async {
+    final valid = recipients
+        .where((s) => normalizePhone(s.phone).isNotEmpty)
+        .toList();
     if (valid.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('لا توجد أرقام هاتف صالحة للإرسال التلقائي')),
+        const SnackBar(
+          content: Text('لا توجد أرقام هاتف صالحة للإرسال التلقائي'),
+        ),
       );
       return;
     }
@@ -130,10 +134,11 @@ class _AlertsScreenState extends State<AlertsScreen> {
           final rendered = _applyTemplate(template, s);
           late final RenderSingleWhatsAppResult single;
           if (type == 'threeDays') {
-            single = await RenderWhatsAppService.notifySubscriptionExpiresIn3Days(
-              s,
-              template: rendered,
-            );
+            single =
+                await RenderWhatsAppService.notifySubscriptionExpiresIn3Days(
+                  s,
+                  template: rendered,
+                );
           } else if (type == 'debt') {
             single = await RenderWhatsAppService.notifyDebtAdded(
               s,
@@ -147,11 +152,12 @@ class _AlertsScreenState extends State<AlertsScreen> {
               template: rendered,
             );
           } else {
-            single = await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
-              s,
-              message: rendered,
-              template: '{message}',
-            );
+            single =
+                await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
+                  s,
+                  message: rendered,
+                  template: '{message}',
+                );
           }
 
           if (single.success) {
@@ -189,9 +195,9 @@ class _AlertsScreenState extends State<AlertsScreen> {
       await _loadLogs();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('فشل الإرسال عبر Render: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('فشل الإرسال عبر Render: $e')));
     } finally {
       if (mounted) {
         setState(() => _sendingAutomatic = false);
@@ -229,11 +235,17 @@ class _AlertsScreenState extends State<AlertsScreen> {
                 },
               ),
               const SizedBox(height: 8),
-              ...plan.map((group) => Text('${group.title}: ${group.recipients.length} مشترك')),
+              ...plan.map(
+                (group) =>
+                    Text('${group.title}: ${group.recipients.length} مشترك'),
+              ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إغلاق'),
+            ),
           ],
         ),
       ),
@@ -244,14 +256,22 @@ class _AlertsScreenState extends State<AlertsScreen> {
     final content = format == 'excel'
         ? exportSubscribersToExcel(AppStore.subscribers)
         : format == 'json'
-            ? exportSubscribersToJson(AppStore.subscribers)
-            : exportSubscribersToCsv(AppStore.subscribers);
+        ? exportSubscribersToJson(AppStore.subscribers)
+        : exportSubscribersToCsv(AppStore.subscribers);
 
     await Clipboard.setData(ClipboardData(text: content));
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('تم نسخ البيانات بصيغة ${format == 'excel' ? 'Excel' : format == 'json' ? 'JSON' : 'CSV'} إلى الحافظة')),
+      SnackBar(
+        content: Text(
+          'تم نسخ البيانات بصيغة ${format == 'excel'
+              ? 'Excel'
+              : format == 'json'
+              ? 'JSON'
+              : 'CSV'} إلى الحافظة',
+        ),
+      ),
     );
   }
 
@@ -275,8 +295,10 @@ class _AlertsScreenState extends State<AlertsScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('عدد المستلمين: ${recipients.length}',
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                    'عدد المستلمين: ${recipients.length}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: c,
@@ -297,9 +319,14 @@ class _AlertsScreenState extends State<AlertsScreen> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
             FilledButton(
-              onPressed: recipients.isEmpty ? null : () => Navigator.pop(ctx, true),
+              onPressed: recipients.isEmpty
+                  ? null
+                  : () => Navigator.pop(ctx, true),
               child: const Text('متابعة'),
             ),
           ],
@@ -316,10 +343,18 @@ class _AlertsScreenState extends State<AlertsScreen> {
         textDirection: TextDirection.rtl,
         child: AlertDialog(
           title: const Text('تأكيد الإرسال'),
-          content: Text('سيتم تجهيز الرسالة إلى ${recipients.length} مشترك. هل تريد المتابعة؟'),
+          content: Text(
+            'سيتم تجهيز الرسالة إلى ${recipients.length} مشترك. هل تريد المتابعة؟',
+          ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('رجوع')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('تأكيد')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('رجوع'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('تأكيد'),
+            ),
           ],
         ),
       ),
@@ -368,35 +403,41 @@ class _AlertsScreenState extends State<AlertsScreen> {
                           log.ok ? Icons.check_circle : Icons.error_outline,
                           color: log.ok ? Colors.green : Colors.red,
                         ),
-                        title: Text('${log.eventType} • ${log.sent}/${log.total}'),
-                        subtitle: Text('${_fmtLogTime(log.at)}${log.note.isEmpty ? '' : ' • ${log.note}'}'),
+                        title: Text(
+                          '${log.eventType} • ${log.sent}/${log.total}',
+                        ),
+                        subtitle: Text(
+                          '${_fmtLogTime(log.at)}${log.note.isEmpty ? '' : ' • ${log.note}'}',
+                        ),
                         trailing: Text('فشل ${log.failed}'),
                         onTap: log.responseBody == null
                             ? null
                             : () => showDialog<void>(
-                                  context: ctx,
-                                  builder: (detailsContext) => Directionality(
-                                    textDirection: TextDirection.rtl,
-                                    child: AlertDialog(
-                                      title: Text(
-                                        log.ok
-                                            ? 'رد Meta ${log.statusCode ?? ''}'
-                                            : 'تفاصيل الخطأ ${log.statusCode ?? ''}',
-                                      ),
-                                      content: SelectableText(
-                                        JsonEncoder.withIndent('  ')
-                                            .convert(log.responseBody),
-                                        textDirection: TextDirection.ltr,
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () => Navigator.pop(detailsContext),
-                                          child: const Text('إغلاق'),
-                                        ),
-                                      ],
+                                context: ctx,
+                                builder: (detailsContext) => Directionality(
+                                  textDirection: TextDirection.rtl,
+                                  child: AlertDialog(
+                                    title: Text(
+                                      log.ok
+                                          ? 'رد Meta ${log.statusCode ?? ''}'
+                                          : 'تفاصيل الخطأ ${log.statusCode ?? ''}',
                                     ),
+                                    content: SelectableText(
+                                      JsonEncoder.withIndent(
+                                        '  ',
+                                      ).convert(log.responseBody),
+                                      textDirection: TextDirection.ltr,
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(detailsContext),
+                                        child: const Text('إغلاق'),
+                                      ),
+                                    ],
                                   ),
                                 ),
+                              ),
                       );
                     },
                   ),
@@ -410,7 +451,10 @@ class _AlertsScreenState extends State<AlertsScreen> {
               },
               child: const Text('مسح السجل'),
             ),
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إغلاق'),
+            ),
           ],
         ),
       ),

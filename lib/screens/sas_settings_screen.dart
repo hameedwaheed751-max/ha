@@ -18,47 +18,82 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
   String? result;
 
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _load();
+    });
+  }
+
   Future<void> _load() async {
     final s = await SasSettings.load();
-    server.text = s.serverUrl; user.text = s.username; pass.text = s.password;
+    server.text = s.serverUrl;
+    user.text = s.username;
+    pass.text = s.password;
     if (s.webProxyUrl.trim().isNotEmpty) _proxyUrl = s.webProxyUrl.trim();
     if (mounted) setState(() => loading = false);
   }
+
   @override
-  void dispose() { server.dispose(); user.dispose(); pass.dispose(); super.dispose(); }
+  void dispose() {
+    server.dispose();
+    user.dispose();
+    pass.dispose();
+    super.dispose();
+  }
 
   SasSettings get value => SasSettings(
-        serverUrl: server.text,
-        username: user.text,
-        password: pass.text,
-        webProxyUrl: _proxyUrl,
-      );
-  InputDecoration dec(String x, IconData i) => InputDecoration(labelText: x, prefixIcon: Icon(i), border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)));
+    serverUrl: server.text,
+    username: user.text,
+    password: pass.text,
+    webProxyUrl: _proxyUrl,
+  );
+  InputDecoration dec(String x, IconData i) => InputDecoration(
+    labelText: x,
+    prefixIcon: Icon(i),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+  );
 
   Future<void> _save() async {
     await value.save();
     AppStore.sasUsername = user.text.trim();
     await AppStore.save();
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ إعدادات SAS')));
+    if (mounted)
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم حفظ إعدادات SAS')));
   }
 
   Future<void> _test() async {
-    if (server.text.trim().isEmpty || user.text.trim().isEmpty || pass.text.isEmpty) {
-      setState(() => result = 'أدخل رابط SAS واليوزر والباسورد'); return;
+    if (server.text.trim().isEmpty ||
+        user.text.trim().isEmpty ||
+        pass.text.isEmpty) {
+      setState(() => result = 'أدخل رابط SAS واليوزر والباسورد');
+      return;
     }
-    setState(() { testing = true; result = null; });
+    setState(() {
+      testing = true;
+      result = null;
+    });
     try {
       await value.save();
       AppStore.sasUsername = user.text.trim();
       await AppStore.save();
       final api = SasApiService(value);
       await api.login().timeout(const Duration(seconds: 20));
-      final sync = await SasSyncService.sync(api).timeout(const Duration(seconds: 30));
-      if (mounted) setState(() => result = 'نجح الاتصال والمزامنة. المقروءة: ${sync.read} | المضافة: ${sync.added} | المحدثة: ${sync.updated}');
+      final sync = await SasSyncService.sync(
+        api,
+      ).timeout(const Duration(seconds: 30));
+      if (mounted)
+        setState(
+          () => result =
+              'نجح الاتصال والمزامنة. المقروءة: ${sync.read} | المضافة: ${sync.added} | المحدثة: ${sync.updated}',
+        );
     } catch (e) {
       if (mounted) setState(() => result = 'فشل الاتصال: $e');
-    } finally { if (mounted) setState(() => testing = false); }
+    } finally {
+      if (mounted) setState(() => testing = false);
+    }
   }
 
   Future<void> _confirmDelete(bool all) async {
@@ -66,11 +101,16 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(all ? 'حذف جميع المشتركين؟' : 'حذف مشتركي SAS؟'),
-        content: Text(all
-            ? 'سيتم حذف جميع المشتركين المحليين وSAS من التطبيق. لا يمكن التراجع.'
-            : 'سيتم حذف المشتركين القادمين من SAS فقط، وتبقى البيانات المحلية.'),
+        content: Text(
+          all
+              ? 'سيتم حذف جميع المشتركين المحليين وSAS من التطبيق. لا يمكن التراجع.'
+              : 'سيتم حذف المشتركين القادمين من SAS فقط، وتبقى البيانات المحلية.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
@@ -87,7 +127,9 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
     }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(all ? 'تم حذف جميع المشتركين' : 'تم حذف مشتركي SAS')),
+        SnackBar(
+          content: Text(all ? 'تم حذف جميع المشتركين' : 'تم حذف مشتركي SAS'),
+        ),
       );
     }
   }
@@ -127,7 +169,13 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('اسم الوكيل', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                  const Text(
+                                    'اسم الوكيل',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
                                   const SizedBox(height: 4),
                                   Text(
                                     AppStore.effectiveAgentName.isNotEmpty
@@ -136,7 +184,8 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                                     style: TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.bold,
-                                      color: AppStore.effectiveAgentName.isNotEmpty
+                                      color:
+                                          AppStore.effectiveAgentName.isNotEmpty
                                           ? Colors.blue.shade800
                                           : Colors.grey,
                                     ),
@@ -145,7 +194,10 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                                     const SizedBox(height: 4),
                                     Text(
                                       'SAS: ${AppStore.sasUsername}',
-                                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey,
+                                      ),
                                     ),
                                   ],
                                 ],
@@ -158,38 +210,121 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                     const SizedBox(height: 14),
 
                     // إعدادات الاتصال
-                    Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                      const Text('إعدادات الاتصال', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      const Text('أدخل رابط SAS الخاص بالشركة وحساب المدير المخول للـ API.'),
-                      const SizedBox(height: 16),
-                      TextField(controller: server, keyboardType: TextInputType.url, decoration: dec('رابط SAS', Icons.dns_outlined)),
-                      const SizedBox(height: 12),
-                      TextField(controller: user, decoration: dec('اسم المستخدم', Icons.person_outline)),
-                      const SizedBox(height: 12),
-                      TextField(controller: pass, obscureText: hide, decoration: dec('كلمة المرور', Icons.lock_outline).copyWith(suffixIcon: IconButton(onPressed: () => setState(() => hide = !hide), icon: Icon(hide ? Icons.visibility : Icons.visibility_off)))),
-                    ]))),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const Text(
+                              'إعدادات الاتصال',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'أدخل رابط SAS الخاص بالشركة وحساب المدير المخول للـ API.',
+                            ),
+                            const SizedBox(height: 16),
+                            TextField(
+                              controller: server,
+                              keyboardType: TextInputType.url,
+                              decoration: dec('رابط SAS', Icons.dns_outlined),
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: user,
+                              decoration: dec(
+                                'اسم المستخدم',
+                                Icons.person_outline,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: pass,
+                              obscureText: hide,
+                              decoration: dec('كلمة المرور', Icons.lock_outline)
+                                  .copyWith(
+                                    suffixIcon: IconButton(
+                                      onPressed: () =>
+                                          setState(() => hide = !hide),
+                                      icon: Icon(
+                                        hide
+                                            ? Icons.visibility
+                                            : Icons.visibility_off,
+                                      ),
+                                    ),
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 14),
-                    if (result != null) Card(color: result!.startsWith('نجح') ? Colors.green.shade50 : Colors.red.shade50, child: Padding(padding: const EdgeInsets.all(14), child: Text(result!, style: const TextStyle(fontWeight: FontWeight.w600)))),
+                    if (result != null)
+                      Card(
+                        color: result!.startsWith('نجح')
+                            ? Colors.green.shade50
+                            : Colors.red.shade50,
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Text(
+                            result!,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
                     const SizedBox(height: 10),
-                    SizedBox(height: 52, child: FilledButton.icon(onPressed: testing ? null : _test, icon: testing ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.cable), label: const Text('اتصال ومزامنة المشتركين'))),
+                    SizedBox(
+                      height: 52,
+                      child: FilledButton.icon(
+                        onPressed: testing ? null : _test,
+                        icon: testing
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.cable),
+                        label: const Text('اتصال ومزامنة المشتركين'),
+                      ),
+                    ),
                     const SizedBox(height: 10),
-                    SizedBox(height: 48, child: OutlinedButton.icon(onPressed: _save, icon: const Icon(Icons.save_outlined), label: const Text('حفظ إعدادات SAS'))),
+                    SizedBox(
+                      height: 48,
+                      child: OutlinedButton.icon(
+                        onPressed: _save,
+                        icon: const Icon(Icons.save_outlined),
+                        label: const Text('حفظ إعدادات SAS'),
+                      ),
+                    ),
                     const SizedBox(height: 22),
                     const Divider(),
                     const SizedBox(height: 10),
                     const Text(
                       'تنظيف المشتركين عند تغيير SAS',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 6),
-                    const Text('اختر حذف مشتركي SAS فقط أو حذف كل المشتركين من التطبيق.'),
+                    const Text(
+                      'اختر حذف مشتركي SAS فقط أو حذف كل المشتركين من التطبيق.',
+                    ),
                     const SizedBox(height: 12),
                     SizedBox(
                       height: 48,
                       child: OutlinedButton.icon(
                         onPressed: testing ? null : () => _confirmDelete(false),
-                        icon: const Icon(Icons.cloud_off, color: Colors.deepOrange),
+                        icon: const Icon(
+                          Icons.cloud_off,
+                          color: Colors.deepOrange,
+                        ),
                         label: const Text('حذف مشتركي SAS فقط'),
                       ),
                     ),
@@ -197,7 +332,9 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                     SizedBox(
                       height: 48,
                       child: FilledButton.icon(
-                        style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
                         onPressed: testing ? null : () => _confirmDelete(true),
                         icon: const Icon(Icons.delete_forever),
                         label: const Text('حذف جميع المشتركين'),

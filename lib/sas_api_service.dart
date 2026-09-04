@@ -102,7 +102,8 @@ class SasSettings {
       // المسار الحالي: agents/{uid}_{sasUsername}/sas
       // إذا كان المسار القديم يحتوي قيماً فارغة (placeholders) فلا نعتبره صالحاً.
       // نقرأ currentAgentId أو sasUsername من profile ثم نحاول المسار الجديد.
-      final legacyValid = hasNonEmpty(data, 'serverUrl') && hasNonEmpty(data, 'username');
+      final legacyValid =
+          hasNonEmpty(data, 'serverUrl') && hasNonEmpty(data, 'username');
       if (!legacyValid) {
         final profileSnapshot = await FirebaseDatabase.instance
             .ref('agents/$uid/profile')
@@ -110,8 +111,12 @@ class SasSettings {
             .timeout(const Duration(seconds: 5));
         final profileData = profileSnapshot.value;
         if (profileData is Map) {
-          final currentAgentId = (profileData['currentAgentId'] ?? '').toString().trim();
-          final sasUsername = (profileData['sasUsername'] ?? '').toString().trim();
+          final currentAgentId = (profileData['currentAgentId'] ?? '')
+              .toString()
+              .trim();
+          final sasUsername = (profileData['sasUsername'] ?? '')
+              .toString()
+              .trim();
           if (currentAgentId.isNotEmpty) {
             final currentSnapshot = await FirebaseDatabase.instance
                 .ref('agents/$currentAgentId/sas')
@@ -134,17 +139,27 @@ class SasSettings {
       final p = await SharedPreferences.getInstance();
 
       if (sasData['serverUrl'] != null) {
-        await p.setString(_serverKey, _normalizeServerUrl(sasData['serverUrl'].toString()));
+        await p.setString(
+          _serverKey,
+          _normalizeServerUrl(sasData['serverUrl'].toString()),
+        );
       }
       if (sasData['username'] != null) {
         await p.setString(_userKey, sasData['username'].toString());
       }
       final proxyCandidate =
-          sasData['webProxyUrl'] ?? sasData['proxyUrl'] ?? sasData['renderProxyUrl'];
-      if (proxyCandidate != null && proxyCandidate.toString().trim().isNotEmpty) {
-        await p.setString(_proxyKey, _normalizeProxyUrl(proxyCandidate.toString()));
+          sasData['webProxyUrl'] ??
+          sasData['proxyUrl'] ??
+          sasData['renderProxyUrl'];
+      if (proxyCandidate != null &&
+          proxyCandidate.toString().trim().isNotEmpty) {
+        await p.setString(
+          _proxyKey,
+          _normalizeProxyUrl(proxyCandidate.toString()),
+        );
       }
-      if (sasData['password'] != null && sasData['password'].toString().isNotEmpty) {
+      if (sasData['password'] != null &&
+          sasData['password'].toString().isNotEmpty) {
         try {
           await SasApiService._secureStorage.write(
             key: _securePassKey,
@@ -173,10 +188,7 @@ class SasSettings {
       p.getString('web_proxy_url'),
       p.getString('proxy_url'),
       p.getString('render_proxy_url'),
-    ].firstWhere(
-      (v) => v != null && v.trim().isNotEmpty,
-      orElse: () => null,
-    );
+    ].firstWhere((v) => v != null && v.trim().isNotEmpty, orElse: () => null);
 
     return SasSettings(
       serverUrl: p.getString(_serverKey)?.trim().isNotEmpty == true
@@ -214,7 +226,10 @@ class SasSettings {
     }
     // store password in secure storage if available
     try {
-      await SasApiService._secureStorage.write(key: _securePassKey, value: password);
+      await SasApiService._secureStorage.write(
+        key: _securePassKey,
+        value: password,
+      );
     } catch (_) {
       // fallback to SharedPreferences if secure storage unavailable
       await p.setString(_passKey, password);
@@ -233,22 +248,27 @@ class SasSettings {
 
         final agentRef = FirebaseDatabase.instance.ref('agents/$_uid');
         final sasRef = agentRef.child('sas');
-        await sasRef.set({
-          'serverUrl': cleanedServerUrl,
-          'username': normalizedSasUser,
-          'password': password,
-          if (cleanedProxyUrl.isNotEmpty) 'webProxyUrl': cleanedProxyUrl,
-        }).timeout(const Duration(seconds: 8));
-        
-        await agentRef.child('profile').update({
-          'email': emailKey,
-          'emailKey': emailKey,
-          'sasUsername': normalizedSasUser,
-          'agentKey': agentKey,
-          'currentAgentId': _uid,
-          'status': 'active',
-        }).timeout(const Duration(seconds: 5));
-        
+        await sasRef
+            .set({
+              'serverUrl': cleanedServerUrl,
+              'username': normalizedSasUser,
+              'password': password,
+              if (cleanedProxyUrl.isNotEmpty) 'webProxyUrl': cleanedProxyUrl,
+            })
+            .timeout(const Duration(seconds: 8));
+
+        await agentRef
+            .child('profile')
+            .update({
+              'email': emailKey,
+              'emailKey': emailKey,
+              'sasUsername': normalizedSasUser,
+              'agentKey': agentKey,
+              'currentAgentId': _uid,
+              'status': 'active',
+            })
+            .timeout(const Duration(seconds: 5));
+
         debugPrint('SAS settings saved to Firebase for agent uid=$_uid');
       } catch (e) {
         debugPrint('Failed to save SAS to Firebase: $e');
@@ -275,6 +295,107 @@ class SasApiException implements Exception {
   String toString() => message;
 }
 
+enum SasFinancialReportType {
+  activations,
+  managerInvoices,
+  managerJournal,
+  userInvoices,
+}
+
+class SasFinancialPage {
+  const SasFinancialPage({
+    required this.rows,
+    required this.currentPage,
+    required this.lastPage,
+    required this.total,
+  });
+
+  final List<Map<String, dynamic>> rows;
+  final int currentPage;
+  final int lastPage;
+  final int total;
+}
+
+class SasManagerJournalEntry {
+  const SasManagerJournalEntry({
+    required this.id,
+    required this.at,
+    required this.creditAccount,
+    required this.debitAccount,
+    required this.amount,
+    required this.operation,
+    required this.balanceAfter,
+  });
+
+  final int id;
+  final DateTime at;
+  final String creditAccount;
+  final String debitAccount;
+  final double amount;
+  final String operation;
+  final double? balanceAfter;
+
+  String get normalizedOperation => operation
+      .trim()
+      .toLowerCase()
+      .replaceAll('إ', 'ا')
+      .replaceAll('أ', 'ا')
+      .replaceAll('آ', 'ا');
+
+  bool get isDeposit =>
+      normalizedOperation.contains('deposit') ||
+      normalizedOperation.contains('recharge') ||
+      normalizedOperation.contains('topup') ||
+      normalizedOperation.contains('top_up') ||
+      normalizedOperation.contains('ايداع');
+
+  bool get isDeduction =>
+      normalizedOperation.contains('purchase') ||
+      normalizedOperation.contains('withdraw') ||
+      normalizedOperation.contains('سحب') ||
+      normalizedOperation.contains('شراء');
+
+  factory SasManagerJournalEntry.fromJson(Map<String, dynamic> json) {
+    double? number(dynamic value) => value is num
+        ? value.toDouble()
+        : double.tryParse(value?.toString() ?? '');
+    final rawDate = (json['created_at'] ?? '').toString().trim();
+    return SasManagerJournalEntry(
+      id: int.tryParse((json['id'] ?? '').toString()) ?? 0,
+      at: DateTime.tryParse(rawDate.replaceFirst(' ', 'T')) ?? DateTime(1970),
+      creditAccount: (json['cr'] ?? '').toString(),
+      debitAccount: (json['dr'] ?? '').toString(),
+      amount: number(json['amount']) ?? 0,
+      operation: (json['operation'] ?? '').toString(),
+      balanceAfter: number(json['balance']),
+    );
+  }
+}
+
+class SasManagerJournalMonth {
+  const SasManagerJournalMonth({required this.entries});
+
+  final List<SasManagerJournalEntry> entries;
+
+  double get deposits => entries
+      .where((entry) => entry.isDeposit)
+      .fold(0, (sum, entry) => sum + entry.amount);
+
+  double get deductions => entries
+      .where((entry) => entry.isDeduction)
+      .fold(0, (sum, entry) => sum + entry.amount);
+
+  double? get latestBalance {
+    SasManagerJournalEntry? latest;
+    for (final entry in entries.where((entry) => entry.balanceAfter != null)) {
+      if (latest == null || entry.at.isAfter(latest.at)) {
+        latest = entry;
+      }
+    }
+    return latest?.balanceAfter;
+  }
+}
+
 class SasApiService {
   // Web builds must use the deployed HTTPS proxy. The value comes from
   // SAS_WEB_PROXY_URL or from persisted app settings; it is intentionally not
@@ -286,6 +407,7 @@ class SasApiService {
   static String get _runtimeWebProxyBaseRaw {
     return readRuntimeAppConfig('sasWebProxyUrl') ?? _webProxyBaseRaw;
   }
+
   static const bool _useProxyOnWeb = bool.fromEnvironment(
     'SAS_USE_PROXY',
     defaultValue: true,
@@ -297,6 +419,7 @@ class SasApiService {
   static String get _runtimeProxyToken {
     return readRuntimeAppConfig('sasProxyToken') ?? _proxyToken;
   }
+
   static const String _legacyProxyToken = String.fromEnvironment(
     'PROXY_TOKEN',
     defaultValue: '',
@@ -310,12 +433,22 @@ class SasApiService {
   // true after proxy returns a 403 from upstream — switch to direct for this session
   bool _directFallback = false;
   final Map<int, dynamic> _profileCache = {};
-  static final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  final Map<String, String> _cookieHeaders = {};
+  static final FlutterSecureStorage _secureStorage =
+      const FlutterSecureStorage();
 
   SasApiService(this.settings) {
     if (kDebugMode) {
       configureSasHttpOverrides(allowBadCertificates: true);
+      _debugLog(
+        '[SAS DEBUG][LOGGER READY] synchronous=true '
+        'platform=${kIsWeb ? "web" : "native"}',
+      );
     }
+  }
+
+  void _debugLog(String message) {
+    if (kDebugMode) debugPrintSynchronously(message);
   }
 
   String get _webProxyBase {
@@ -341,7 +474,9 @@ class SasApiService {
         host == '127.0.0.1' ||
         host == '::1' ||
         host.endsWith('.localhost')) {
-      throw SasApiException('رابط البروكسي المحلي غير مسموح. استخدم بروكسي Render عبر HTTPS.');
+      throw SasApiException(
+        'رابط البروكسي المحلي غير مسموح. استخدم بروكسي Render عبر HTTPS.',
+      );
     }
     if (uri.scheme != 'https') {
       throw SasApiException('رابط البروكسي يجب أن يستخدم HTTPS: $proxy');
@@ -353,41 +488,117 @@ class SasApiService {
     return SasSettings._normalizeServerUrl(settings.serverUrl);
   }
 
-  String get _sasOrigin {
-    final uri = Uri.parse(_sasInputNormalized);
-    final path = uri.path.isNotEmpty && uri.path != '/' ? uri.path : '';
-    return '${uri.scheme}://${uri.authority}$path';
+  static String computeOriginFor(String serverUrl) {
+    final input = SasSettings._normalizeServerUrl(serverUrl);
+    final uri = Uri.parse(input);
+    return '${uri.scheme}://${uri.authority}';
   }
 
-  String get _sasApiBase {
-    final inputUri = Uri.parse(_sasInputNormalized);
+  static String computeApiBaseFor(String serverUrl) {
+    final input = SasSettings._normalizeServerUrl(serverUrl);
+    final origin = computeOriginFor(serverUrl);
+    final inputUri = Uri.parse(input);
     var path = inputUri.path;
 
     if (path.isEmpty || path == '/') {
-      return '$_sasOrigin/admin/api/index.php/api/';
+      return '$origin/admin/api/index.php/api/';
     }
 
     path = path.replaceAll(RegExp(r'/+$'), '');
     final lowerPath = path.toLowerCase();
-    final standardMatch = RegExp(r'(/admin)?/api/index\.php/api', caseSensitive: false).firstMatch(path);
-    if (standardMatch != null) {
-      final canonicalBase = lowerPath.contains('/admin/api/index.php/api')
-          ? '/admin/api/index.php/api'
-          : '/api/index.php/api';
-      return '$_sasOrigin$canonicalBase/';
+
+    final adminBaseStart = lowerPath.indexOf('/admin/api/index.php/api');
+    final altBaseStart = lowerPath.indexOf('/api/index.php/api');
+    var apiBaseStart = -1;
+    var canonicalBase = '/admin/api/index.php/api';
+    if (adminBaseStart >= 0 &&
+        (altBaseStart < 0 || adminBaseStart <= altBaseStart)) {
+      apiBaseStart = adminBaseStart;
+      canonicalBase = '/admin/api/index.php/api';
+    } else if (altBaseStart >= 0) {
+      apiBaseStart = altBaseStart;
+      canonicalBase = '/api/index.php/api';
     }
 
-    // If a full endpoint is pasted, strip common action suffixes.
+    if (apiBaseStart >= 0) {
+      final prefix = path.substring(0, apiBaseStart);
+      final cleanPrefix = prefix.replaceAll(RegExp(r'/+$'), '');
+      if (cleanPrefix.isEmpty) {
+        return '$origin$canonicalBase/';
+      }
+      return '$origin$cleanPrefix$canonicalBase/';
+    }
+
     path = path.replaceAll(RegExp(r'/(login|auth)$', caseSensitive: false), '');
 
     if (!path.toLowerCase().contains('/api/')) {
-      return '$_sasOrigin/admin/api/index.php/api/';
+      return '$origin/admin/api/index.php/api/';
     }
 
-    return '$_sasOrigin${path.endsWith('/') ? path : '$path/'}';
+    return '$origin${path.endsWith('/') ? path : '$path/'}';
+  }
+
+  String get _sasOrigin {
+    return computeOriginFor(settings.serverUrl);
+  }
+
+  String get _sasApiBase {
+    return computeApiBaseFor(settings.serverUrl);
+  }
+
+  bool get _isResellerServer {
+    final normalizedUrl = SasSettings._normalizeServerUrl(settings.serverUrl);
+    return normalizedUrl.contains('reseller.nbtel.iq') ||
+        normalizedUrl.contains('reseller.nbtle.iq');
+  }
+
+  String? _resellerApiServer;
+
+  String? _normalizeResellerApiBase(dynamic value) {
+    final raw = value?.toString().trim() ?? '';
+    if (raw.isEmpty) return null;
+
+    final candidate = raw.startsWith('/') ? '$_sasOrigin$raw' : raw;
+    try {
+      return computeApiBaseFor(candidate);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _extractResellerApiServer() {
+    final cookieHeader =
+        _cookieHeaders['set-cookie'] ?? _cookieHeaders['Set-Cookie'] ?? '';
+    for (final part in cookieHeader.split(',')) {
+      final trimmed = part.trim();
+      if (trimmed.startsWith('api_server=')) {
+        final value = trimmed.substring('api_server='.length);
+        final end = value.indexOf(';');
+        final raw = end >= 0 ? value.substring(0, end) : value;
+        return _normalizeResellerApiBase(Uri.decodeComponent(raw));
+      }
+    }
+    return null;
+  }
+
+  static String resolveResellerApiBase(String serverUrl) {
+    final normalizedUrl = SasSettings._normalizeServerUrl(serverUrl);
+    final uri = Uri.parse(normalizedUrl);
+    final origin = '${uri.scheme}://${uri.authority}';
+    if (normalizedUrl.contains('reseller.nbtel.iq') ||
+        normalizedUrl.contains('reseller.nbtle.iq')) {
+      return '$origin/admin/api/index.php/api/';
+    }
+    return origin;
   }
 
   String get _base {
+    if (_isResellerServer) {
+      if (_resellerApiServer != null) {
+        return _resellerApiServer!;
+      }
+      return '$_sasOrigin/admin/api/index.php/api/';
+    }
     if (kIsWeb) {
       if (useDirectConnection || _directFallback) {
         return _sasApiBase;
@@ -395,7 +606,9 @@ class SasApiService {
 
       final webProxyBase = _webProxyBase;
       final sasPath = Uri.parse(_sasApiBase).path;
-      final cleanSasPath = sasPath.endsWith('/') ? sasPath.substring(0, sasPath.length - 1) : sasPath;
+      final cleanSasPath = sasPath.endsWith('/')
+          ? sasPath.substring(0, sasPath.length - 1)
+          : sasPath;
       final proxyUrl = '$webProxyBase/sas$cleanSasPath';
       debugPrint('Proxy base URL: $proxyUrl');
       return proxyUrl;
@@ -411,50 +624,61 @@ class SasApiService {
   /// Check if the web proxy is reachable
   Future<bool> checkProxyHealth() async {
     if (!kIsWeb) return true;
-    
+
     // If direct connection is enabled, skip proxy check
     if (useDirectConnection) {
       debugPrint('Direct connection enabled, skipping proxy health check');
       return true;
     }
-    
+
     final proxyBase = _webProxyBase;
-    
+
     try {
       debugPrint('Checking proxy health: $proxyBase/health');
-      final response = await http.get(
-        Uri.parse('$proxyBase/health'),
-      ).timeout(const Duration(seconds: 10));
-      
+      final response = await http
+          .get(Uri.parse('$proxyBase/health'))
+          .timeout(const Duration(seconds: 10));
+
       if (response.statusCode == 200) {
         debugPrint('Proxy health check passed: $proxyBase');
         return true;
       } else {
-        debugPrint('Proxy health check failed with status: ${response.statusCode}');
+        debugPrint(
+          'Proxy health check failed with status: ${response.statusCode}',
+        );
       }
     } catch (e) {
       debugPrint('Proxy health check failed: $e');
     }
-    
+
     return false;
   }
 
   Uri _uriFor(String route) {
+    if (_isResellerServer) {
+      final cleanBase = _base.endsWith('/')
+          ? _base.substring(0, _base.length - 1)
+          : _base;
+      final uri = Uri.parse('$cleanBase/$route');
+      debugPrint('[Reseller] Route: $route -> $uri');
+      return uri;
+    }
     final base = _base;
-    // Ensure route starts with / and doesn't have double slashes
     final cleanRoute = route.startsWith('/') ? route : '/$route';
-    // Remove any double slashes that might occur
     final cleanBase = base.endsWith('/')
-    ? base.substring(0, base.length - 1)
-    : base;
+        ? base.substring(0, base.length - 1)
+        : base;
     final uri = Uri.parse('$cleanBase$cleanRoute');
     debugPrint('Full URI: $uri');
     return uri;
   }
 
   void _addProxyTarget(Map<String, String> headers) {
+    if (_isResellerServer) return;
     if (kIsWeb && !useDirectConnection && !_directFallback) {
-      headers['X-SAS-Target'] = _sasOrigin.isNotEmpty ? _sasOrigin : _sasInputNormalized;
+      headers['X-SAS-Target'] = _sasOrigin.isNotEmpty
+          ? _sasOrigin
+          : _sasInputNormalized;
       final effectiveProxyToken = _runtimeProxyToken.trim().isNotEmpty
           ? _runtimeProxyToken.trim()
           : _legacyProxyToken.trim();
@@ -471,13 +695,116 @@ class SasApiService {
   String _newSessionId() {
     final random = Random.secure();
     String hex(int length) => List.generate(
-          length,
-          (_) => random.nextInt(16).toRadixString(16),
-        ).join();
+      length,
+      (_) => random.nextInt(16).toRadixString(16),
+    ).join();
     return '${hex(8)}-${hex(4)}-${hex(4)}-${hex(4)}-${hex(12)}';
   }
 
   Future<void> login() async {
+    final normalizedUrl = SasSettings._normalizeServerUrl(settings.serverUrl);
+    if (normalizedUrl.contains('reseller.nbtel.iq') ||
+        normalizedUrl.contains('reseller.nbtle.iq')) {
+      final uri = Uri.parse('$normalizedUrl/api.php?action=login');
+      final payload = jsonEncode({
+        'username': settings.username.trim(),
+        'password': settings.password,
+      });
+      final encrypted = _cryptoJsEncrypt(payload, _passphrase);
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/plain, */*',
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Origin': normalizedUrl,
+        'Referer': '$normalizedUrl/',
+      };
+
+      if (kDebugMode) {
+        _debugLog('[SAS DEBUG][LOGIN] endpoint=$uri method=POST');
+      }
+
+      final response = await http
+          .post(uri, headers: headers, body: jsonEncode({'payload': encrypted}))
+          .timeout(const Duration(seconds: 45));
+
+      debugPrint('====== [Reseller] LOGIN RESPONSE DEBUG START ======');
+      debugPrint('[Reseller] Login STATUS: ${response.statusCode}');
+      debugPrint('[Reseller] RESPONSE HEADER KEYS:');
+      response.headers.forEach((k, v) {
+        debugPrint('  HEADER $k');
+      });
+      final setCookies = response.headers['set-cookie'];
+      if (setCookies != null && setCookies.isNotEmpty) {
+        final names = setCookies
+            .split(',')
+            .map((s) => s.trim().split('=').first.trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        debugPrint('[Reseller] SET-COOKIE NAMES: $names');
+      } else {
+        debugPrint('[Reseller] SET-COOKIE NAMES: <absent>');
+      }
+      if (response.statusCode == 403) {
+        throw SasApiException('الخادم رفض تسجيل الدخول (403)');
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        debugPrint(
+          '====== [Reseller] LOGIN RESPONSE DEBUG END (non-2xx) ======',
+        );
+        throw SasApiException('الخادم رجع خطأ HTTP ${response.statusCode}');
+      }
+
+      _cookieHeaders.addAll(response.headers);
+      _resellerApiServer = _extractResellerApiServer();
+
+      try {
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        if (kDebugMode) {
+          _debugLog(
+            '[SAS DEBUG][LOGIN] response_keys=${decoded.keys.toList()}',
+          );
+        }
+        final successfulServer = decoded['successful_server'];
+        final successfulServerApiUrl = successfulServer is Map
+            ? successfulServer['api_url']
+            : null;
+        final responseApiBase = _normalizeResellerApiBase(
+          successfulServerApiUrl ?? decoded['api_server'],
+        );
+        if (kDebugMode) {
+          _debugLog(
+            '[SAS DEBUG][LOGIN] successful_server.api_url='
+            '${successfulServerApiUrl?.toString().trim().isNotEmpty == true ? successfulServerApiUrl : "<absent>"}',
+          );
+        }
+        if (responseApiBase != null) {
+          _resellerApiServer = responseApiBase;
+        }
+
+        final primaryToken = decoded['token']?.toString().trim() ?? '';
+        final fallbackToken = decoded['jwt']?.toString().trim() ?? '';
+        final token = primaryToken.isNotEmpty ? primaryToken : fallbackToken;
+        if (token.isNotEmpty) {
+          _token = token;
+        }
+      } catch (e) {
+        debugPrint(
+          '====== [Reseller] LOGIN RESPONSE DEBUG END (json error) ======',
+        );
+        throw SasApiException('رد الخادم غير مفهوم: $e');
+      }
+      if (kDebugMode) {
+        _debugLog('[SAS DEBUG][LOGIN] final_api_base=$_base');
+        _debugLog(
+          '[SAS DEBUG][LOGIN] token=${_token != null ? "<redacted-present>" : "<absent>"}',
+        );
+      }
+      debugPrint('====== [Reseller] LOGIN RESPONSE DEBUG END ======');
+      return;
+    }
+
     final username = settings.username.trim();
     final password = settings.password;
 
@@ -491,13 +818,30 @@ class SasApiService {
       }, authenticated: false);
     } catch (e) {
       firstError = e;
-      // إذا رفض البروكسي الطلب (403 من السيرفر العلوي) انتقل للاتصال المباشر
-      if (kIsWeb && !_directFallback && _isProxyBlockedError(e)) {
-        debugPrint('Proxy blocked by SAS upstream (403), retrying direct');
-        _directFallback = true;
+      // إذا رفض البروكسي أو SAS الطلب (403) نعيد المحاولة
+      if (!_directFallback && _is403Error(e)) {
+        debugPrint('403 error on login, retrying with fallback options');
+        if (kIsWeb) {
+          _directFallback = true;
+        }
         _token = null;
         try {
-          data = await _post('login', {'username': username, 'password': password}, authenticated: false);
+          data = await _post('login', {
+            'username': username,
+            'password': password,
+            'language': 'en',
+            'session_id': _newSessionId(),
+          }, authenticated: false);
+          firstError = null;
+        } catch (e2) {
+          firstError = e2;
+        }
+      }
+      // إذا فشل تسجيل الدخول بـ 401، نجرب form-encoded كحل بديل
+      if (firstError != null && firstError.toString().contains('401')) {
+        try {
+          debugPrint('401 error on login, retrying with form-encoded');
+          data = await _loginFormEncoded(username, password);
           firstError = null;
         } catch (e2) {
           firstError = e2;
@@ -525,6 +869,19 @@ class SasApiService {
       }
     }
 
+    // بعض خوادم SAS (مثل resller.nbtel.iq) تتطلب بيانات من نوع form-encoded
+    // بدلاً من JSON. نجرب هذه الطريقة إذا فشلت كل الطرق السابقة بـ 403.
+    if (data is! Map || data['token'] == null) {
+      try {
+        data = await _loginFormEncoded(username, password);
+        if (data is! Map || data['token'] == null) {
+          throw SasApiException('لا يحتوي الرد على رمز دخول');
+        }
+      } catch (e) {
+        debugPrint('Form-encoded login also failed: $e');
+      }
+    }
+
     if (data is! Map || data['token'] == null) {
       throw SasApiException('تم الاتصال لكن لم يرجع SAS رمز دخول Token');
     }
@@ -532,11 +889,62 @@ class SasApiService {
     _token = data['token'].toString();
   }
 
+  /// محاولة تسجيل دخول ببيانات من نوع form-encoded بدلاً من JSON
+  /// يستخدمها بعض خوادر SAS مثل resller.nbtel.iq
+  Future<dynamic> _loginFormEncoded(String username, String password) async {
+    final uri = _uriFor('login');
+    final formBody = {
+      'username': username,
+      'password': password,
+      'language': 'en',
+    };
+    final headers = <String, String>{
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json, text/plain, */*',
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Referer': '$_sasOrigin/',
+    };
+    _addProxyTarget(headers);
+    final response = await http
+        .post(uri, headers: headers, body: formBody)
+        .timeout(const Duration(seconds: 45));
+    debugPrint('Form login STATUS: ${response.statusCode}');
+    if (response.statusCode == 403) {
+      throw SasApiException('SAS رفع 403 على تسجيل الدخول (form-encoded)');
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw SasApiException('SAS رجع خطأ HTTP ${response.statusCode}');
+    }
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map && decoded['token'] != null) {
+        _cookieHeaders.addAll(response.headers);
+        return decoded;
+      }
+      return decoded;
+    } catch (_) {
+      throw SasApiException('رد SAS غير مفهوم (form-encoded)');
+    }
+  }
+
+  /// يكتشف إذا كان الخطأ ناتجاً عن رفض 403 (من البروكسي أو من SAS مباشرة)
+  static bool _is403Error(Object e) {
+    final msg = e.toString();
+    if (!msg.contains('403')) return false;
+    return _isProxyBlockedError(e) ||
+        msg.contains('Forbidden') ||
+        msg.contains('HTTP 403');
+  }
+
   /// يكتشف إذا كان الخطأ ناتجاً عن رفض السيرفر العلوي للبروكسي (403)
   static bool _isProxyBlockedError(Object e) {
     final msg = e.toString();
     return msg.contains('403') &&
-        (msg.contains('upstream returned HTML') || msg.contains('Forbidden') || msg.contains('HTML error'));
+        (msg.contains('upstream returned HTML') ||
+            msg.contains('Forbidden') ||
+            msg.contains('HTML error'));
   }
 
   Future<dynamic> fetchUsers() async {
@@ -553,6 +961,7 @@ class SasApiService {
 
       for (var attempt = 1; attempt <= 3; attempt++) {
         try {
+          debugPrint('[Reseller] fetchUsers page=$page');
           response = await _post('index/user', {
             'page': page,
             'current': page,
@@ -579,31 +988,39 @@ class SasApiService {
       if (rows.isEmpty) break;
 
       final firstProfileName = rows.isNotEmpty
-          ? (rows.first['profile_name'] ?? rows.first['profile'] ?? rows.first['package_name'] ?? rows.first['package'] ?? '').toString()
+          ? (rows.first['profile_name'] ??
+                    rows.first['profile'] ??
+                    rows.first['package_name'] ??
+                    rows.first['package'] ??
+                    '')
+                .toString()
           : 'none';
       debugPrint('SAS fetchUsers row0 profile_name=$firstProfileName');
 
       // بصمة الصفحة تمنع الدوران إذا تجاهل SAS رقم الصفحة وأعاد نفس البيانات.
-      final pageFingerprint = rows.map((row) {
-        return (row['id'] ??
-                row['user_id'] ??
-                row['uid'] ??
-                row['username'] ??
-                row['user'] ??
-                row)
-            .toString();
-      }).join('|');
+      final pageFingerprint = rows
+          .map((row) {
+            return (row['id'] ??
+                    row['user_id'] ??
+                    row['uid'] ??
+                    row['username'] ??
+                    row['user'] ??
+                    row)
+                .toString();
+          })
+          .join('|');
       if (!seenPages.add(pageFingerprint)) break;
 
       var addedThisPage = 0;
       for (final row in rows) {
-        final key = (row['id'] ??
-                row['user_id'] ??
-                row['uid'] ??
-                row['username'] ??
-                row['user'] ??
-                row)
-            .toString();
+        final key =
+            (row['id'] ??
+                    row['user_id'] ??
+                    row['uid'] ??
+                    row['username'] ??
+                    row['user'] ??
+                    row)
+                .toString();
         if (seenUsers.add(key)) {
           all.add(row);
           debugPrint('USER JSON = $row');
@@ -667,7 +1084,11 @@ class SasApiService {
       return '';
     }
 
-    void setExistingOr(String preferred, List<String> alternatives, dynamic value) {
+    void setExistingOr(
+      String preferred,
+      List<String> alternatives,
+      dynamic value,
+    ) {
       String? target;
       if (payload.containsKey(preferred)) {
         target = preferred;
@@ -687,13 +1108,15 @@ class SasApiService {
     // لا نغيّر اسم SAS إلا إذا تغيّر الاسم فعلياً من داخل التطبيق.
     final existingFirst = readExistingValue(['firstname', 'first_name']);
     final existingLast = readExistingValue(['lastname', 'last_name']);
-    final existingFull = [existingFirst, existingLast]
-        .where((v) => v.isNotEmpty && v != '-')
-        .join(' ')
-        .trim();
+    final existingFull = [
+      existingFirst,
+      existingLast,
+    ].where((v) => v.isNotEmpty && v != '-').join(' ').trim();
     final requestedFull = fullName.trim();
     final shouldUpdateName =
-        requestedFull.isNotEmpty && existingFull.isNotEmpty && requestedFull != existingFull;
+        requestedFull.isNotEmpty &&
+        existingFull.isNotEmpty &&
+        requestedFull != existingFull;
 
     if (allowNameUpdate && shouldUpdateName && firstName.trim().isNotEmpty) {
       // عند التعديل من التطبيق نحدّث الاسم الأول فقط ونترك اسم العائلة كما هو في SAS.
@@ -701,13 +1124,21 @@ class SasApiService {
     }
 
     if (phone.trim().isNotEmpty) {
-      setExistingOr('phone', ['mobile', 'phone_number', 'mobile_number'], phone.trim());
+      setExistingOr('phone', [
+        'mobile',
+        'phone_number',
+        'mobile_number',
+      ], phone.trim());
     }
     if (address.trim().isNotEmpty) {
       setExistingOr('address', ['location'], address.trim());
     }
     if (ip.trim().isNotEmpty) {
-      setExistingOr('ip', ['ip_address', 'static_ip', 'framed_ip_address'], ip.trim());
+      setExistingOr('ip', [
+        'ip_address',
+        'static_ip',
+        'framed_ip_address',
+      ], ip.trim());
     }
 
     return _put('user/$userId', payload);
@@ -722,9 +1153,7 @@ class SasApiService {
     // SAS real request:
     // POST /api/user/disable
     // encrypted body before encryption: {"user_ids":[...]}
-    return _post('user/disable', {
-      'user_ids': userIds,
-    });
+    return _post('user/disable', {'user_ids': userIds});
   }
 
   Future<dynamic> disableUser(int userId) {
@@ -738,16 +1167,14 @@ class SasApiService {
     if (_token == null) await login();
 
     // SAS counterpart of /user/disable.
-    return _post('user/enable', {
-      'user_ids': userIds,
-    });
+    return _post('user/enable', {'user_ids': userIds});
   }
 
   Future<dynamic> enableUser(int userId) {
     return enableUsers([userId]);
   }
 
-    Future<dynamic> extendUser({
+  Future<dynamic> extendUser({
     required int userId,
     required int profileId,
     required String transactionId,
@@ -770,12 +1197,13 @@ class SasApiService {
     if (response is Map) {
       final status = response['status'];
       final success = response['success'];
-      final message = (response['message'] ??
-              response['msg'] ??
-              response['error'] ??
-              response['errors'] ??
-              '')
-          .toString();
+      final message =
+          (response['message'] ??
+                  response['msg'] ??
+                  response['error'] ??
+                  response['errors'] ??
+                  '')
+              .toString();
       final low = message.toLowerCase();
 
       if (success == false ||
@@ -819,11 +1247,9 @@ class SasApiService {
     if (response is Map) {
       final status = response['status'];
       final success = response['success'];
-      final message = (response['message'] ??
-              response['msg'] ??
-              response['error'] ??
-              '')
-          .toString();
+      final message =
+          (response['message'] ?? response['msg'] ?? response['error'] ?? '')
+              .toString();
       final low = message.toLowerCase();
 
       if (success == false ||
@@ -878,6 +1304,121 @@ class SasApiService {
     return num.tryParse((v ?? '').toString().replaceAll(',', '').trim());
   }
 
+  bool _isSensitiveDebugKey(String key) {
+    final normalized = key.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    return normalized.contains('password') ||
+        normalized.contains('passwd') ||
+        normalized.contains('token') ||
+        normalized.contains('cookie') ||
+        normalized.contains('authorization') ||
+        normalized.contains('secret') ||
+        normalized == 'pin';
+  }
+
+  bool _isFinancialDebugKey(String key) {
+    final normalized = key.toLowerCase();
+    return const [
+      'balance',
+      'amount',
+      'price',
+      'cost',
+      'deduction',
+      'deduct',
+      'credit',
+      'debit',
+      'remaining',
+      'money',
+      'wallet',
+      'charge',
+      'fee',
+      'total',
+      'collected',
+    ].any(normalized.contains);
+  }
+
+  bool _isTransactionDebugKey(String key) {
+    final normalized = key.toLowerCase();
+    return normalized.contains('transaction') ||
+        normalized.contains('reference') ||
+        normalized.contains('invoice');
+  }
+
+  void _collectDebugResponseData(
+    dynamic node,
+    String path,
+    List<String> fieldPaths,
+    Map<String, dynamic> financialValues,
+    Map<String, dynamic> transactionValues,
+  ) {
+    if (node is Map) {
+      for (final entry in node.entries) {
+        final key = entry.key.toString();
+        final childPath = path.isEmpty ? key : '$path.$key';
+        fieldPaths.add(childPath);
+        if (_isSensitiveDebugKey(key)) continue;
+        final value = entry.value;
+        if (_isFinancialDebugKey(key) && value is! Map && value is! List) {
+          financialValues[childPath] = value;
+        }
+        if (_isTransactionDebugKey(key) && value is! Map && value is! List) {
+          transactionValues[childPath] = value;
+        }
+        _collectDebugResponseData(
+          value,
+          childPath,
+          fieldPaths,
+          financialValues,
+          transactionValues,
+        );
+      }
+    } else if (node is List) {
+      for (var index = 0; index < node.length; index++) {
+        _collectDebugResponseData(
+          node[index],
+          '$path[$index]',
+          fieldPaths,
+          financialValues,
+          transactionValues,
+        );
+      }
+    }
+  }
+
+  void _debugResponseShape(
+    String label,
+    dynamic response, {
+    int? statusCode,
+    Uri? endpoint,
+    String? method,
+  }) {
+    if (!kDebugMode) return;
+    final fieldPaths = <String>[];
+    final financialValues = <String, dynamic>{};
+    final transactionValues = <String, dynamic>{};
+    _collectDebugResponseData(
+      response,
+      '',
+      fieldPaths,
+      financialValues,
+      transactionValues,
+    );
+    _debugLog('====== [SAS DEBUG][$label] ======');
+    if (endpoint != null) _debugLog('endpoint=$endpoint');
+    if (method != null) _debugLog('method=$method');
+    if (statusCode != null) _debugLog('status_code=$statusCode');
+    _debugLog('response_type=${response.runtimeType}');
+    _debugLog(
+      'response_field_paths=${fieldPaths.isEmpty ? "<none>" : fieldPaths}',
+    );
+    _debugLog(
+      'financial_values=${financialValues.isEmpty ? "<none>" : financialValues}',
+    );
+    _debugLog(
+      'transaction_values=${transactionValues.isEmpty ? "<none>" : transactionValues}',
+    );
+    _debugLog('====== [SAS DEBUG][$label END] ======');
+  }
+
   Future<dynamic> activateUser(
     int userId, {
     String? notifyPhone,
@@ -911,22 +1452,21 @@ class SasApiService {
       'default_method',
     ]);
 
-    final rewardPoints = _asNum(_firstDeep(activation, [
-      'reward_points',
-      'points',
-      'available_points',
-    ]));
+    final rewardPoints = _asNum(
+      _firstDeep(activation, ['reward_points', 'points', 'available_points']),
+    );
 
-    final requiredPoints = _asNum(_firstDeep(activation, [
-      'required_points',
-      'points_required',
-    ]));
+    final requiredPoints = _asNum(
+      _firstDeep(activation, ['required_points', 'points_required']),
+    );
 
-    final requiredAmount = _asNum(_firstDeep(activation, [
-      'required_amount',
-      'n_required_amount',
-      'amount_required',
-    ]));
+    final requiredAmount = _asNum(
+      _firstDeep(activation, [
+        'required_amount',
+        'n_required_amount',
+        'amount_required',
+      ]),
+    );
 
     String method;
     if (explicitMethod != null && explicitMethod.toString().trim().isNotEmpty) {
@@ -943,27 +1483,30 @@ class SasApiService {
       method = 'credit';
     }
 
-    final price = _asNum(_firstDeep(activation, [
-          'user_price',
-          'price',
-          'unit_price',
-          'amount',
-          'total',
-          'required_amount',
-        ])) ??
-        _asNum(_firstDeep(profile, [
-          'user_price',
-          'price',
-          'unit_price',
-          'amount',
-        ]));
+    final price =
+        _asNum(
+          _firstDeep(activation, [
+            'user_price',
+            'price',
+            'unit_price',
+            'amount',
+            'total',
+            'required_amount',
+          ]),
+        ) ??
+        _asNum(
+          _firstDeep(profile, ['user_price', 'price', 'unit_price', 'amount']),
+        );
 
-    final units = _asNum(_firstDeep(activation, [
-          'activation_units',
-          'units',
-          'unit',
-          'months',
-        ])) ??
+    final units =
+        _asNum(
+          _firstDeep(activation, [
+            'activation_units',
+            'units',
+            'unit',
+            'months',
+          ]),
+        ) ??
         1;
 
     final issueInvoiceRaw = _firstDeep(activation, [
@@ -1002,20 +1545,18 @@ class SasApiService {
       if (requiredAmount != null) payload['required_amount'] = requiredAmount;
     }
 
-    final response = await _post(
-      'user/activate',
-      payload,
-    );
+    final response = await _post('user/activate', payload);
 
     if (response is Map) {
       final status = response['status'];
       final success = response['success'];
-      final message = (response['message'] ??
-              response['msg'] ??
-              response['error'] ??
-              response['errors'] ??
-              '')
-          .toString();
+      final message =
+          (response['message'] ??
+                  response['msg'] ??
+                  response['error'] ??
+                  response['errors'] ??
+                  '')
+              .toString();
       final text = message.toLowerCase();
 
       final explicitFailure =
@@ -1034,26 +1575,34 @@ class SasApiService {
           message.trim().isEmpty ? 'رفض SAS عملية التفعيل' : message,
         );
       }
+
+      final sasDeductionAmount = requiredAmount ?? price;
+      if (sasDeductionAmount != null) {
+        return <String, dynamic>{
+          ...Map<String, dynamic>.from(response),
+          '_sas_deduction_amount': sasDeductionAmount,
+        };
+      }
     }
     return response;
   }
 
   Future<dynamic> fetchProfileDetails(int profileId) async {
-  if (_profileCache.containsKey(profileId)) {
-    return _profileCache[profileId];
+    if (_profileCache.containsKey(profileId)) {
+      return _profileCache[profileId];
+    }
+
+    if (_token == null) await login();
+
+    final result = await _get('profile/$profileId');
+
+    _profileCache[profileId] = result;
+
+    debugPrint('PROFILE RESULT TYPE: ${result.runtimeType}');
+    debugPrint('PROFILE RESULT: $result');
+
+    return result;
   }
-
-  if (_token == null) await login();
-
-  final result = await _get('profile/$profileId');
-
-  _profileCache[profileId] = result;
-
-  debugPrint('PROFILE RESULT TYPE: ${result.runtimeType}');
-  debugPrint('PROFILE RESULT: $result');
-
-  return result;
-}
 
   Future<Map<String, dynamic>> fetchDashboardWidgets() async {
     if (_token == null) await login();
@@ -1133,8 +1682,9 @@ class SasApiService {
     } else {
       final allowed = await _get('allowedExtensions/$currentProfileId');
       rows = _extractRows(allowed);
-      _extensionCache[currentProfileId] =
-          rows.map((e) => Map<String, dynamic>.from(e)).toList();
+      _extensionCache[currentProfileId] = rows
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
       _extensionCacheAt[currentProfileId] = DateTime.now();
     }
 
@@ -1161,6 +1711,7 @@ class SasApiService {
     final seenPages = <String>{};
 
     for (int page = 1; page <= 500; page++) {
+      debugPrint('[Reseller] fetchConnectedSessions page=$page');
       final response = await _post('index/online', {
         'page': page,
         'current': page,
@@ -1195,7 +1746,7 @@ class SasApiService {
     return allRows;
   }
 
-Future<List<Map<String, dynamic>>> fetchParents() async {
+  Future<List<Map<String, dynamic>>> fetchParents() async {
     if (_token == null) await login();
     final response = await _get('manager');
 
@@ -1222,7 +1773,6 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
     }
     return const [];
   }
-
 
   Future<dynamic> fetchExtensionData(int userId) async {
     if (_token == null) await login();
@@ -1253,10 +1803,7 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
       return null;
     }
 
-    dynamic balance = findValue(raw, const [
-      'balance',
-      'user_balance',
-    ]);
+    dynamic balance = findValue(raw, const ['balance', 'user_balance']);
 
     dynamic rewardPoints = findValue(raw, const [
       'reward_points.balance',
@@ -1267,9 +1814,8 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
     if (rewardPoints == null) {
       dynamic rewards = findValue(raw, const ['reward_points', 'rewardpoints']);
       if (rewards is Map) {
-        rewardPoints = rewards['balance'] ??
-            rewards['points'] ??
-            rewards['value'];
+        rewardPoints =
+            rewards['balance'] ?? rewards['points'] ?? rewards['value'];
       } else if (rewards is num) {
         rewardPoints = rewards;
       }
@@ -1281,15 +1827,217 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
       );
     }
 
-    return <String, dynamic>{
-      'balance': balance,
-      'reward_points': rewardPoints,
+    return <String, dynamic>{'balance': balance, 'reward_points': rewardPoints};
+  }
+
+  Future<SasFinancialPage> fetchFinancialReport(
+    SasFinancialReportType type, {
+    int page = 1,
+    int count = 10,
+    String search = '',
+  }) async {
+    if (_token == null) await login();
+    final response = await _post(
+      _financialReportRoute(type),
+      buildFinancialReportPayload(
+        type,
+        page: page,
+        count: count,
+        search: search,
+      ),
+    );
+    if (response is! Map) {
+      throw SasApiException('رد تقرير SAS غير مفهوم');
+    }
+    return parseFinancialReportResponse(
+      response,
+      requestedPage: page,
+      requestedCount: count,
+    );
+  }
+
+  static SasFinancialPage parseFinancialReportResponse(
+    dynamic response, {
+    required int requestedPage,
+    required int requestedCount,
+  }) {
+    final rows = _extractRows(response);
+
+    int? deepNumber(dynamic node, List<String> keys) {
+      if (node is Map) {
+        for (final key in keys) {
+          if (node.containsKey(key)) {
+            final value = node[key];
+            final parsed = value is num
+                ? value.toInt()
+                : int.tryParse((value ?? '').toString());
+            if (parsed != null) return parsed;
+          }
+        }
+        for (final key in const ['pagination', 'meta', 'data', 'result']) {
+          if (node.containsKey(key)) {
+            final parsed = deepNumber(node[key], keys);
+            if (parsed != null) return parsed;
+          }
+        }
+      }
+      return null;
+    }
+
+    final currentPage =
+        deepNumber(response, const ['current_page', 'currentPage', 'page']) ??
+        requestedPage;
+    final total =
+        deepNumber(response, const [
+          'total',
+          'recordsTotal',
+          'total_count',
+          'totalCount',
+          'count_all',
+        ]) ??
+        rows.length;
+    var lastPage = deepNumber(response, const [
+      'last_page',
+      'lastPage',
+      'page_count',
+      'pageCount',
+      'total_pages',
+      'totalPages',
+    ]);
+    if (lastPage == null && total > rows.length && requestedCount > 0) {
+      lastPage = (total / requestedCount).ceil();
+    }
+    lastPage ??= rows.length >= requestedCount ? currentPage + 1 : currentPage;
+
+    return SasFinancialPage(
+      rows: rows,
+      currentPage: currentPage < 1 ? requestedPage : currentPage,
+      lastPage: lastPage < currentPage ? currentPage : lastPage,
+      total: total,
+    );
+  }
+
+  Future<SasManagerJournalMonth> fetchManagerJournalMonth(
+    DateTime month,
+  ) async {
+    final monthStart = DateTime(month.year, month.month);
+    final nextMonth = DateTime(month.year, month.month + 1);
+    final entries = <SasManagerJournalEntry>[];
+    var page = 1;
+    var lastPage = 1;
+
+    do {
+      final result = await fetchFinancialReport(
+        SasFinancialReportType.managerJournal,
+        page: page,
+        count: 100,
+      );
+      lastPage = result.lastPage;
+      final pageEntries = result.rows
+          .map(SasManagerJournalEntry.fromJson)
+          .where((entry) => entry.at.year > 1970)
+          .toList();
+      entries.addAll(
+        pageEntries.where(
+          (entry) =>
+              !entry.at.isBefore(monthStart) && entry.at.isBefore(nextMonth),
+        ),
+      );
+      final reachedOlderRows = pageEntries.any(
+        (entry) => entry.at.isBefore(monthStart),
+      );
+      if (reachedOlderRows || pageEntries.isEmpty) break;
+      page++;
+    } while (page <= lastPage && page <= 500);
+
+    entries.sort((a, b) => b.at.compareTo(a.at));
+    return SasManagerJournalMonth(entries: entries);
+  }
+
+  static Map<String, dynamic> buildFinancialReportPayload(
+    SasFinancialReportType type, {
+    int page = 1,
+    int count = 10,
+    String search = '',
+  }) {
+    const columns = <SasFinancialReportType, List<String>>{
+      SasFinancialReportType.activations: [
+        'created_at',
+        'username',
+        'firstname',
+        'lastname',
+        'username',
+        'name',
+        'price',
+        'user_price',
+        'old_expiration',
+        'new_expiration',
+        'activation_method',
+        'user_activations_count',
+        'refunded',
+      ],
+      SasFinancialReportType.managerInvoices: [
+        'invoice_number',
+        'created_at',
+        'type',
+        'username',
+        'amount',
+        'description',
+        'username',
+        'payment_method',
+        'comments',
+        'paid',
+      ],
+      SasFinancialReportType.managerJournal: [
+        'created_at',
+        'cr',
+        'dr',
+        'amount',
+        'balance',
+        'operation',
+        'description',
+        'comment',
+      ],
+      SasFinancialReportType.userInvoices: [
+        'invoice_number',
+        'due_date',
+        'username',
+        'type',
+        'amount',
+        'description',
+        'username',
+        'payment_method',
+        'paid',
+      ],
     };
+    return <String, dynamic>{
+      'page': page < 1 ? 1 : page,
+      'count': count < 1 ? 10 : count,
+      'sortBy': type == SasFinancialReportType.activations
+          ? 'id'
+          : 'created_at',
+      'direction': 'desc',
+      'search': search.trim(),
+      'columns': columns[type]!,
+    };
+  }
+
+  String _financialReportRoute(SasFinancialReportType type) {
+    switch (type) {
+      case SasFinancialReportType.activations:
+        return 'index/activations';
+      case SasFinancialReportType.managerInvoices:
+        return 'index/ManagerInvoices';
+      case SasFinancialReportType.managerJournal:
+        return 'index/ManagerJournal';
+      case SasFinancialReportType.userInvoices:
+        return 'index/UserInvoices';
+    }
   }
 
   Future<int> testConnection() async {
     debugPrint('Testing connection to SAS...');
-    
+
     // Check proxy only when it is explicitly enabled for Flutter Web.
     if (kIsWeb && !useDirectConnection) {
       final proxyUrl = _webProxyBase;
@@ -1299,10 +2047,10 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
           'الحلول:\n'
           '1. انشر بروكسي SAS على Render\n'
           '2. شغّل التطبيق مع SAS_WEB_PROXY_URL أو احفظ رابط البروكسي في الإعدادات\n\n'
-          'يجب أن يكون الرابط HTTPS'
+          'يجب أن يكون الرابط HTTPS',
         );
       }
-      
+
       // Check proxy health
       final proxyOk = await checkProxyHealth();
       if (!proxyOk) {
@@ -1312,24 +2060,36 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
           '1. نشر البروكسي على Render وأن /health يعمل\n'
           '2. تحديث رابط البروكسي في SAS_WEB_PROXY_URL أو إعدادات التطبيق\n'
           '3. أن الرابط يبدأ بـ https://\n\n'
-          'رابط البروكسي الحالي: $proxyUrl'
+          'رابط البروكسي الحالي: $proxyUrl',
         );
       }
     }
-    
+
     await login().timeout(const Duration(seconds: 20));
     final users = await fetchUsers().timeout(const Duration(seconds: 30));
     debugPrint('Connection successful!');
     return _extractRows(users).length;
   }
 
-  List<Map<String, dynamic>> extractUsers(dynamic response) => _extractRows(response);
+  List<Map<String, dynamic>> extractUsers(dynamic response) =>
+      _extractRows(response);
 
-  List<Map<String, dynamic>> _extractRows(dynamic v) {
+  static List<Map<String, dynamic>> _extractRows(dynamic v) {
     dynamic x = v;
     if (x is Map) {
-      for (final key in ['data', 'rows', 'users', 'items', 'result']) {
-        if (x[key] is List) { x = x[key]; break; }
+      for (final key in [
+        'data',
+        'rows',
+        'users',
+        'items',
+        'records',
+        'activations',
+        'result',
+      ]) {
+        if (x[key] is List) {
+          x = x[key];
+          break;
+        }
         if (x[key] is Map) {
           final nested = _extractRows(x[key]);
           if (nested.isNotEmpty) return nested;
@@ -1337,7 +2097,10 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
       }
     }
     if (x is List) {
-      return x.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      return x
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
     }
     return const [];
   }
@@ -1347,24 +2110,49 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
     };
-    if (!_directFallback) headers['Allow-Cache-Y'] = 'yes';
-    if (kIsWeb && !_directFallback) headers['X-SAS-DIAG'] = '1';
+    if (!_directFallback && !_isResellerServer) {
+      headers['Allow-Cache-Y'] = 'yes';
+    }
+    if (kIsWeb && !_directFallback && !_isResellerServer) {
+      headers['X-SAS-DIAG'] = '1';
+    }
     _addProxyTarget(headers);
     if (_token != null) headers['authorization'] = 'Bearer $_token';
 
     http.Response res;
     try {
-      debugPrint('GET URL: $uri');
-      res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 45));
-      debugPrint('GET STATUS: ${res.statusCode}');
-      
+      debugPrint('[_get] URL: $uri route=$route');
+      res = await http
+          .get(uri, headers: headers)
+          .timeout(const Duration(seconds: 45));
+      debugPrint('[_get] STATUS: ${res.statusCode} route=$route');
+
       if (res.statusCode == 401) {
         // try to refresh token once
         try {
           await login();
           if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 45));
+          res = await http
+              .get(uri, headers: headers)
+              .timeout(const Duration(seconds: 45));
+        } catch (_) {
+          // fallthrough to error handling below
+        }
+      }
+
+      // معالجة 403 من SAS: نعيد المصادقة ونعيد المحاولة مرة واحدة
+      if (res.statusCode == 403) {
+        try {
+          debugPrint('SAS returned 403 on GET, re-authenticating and retrying');
+          await login();
+          if (_token != null) headers['authorization'] = 'Bearer $_token';
+          res = await http
+              .get(uri, headers: headers)
+              .timeout(const Duration(seconds: 45));
         } catch (_) {
           // fallthrough to error handling below
         }
@@ -1374,7 +2162,11 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
       throw SasApiException('تعذر جلب بيانات SAS: $e');
     }
 
-    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
+    if (res.statusCode == 401 &&
+        kIsWeb &&
+        !useDirectConnection &&
+        !_directFallback &&
+        !_isResellerServer) {
       final body = res.body.trim();
       throw SasApiException(
         'رفض التوثيق من البروكسي (401) أثناء GET. '
@@ -1403,40 +2195,70 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
     };
-    if (!_directFallback) headers['Allow-Cache-Y'] = 'yes';
+    if (!_directFallback && !_isResellerServer) {
+      headers['Allow-Cache-Y'] = 'yes';
+    }
     _addProxyTarget(headers);
     if (_token != null) headers['authorization'] = 'Bearer $_token';
 
     http.Response res;
     try {
-      res = await http.put(
-        uri,
-        headers: headers,
-        body: jsonEncode({
-          'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
-        }),
-      ).timeout(const Duration(seconds: 45));
-      
-      if (res.statusCode == 502) {
-        final connectionMode = useDirectConnection ? 'الاتصال المباشر' : 'البروكسي';
-        throw SasApiException(
-          'خطأ 502 من SAS عبر $connectionMode.\n'
-          'تأكد من صحة رابط SAS وأن السيرفر متاح من هذا الجهاز/المتصفح.'
-        );
-      }
-      
-      if (res.statusCode == 401) {
-        try {
-          await login();
-          if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http.put(
+      debugPrint('[_put] URL: $uri route=$route');
+      res = await http
+          .put(
             uri,
             headers: headers,
             body: jsonEncode({
               'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
             }),
-          ).timeout(const Duration(seconds: 45));
+          )
+          .timeout(const Duration(seconds: 45));
+      debugPrint('[_put] STATUS: ${res.statusCode} route=$route');
+
+      if (res.statusCode == 502) {
+        final connectionMode = useDirectConnection
+            ? 'الاتصال المباشر'
+            : 'البروكسي';
+        throw SasApiException(
+          'خطأ 502 من SAS عبر $connectionMode.\n'
+          'تأكد من صحة رابط SAS وأن السيرفر متاح من هذا الجهاز/المتصفح.',
+        );
+      }
+
+      if (res.statusCode == 401) {
+        try {
+          await login();
+          if (_token != null) headers['authorization'] = 'Bearer $_token';
+          res = await http
+              .put(
+                uri,
+                headers: headers,
+                body: jsonEncode({
+                  'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
+                }),
+              )
+              .timeout(const Duration(seconds: 45));
+        } catch (_) {}
+      }
+
+      if (res.statusCode == 403) {
+        try {
+          debugPrint('SAS returned 403 on PUT, re-authenticating and retrying');
+          await login();
+          if (_token != null) headers['authorization'] = 'Bearer $_token';
+          res = await http
+              .put(
+                uri,
+                headers: headers,
+                body: jsonEncode({
+                  'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
+                }),
+              )
+              .timeout(const Duration(seconds: 45));
         } catch (_) {}
       }
     } catch (e) {
@@ -1444,7 +2266,11 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
       throw SasApiException('تعذر تعديل المشترك في SAS: $e');
     }
 
-    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
+    if (res.statusCode == 401 &&
+        kIsWeb &&
+        !useDirectConnection &&
+        !_directFallback &&
+        !_isResellerServer) {
       final body = res.body.trim();
       throw SasApiException(
         'رفض التوثيق من البروكسي (401) أثناء PUT. '
@@ -1488,31 +2314,89 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
     };
-    if (!_directFallback) headers['Allow-Cache-Y'] = 'yes';
-    if (kIsWeb && !_directFallback) headers['X-SAS-DIAG'] = '1';
+    if (!_directFallback && !_isResellerServer) {
+      headers['Allow-Cache-Y'] = 'yes';
+    }
+    if (kIsWeb && !_directFallback && !_isResellerServer) {
+      headers['X-SAS-DIAG'] = '1';
+    }
     _addProxyTarget(headers);
     if (extraHeaders != null && extraHeaders.isNotEmpty) {
       headers.addAll(extraHeaders);
     }
-    if (authenticated && _token != null) headers['authorization'] = 'Bearer $_token';
+    if (authenticated && _token != null) {
+      headers['authorization'] = 'Bearer $_token';
+    }
     http.Response res;
     try {
-      res = await http.post(uri, headers: headers, body: jsonEncode({'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase)})).timeout(const Duration(seconds: 45));
-      
+      debugPrint('[_post] URL: $uri');
+      res = await http
+          .post(
+            uri,
+            headers: headers,
+            body: jsonEncode({
+              'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
+            }),
+          )
+          .timeout(const Duration(seconds: 45));
+      debugPrint('[_post] STATUS: ${res.statusCode} route=$route');
+
       if (authenticated && res.statusCode == 401) {
         // attempt to refresh token once then retry
         try {
           await login();
           if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http.post(uri, headers: headers, body: jsonEncode({'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase)})).timeout(const Duration(seconds: 45));
+          res = await http
+              .post(
+                uri,
+                headers: headers,
+                body: jsonEncode({
+                  'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
+                }),
+              )
+              .timeout(const Duration(seconds: 45));
+        } catch (_) {}
+      }
+
+      // معالجة 403 من SAS: قد يعني رمزاً منتهياً أو ممنوعاً، نعيد تسجيل الدخول ونعيد المحاولة مرة واحدة
+      if (res.statusCode == 403 && authenticated && _token != null) {
+        try {
+          debugPrint(
+            'SAS returned 403 on POST, re-authenticating and retrying',
+          );
+          await login();
+          if (_token != null) headers['authorization'] = 'Bearer $_token';
+          res = await http
+              .post(
+                uri,
+                headers: headers,
+                body: jsonEncode({
+                  'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
+                }),
+              )
+              .timeout(const Duration(seconds: 45));
         } catch (_) {}
       }
     } catch (e) {
       if (e is SasApiException) rethrow;
       throw SasApiException('تعذر الاتصال بخادم SAS: $e');
     }
-    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
+    if (kDebugMode && route == 'user/activate') {
+      _debugLog(
+        '[SAS DEBUG][ACTIVATION] endpoint=$uri method=POST '
+        'final_status_code=${res.statusCode}',
+      );
+    }
+    if (res.statusCode == 401 &&
+        kIsWeb &&
+        !useDirectConnection &&
+        !_directFallback &&
+        !_isResellerServer &&
+        authenticated) {
       final body = res.body.trim();
       throw SasApiException(
         'رفض التوثيق من البروكسي (401) أثناء POST. '
@@ -1529,18 +2413,34 @@ Future<List<Map<String, dynamic>>> fetchParents() async {
       throw SasApiException('SAS رجع خطأ HTTP ${res.statusCode}$detail');
     }
     try {
-      return jsonDecode(res.body);
+      final decoded = jsonDecode(res.body);
+      if (kDebugMode && route == 'user/activate') {
+        _debugResponseShape(
+          'ACTIVATION RESPONSE',
+          decoded,
+          statusCode: res.statusCode,
+          endpoint: uri,
+          method: 'POST',
+        );
+      }
+      return decoded;
     } catch (_) {
-      throw SasApiException('رد SAS غير مفهوم: ${res.body.length > 120 ? res.body.substring(0, 120) : res.body}');
+      throw SasApiException(
+        'رد SAS غير مفهوم: ${res.body.length > 120 ? res.body.substring(0, 120) : res.body}',
+      );
     }
   }
 
   String _cryptoJsEncrypt(String plainText, String passphrase) {
-    final salt = Uint8List.fromList(List<int>.generate(8, (_) => Random.secure().nextInt(256)));
+    final salt = Uint8List.fromList(
+      List<int>.generate(8, (_) => Random.secure().nextInt(256)),
+    );
     final derived = _evpBytesToKey(utf8.encode(passphrase), salt, 48);
     final key = enc.Key(Uint8List.fromList(derived.sublist(0, 32)));
     final iv = enc.IV(Uint8List.fromList(derived.sublist(32, 48)));
-    final aes = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc, padding: 'PKCS7'));
+    final aes = enc.Encrypter(
+      enc.AES(key, mode: enc.AESMode.cbc, padding: 'PKCS7'),
+    );
     final cipher = aes.encrypt(plainText, iv: iv).bytes;
     final out = <int>[...ascii.encode('Salted__'), ...salt, ...cipher];
     return base64Encode(out);

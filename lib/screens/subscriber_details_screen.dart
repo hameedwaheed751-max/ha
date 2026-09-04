@@ -303,7 +303,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF5F7F9),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(title: const Text('معلومات المشترك'), centerTitle: true),
         body: Column(
           children: [
@@ -346,7 +346,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
               ),
             ),
             Material(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               child: TabBar(
                 controller: tabs,
                 isScrollable: true,

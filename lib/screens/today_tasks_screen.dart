@@ -25,17 +25,6 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
 
   String _money(double amount) => '${amount.toStringAsFixed(0)} د.ع';
 
-  double _eventAmount(DailyTaskEvent event) {
-    if (event.amount > 0 || event.type != 'activation') return event.amount;
-    final user = event.subscriberUser.trim().toLowerCase();
-    for (final subscriber in AppStore.subscribers) {
-      if (user.isNotEmpty && subscriber.user.trim().toLowerCase() == user) {
-        return subscriber.paid;
-      }
-    }
-    return 0;
-  }
-
   List<DailyTaskEvent> _eventsOfDay(DateTime day) {
     final events = AppStore.dailyTaskEvents
         .where((e) => AppStore.isSameDay(e.at, day))
@@ -47,10 +36,7 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
   @override
   Widget build(BuildContext context) {
     final events = _eventsOfDay(_selectedDate);
-    final summary = DailyTaskSummary.fromEvents(
-      events,
-      amountOf: _eventAmount,
-    );
+    final summary = DailyTaskSummary.fromEvents(events);
     final filteredEvents = events.where((event) {
       return switch (_filter) {
         _DailyTaskFilter.all => true,
@@ -65,9 +51,7 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('المهام اليومية'),
-        ),
+        appBar: AppBar(title: const Text('المهام اليومية')),
         body: LayoutBuilder(
           builder: (context, constraints) {
             final horizontalPadding = constraints.maxWidth < 600 ? 12.0 : 24.0;
@@ -101,7 +85,11 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
                           ),
                           child: Column(
                             children: [
-                              for (var i = 0; i < filteredEvents.length; i++) ...[
+                              for (
+                                var i = 0;
+                                i < filteredEvents.length;
+                                i++
+                              ) ...[
                                 _activityRow(filteredEvents[i]),
                                 if (i < filteredEvents.length - 1)
                                   const Divider(height: 1, indent: 72),
@@ -186,20 +174,50 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
 
   Widget _summaryGrid(DailyTaskSummary summary) {
     final items = [
-      ('حالات التفعيل', summary.activationCases.toString(), Icons.check_circle_outline, Colors.green),
-      ('حالات تسديد الديون', summary.debtPaymentCases.toString(), Icons.paid_outlined, Colors.blue),
-      ('الواصل من التفعيل', _money(summary.activationCollected), Icons.point_of_sale_outlined, Colors.teal),
-      ('الواصل من التسديد', _money(summary.debtPaymentsCollected), Icons.account_balance_wallet_outlined, Colors.orange),
-      ('المجموع الواصل اليوم', _money(summary.totalCollected), Icons.calculate_outlined, Colors.deepPurple),
-      ('المضاف إلى الديون', _money(summary.debtAddedTotal), Icons.add_card_outlined, Colors.red),
+      (
+        'حالات التفعيل',
+        summary.activationCases.toString(),
+        Icons.check_circle_outline,
+        Colors.green,
+      ),
+      (
+        'حالات تسديد الديون',
+        summary.debtPaymentCases.toString(),
+        Icons.paid_outlined,
+        Colors.blue,
+      ),
+      (
+        'الواصل من التفعيل',
+        _money(summary.activationCollected),
+        Icons.point_of_sale_outlined,
+        Colors.teal,
+      ),
+      (
+        'الواصل من التسديد',
+        _money(summary.debtPaymentsCollected),
+        Icons.account_balance_wallet_outlined,
+        Colors.orange,
+      ),
+      (
+        'المجموع الواصل اليوم',
+        _money(summary.totalCollected),
+        Icons.calculate_outlined,
+        Colors.deepPurple,
+      ),
+      (
+        'المضاف إلى الديون',
+        _money(summary.debtAddedTotal),
+        Icons.add_card_outlined,
+        Colors.red,
+      ),
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 920
             ? 3
             : constraints.maxWidth >= 520
-                ? 2
-                : 1;
+            ? 2
+            : 1;
         final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
         return Wrap(
           spacing: 12,
@@ -265,7 +283,10 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
                   value,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+                  style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ],
             ),
@@ -299,12 +320,22 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
           child: SegmentedButton<_DailyTaskFilter>(
             segments: const [
               ButtonSegment(value: _DailyTaskFilter.all, label: Text('الكل')),
-              ButtonSegment(value: _DailyTaskFilter.activation, label: Text('التفعيل')),
-              ButtonSegment(value: _DailyTaskFilter.payment, label: Text('التسديد')),
-              ButtonSegment(value: _DailyTaskFilter.debtAdded, label: Text('إضافة دين')),
+              ButtonSegment(
+                value: _DailyTaskFilter.activation,
+                label: Text('التفعيل'),
+              ),
+              ButtonSegment(
+                value: _DailyTaskFilter.payment,
+                label: Text('التسديد'),
+              ),
+              ButtonSegment(
+                value: _DailyTaskFilter.debtAdded,
+                label: Text('إضافة دين'),
+              ),
             ],
             selected: {_filter},
-            onSelectionChanged: (value) => setState(() => _filter = value.first),
+            onSelectionChanged: (value) =>
+                setState(() => _filter = value.first),
             showSelectedIcon: false,
           ),
         ),
@@ -318,20 +349,20 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
     final color = isActivation
         ? const Color(0xFF087F5B)
         : isPayment
-            ? const Color(0xFF1769AA)
-            : const Color(0xFFC2413B);
+        ? const Color(0xFF1769AA)
+        : const Color(0xFFC2413B);
     final icon = isActivation
         ? Icons.bolt_outlined
         : isPayment
-            ? Icons.payments_outlined
-            : Icons.add_card_outlined;
+        ? Icons.payments_outlined
+        : Icons.add_card_outlined;
     final label = isActivation
         ? 'تفعيل'
         : isPayment
-            ? 'تسديد دين'
-            : 'إضافة دين';
+        ? 'تسديد دين'
+        : 'إضافة دين';
     final amountLabel = isPayment || isActivation ? 'الواصل' : 'المضاف';
-    final amount = _eventAmount(event);
+    final amount = event.amount;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -377,7 +408,10 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
                   '${event.note.trim().isEmpty ? '' : '  •  ${event.note}'}',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF64748B),
+                  ),
                 ),
               ],
             ),
@@ -393,7 +427,10 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
               if (!isActivation)
                 Text(
                   'المتبقي: ${_money(event.remainingAfter)}',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF64748B),
+                  ),
                 ),
             ],
           ),
@@ -403,12 +440,13 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
   }
 
   Widget _emptyState() {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 44),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: colors.outlineVariant),
       ),
       child: const Column(
         children: [

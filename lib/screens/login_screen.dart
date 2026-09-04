@@ -164,6 +164,7 @@ Future<void> _loadAgentData() async {
     
     // بدء المزامنة اللحظية
     AppStore.startRealtimeSync();
+    AppStore.startChatSync();
     
     // مزامنة SAS بالخلفية
     Future<void>(() async {
@@ -911,7 +912,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF7F9FC),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
           title: const Text('إنشاء حساب الاشتراك'),
           centerTitle: true,
@@ -1120,7 +1121,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         labelText: label,
         prefixIcon: Icon(icon),
         filled: true,
-        fillColor: const Color(0xFFF7F9FC),
+        fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
@@ -1332,7 +1333,7 @@ class _RenewalRequestStatusScreenState extends State<RenewalRequestStatusScreen>
                                     ? (rejectedReason.isEmpty ? 'يمكنك إرسال طلب جديد.' : 'سبب الرفض: $rejectedReason')
                                     : 'يمكنك إرسال طلب تجديد جديد.'),
                             textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 14, color: Colors.black87),
+                            style: TextStyle(fontSize: 14, color: colorScheme.onSurfaceVariant),
                           ),
                           if (widget.successNotice != null && widget.successNotice!.trim().isNotEmpty && isPending) ...[
                             const SizedBox(height: 10),
@@ -1496,7 +1497,7 @@ class SubscriptionPlansScreen extends StatelessWidget {
                 children: [
                   Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 4),
-                  Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                  Text(subtitle, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 ],
               ),
             ),
@@ -1514,7 +1515,7 @@ class SubscriptionPlansScreen extends StatelessWidget {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF7F9FC),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
           title: const Text('الاشتراكات'),
           centerTitle: true,
@@ -1626,7 +1627,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF7F9FC),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
           title: const Text('حساب الماستر'),
           centerTitle: true,
@@ -1713,7 +1714,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: colorScheme.surface,
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))],
                       ),
@@ -1728,9 +1729,9 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF7F9FC),
+                              color: colorScheme.surfaceContainerHighest,
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: const Color(0xFFE5EAF0)),
+                              border: Border.all(color: colorScheme.outlineVariant),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1755,7 +1756,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF3F8F4),
+                              color: colorScheme.primaryContainer.withValues(alpha: 0.35),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Row(
@@ -1778,9 +1779,9 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF7F9FC),
+                        color: colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFFE5EAF0)),
+                        border: Border.all(color: colorScheme.outlineVariant),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,

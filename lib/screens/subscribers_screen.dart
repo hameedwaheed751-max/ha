@@ -10,7 +10,6 @@ import 'add_subscriber_screen.dart';
 import 'receipt_screen.dart';
 import 'subscriber_details_screen.dart';
 
-
 class SubscribersScreen extends StatefulWidget {
   final String filter;
   const SubscribersScreen({super.key, this.filter = 'all'});
@@ -21,7 +20,6 @@ class SubscribersScreen extends StatefulWidget {
 
 class _SubscribersScreenState extends State<SubscribersScreen> {
   final ScrollController _verticalScrollController = ScrollController();
-  final ScrollController _horizontalScrollController = ScrollController();
 
   bool operationBusy = false;
   Subscriber? selected;
@@ -38,7 +36,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   String _advancedParent = 'الكل';
   bool _includeSubUsers = true;
   String _advancedMac = '';
-  
+
   // العناصر الجديدة من SAS Radius
   final Map<String, bool> _columnVisibility = {
     'ip': true,
@@ -57,7 +55,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _columnVisibility['ip'] = prefs.getBool('col_ip') ?? true;
-      _columnVisibility['remainingDays'] = prefs.getBool('col_remainingDays') ?? true;
+      _columnVisibility['remainingDays'] =
+          prefs.getBool('col_remainingDays') ?? true;
       _columnVisibility['debtDays'] = prefs.getBool('col_debtDays') ?? false;
     });
   }
@@ -65,7 +64,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   Future<void> _saveColumnPreferences() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('col_ip', _columnVisibility['ip'] ?? false);
-    await prefs.setBool('col_remainingDays', _columnVisibility['remainingDays'] ?? false);
+    await prefs.setBool(
+      'col_remainingDays',
+      _columnVisibility['remainingDays'] ?? false,
+    );
     await prefs.setBool('col_debtDays', _columnVisibility['debtDays'] ?? false);
   }
 
@@ -84,7 +86,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         if (days < 0 || days > 3) return false;
       }
 
-      final basicMatch = s.user.toLowerCase().contains(z) ||
+      final basicMatch =
+          s.user.toLowerCase().contains(z) ||
           s.name.toLowerCase().contains(z) ||
           s.phone.contains(z) ||
           s.type.toLowerCase().contains(z) ||
@@ -92,7 +95,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       if (!basicMatch) return false;
 
       if (_advancedStatus != 'الكل') {
-        if (_advancedStatus == 'فعال' && (!s.isActive || s.disabled)) return false;
+        if (_advancedStatus == 'فعال' && (!s.isActive || s.disabled))
+          return false;
         if (_advancedStatus == 'منتهي الصلاحية' && !s.expired) return false;
         if (_advancedStatus == 'معطل' && !s.disabled) return false;
         if (_advancedStatus == 'ينتهي قريباً') {
@@ -104,7 +108,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           if (days < 0 || days > 3) return false;
         }
         if (_advancedStatus == 'ينتهي اشتراكهم اليوم') {
-          final sameDay = s.endDate.year == now.year &&
+          final sameDay =
+              s.endDate.year == now.year &&
               s.endDate.month == now.month &&
               s.endDate.day == now.day;
           if (!sameDay) return false;
@@ -117,10 +122,14 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         if (_advancedConnection == 'غير متصل' && online) return false;
       }
 
-      if (_advancedPackage != 'الكل' && s.packageDisplay != _advancedPackage) return false;
-      if (_advancedParent != 'الكل' && _parentText(s) != _advancedParent) return false;
+      if (_advancedPackage != 'الكل' && s.packageDisplay != _advancedPackage)
+        return false;
+      if (_advancedParent != 'الكل' && _parentText(s) != _advancedParent)
+        return false;
       if (_advancedMac.trim().isNotEmpty &&
-          !_macText(s).toLowerCase().contains(_advancedMac.toLowerCase().trim())) {
+          !_macText(
+            s,
+          ).toLowerCase().contains(_advancedMac.toLowerCase().trim())) {
         return false;
       }
       return true;
@@ -136,10 +145,15 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           c = a.user.toLowerCase().compareTo(b.user.toLowerCase());
           break;
         case 'package':
-          c = a.packageDisplay.toLowerCase().compareTo(b.packageDisplay.toLowerCase());
+          c = a.packageDisplay.toLowerCase().compareTo(
+            b.packageDisplay.toLowerCase(),
+          );
           break;
         case 'date':
           c = a.endDate.compareTo(b.endDate);
+          break;
+        case 'debt':
+          c = a.remaining.compareTo(b.remaining);
           break;
         case 'status':
           c = _statusOrder(a).compareTo(_statusOrder(b));
@@ -161,19 +175,24 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   String fmt(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
-  DateTime _dayOnly(DateTime d) => DateTime(d.year, d.month, d.day);
-
   void _setStartDateAsActivationDay(Subscriber s, {DateTime? at}) {
     s.markActivationDate(at: at ?? DateTime.now());
   }
 
-  String _parentText(Subscriber s) => _sasText(
-    s, const ['parent_name', 'parent', 'manager_name', 'reseller_name', 'owner_name'], ''
-  );
+  String _parentText(Subscriber s) => _sasText(s, const [
+    'parent_name',
+    'parent',
+    'manager_name',
+    'reseller_name',
+    'owner_name',
+  ], '');
 
-  String _macText(Subscriber s) => _sasText(
-    s, const ['mac', 'mac_address', 'macAddress', 'calling_station_id'], ''
-  );
+  String _macText(Subscriber s) => _sasText(s, const [
+    'mac',
+    'mac_address',
+    'macAddress',
+    'calling_station_id',
+  ], '');
 
   void _sort(String field, [int? columnIndex]) {
     setState(() {
@@ -255,9 +274,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('تعذرت المزامنة: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('تعذرت المزامنة: $e')));
       }
     } finally {
       if (mounted) setState(() => syncing = false);
@@ -267,7 +286,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   @override
   void dispose() {
     _verticalScrollController.dispose();
-    _horizontalScrollController.dispose();
     super.dispose();
   }
 
@@ -300,13 +318,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
   double _toNum(dynamic value) {
     if (value is num) return value.toDouble();
-    return double.tryParse((value ?? '').toString().replaceAll(',', '').trim()) ?? 0;
+    return double.tryParse(
+          (value ?? '').toString().replaceAll(',', '').trim(),
+        ) ??
+        0;
   }
 
-  double _activationReceivedAmount(dynamic response, Subscriber subscriber) {
+  double _activationReceivedAmount(dynamic response) {
     if (response is Map) {
       for (final key in const [
-        'money_collected',
+        '_sas_deduction_amount',
         'required_amount',
         'amount',
         'user_price',
@@ -319,7 +340,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       final data = response['data'];
       if (data is Map) {
         for (final key in const [
-          'money_collected',
+          '_sas_deduction_amount',
           'required_amount',
           'amount',
           'user_price',
@@ -331,7 +352,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         }
       }
     }
-    return subscriber.paid > 0 ? subscriber.paid : 0;
+    return 0;
   }
 
   Future<void> whatsapp(Subscriber s, {String? message}) async {
@@ -360,13 +381,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('فشل إرسال واتساب: ${result.error ?? 'خطأ غير معروف'}')),
+        SnackBar(
+          content: Text('فشل إرسال واتساب: ${result.error ?? 'خطأ غير معروف'}'),
+        ),
       );
     }
   }
 
   Future<void> _sendActivationWhatsApp(Subscriber s) async {
-    final activationTemplate = AppStore.messageTemplates['activation'] ??
+    final activationTemplate =
+        AppStore.messageTemplates['activation'] ??
         'مرحباً {name}، تم تفعيل اشتراكك لدى {office}. الباقة: {package} وتنتهي بتاريخ {endDate}.';
     final result = await RenderWhatsAppService.notifySubscriptionActivated(
       s,
@@ -391,9 +415,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
     final uri = Uri(scheme: 'tel', path: phone);
     if (!await launchUrl(uri) && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تعذر فتح تطبيق الاتصال')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تعذر فتح تطبيق الاتصال')));
     }
   }
 
@@ -407,31 +431,34 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     return template
         .replaceAll('{name}', s.name)
         .replaceAll('{{customer_name}}', s.name)
-      .replaceAll('{{الاسم المشترك}}', s.name)
+        .replaceAll('{{الاسم المشترك}}', s.name)
         .replaceAll('{office}', AppStore.officeName)
-      .replaceAll('{{agent_name}}', agentName)
-      .replaceAll('{{اسم الوكيل}}', AppStore.officeName)
+        .replaceAll('{{agent_name}}', agentName)
+        .replaceAll('{{اسم الوكيل}}', AppStore.officeName)
         .replaceAll('{package}', s.packageDisplay)
-      .replaceAll('{{package_name}}', s.packageDisplay)
-      .replaceAll('{{اسم الباقة}}', s.packageDisplay)
-      .replaceAll('{{subscription_start}}', startDate)
-      .replaceAll('{{subscription_end}}', endDate)
-      .replaceAll('{{subscription_start_date}}', startDate)
-      .replaceAll('{{subscription_end_date}}', endDate)
-      .replaceAll('{{whatsapp_number}}', whatsappNumber)
-      .replaceAll('{{payment_date}}', s.paymentDate.isNotEmpty ? s.paymentDate : fmt(DateTime.now()))
-      .replaceAll('{{paid_amount}}', paid)
-      .replaceAll('{{remaining_amount}}', remaining)
-      .replaceAll('{{تاريخ البدء}}', startDate)
+        .replaceAll('{{package_name}}', s.packageDisplay)
+        .replaceAll('{{اسم الباقة}}', s.packageDisplay)
+        .replaceAll('{{subscription_start}}', startDate)
+        .replaceAll('{{subscription_end}}', endDate)
+        .replaceAll('{{subscription_start_date}}', startDate)
+        .replaceAll('{{subscription_end_date}}', endDate)
+        .replaceAll('{{whatsapp_number}}', whatsappNumber)
+        .replaceAll(
+          '{{payment_date}}',
+          s.paymentDate.isNotEmpty ? s.paymentDate : fmt(DateTime.now()),
+        )
+        .replaceAll('{{paid_amount}}', paid)
+        .replaceAll('{{remaining_amount}}', remaining)
+        .replaceAll('{{تاريخ البدء}}', startDate)
         .replaceAll('{endDate}', fmt(s.endDate))
-      .replaceAll('{{تاريخ الانتهاء}}', endDate)
-      .replaceAll('{price}', s.price.toStringAsFixed(0))
-      .replaceAll('{{مبلغ الاشتراك}}', s.price.toStringAsFixed(0))
-      .replaceAll('{{المبلغ}}', remaining)
-      .replaceAll('{paid}', paid)
-      .replaceAll('{{الواصل}}', 'الواصل: $paid')
-      .replaceAll('{remaining}', remaining)
-      .replaceAll('{{المتبقي}}', 'المتبقي: $remaining');
+        .replaceAll('{{تاريخ الانتهاء}}', endDate)
+        .replaceAll('{price}', s.price.toStringAsFixed(0))
+        .replaceAll('{{مبلغ الاشتراك}}', s.price.toStringAsFixed(0))
+        .replaceAll('{{المبلغ}}', remaining)
+        .replaceAll('{paid}', paid)
+        .replaceAll('{{الواصل}}', 'الواصل: $paid')
+        .replaceAll('{remaining}', remaining)
+        .replaceAll('{{المتبقي}}', 'المتبقي: $remaining');
   }
 
   void messageTemplates(Subscriber s) {
@@ -459,7 +486,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               children: [
                 const ListTile(
                   leading: Icon(Icons.chat, color: Colors.green),
-                  title: Text('رسائل واتساب', style: TextStyle(fontWeight: FontWeight.bold)),
+                  title: Text(
+                    'رسائل واتساب',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   subtitle: Text('تستخدم النماذج المحفوظة من قائمة الداشبورد'),
                 ),
                 const Divider(height: 1),
@@ -479,7 +509,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       );
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('تمت جدولة إرسال الرسالة عبر واتساب')),
+                          const SnackBar(
+                            content: Text('تمت جدولة إرسال الرسالة عبر واتساب'),
+                          ),
                         );
                       }
                     },
@@ -494,11 +526,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
   }
 
-  Future<void> _activateSubscriber(Subscriber s, {BuildContext? modalContext}) async {
+  Future<void> _activateSubscriber(
+    Subscriber s, {
+    BuildContext? modalContext,
+  }) async {
     bool loadingDialogShown = false;
     // استخراج معرف SAS بشكل آمن
     final sasId = s.sasId.trim();
-    final dataId = (s.sasData['id'] ?? s.sasData['user_id'] ?? '').toString().trim();
+    final dataId = (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
+        .toString()
+        .trim();
     final rawId = sasId.isNotEmpty ? sasId : dataId;
 
     debugPrint('Activation Debug: sasId=$sasId, dataId=$dataId, rawId=$rawId');
@@ -506,7 +543,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     final userId = int.tryParse(rawId);
 
     if (userId == null || userId == 0) {
-      if (modalContext != null && modalContext.mounted) Navigator.pop(modalContext);
+      if (modalContext != null && modalContext.mounted)
+        Navigator.pop(modalContext);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -524,10 +562,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         throw Exception('أكمل إعدادات ربط SAS أولاً');
       }
 
-      debugPrint('Attempting to activate userId=$userId for subscriber ${s.name}');
+      debugPrint(
+        'Attempting to activate userId=$userId for subscriber ${s.name}',
+      );
 
       final api = SasApiService(settings);
-      
+
       // عرض شاشة التحميل
       if (modalContext != null && modalContext.mounted) {
         Navigator.pop(modalContext);
@@ -537,34 +577,33 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         showDialog(
           context: context,
           barrierDismissible: false,
-          builder: (_) => const Center(
-            child: CircularProgressIndicator(),
-          ),
+          builder: (_) => const Center(child: CircularProgressIndicator()),
         );
       }
 
       // تفعيل المشترك في SAS
-      final activationTemplate = AppStore.messageTemplates['activation'] ??
+      final activationTemplate =
+          AppStore.messageTemplates['activation'] ??
           'مرحباً {name}، تم تفعيل اشتراكك لدى {office}. الباقة: {package} وتنتهي بتاريخ {endDate}.';
       final activationMessage = _renderTemplate(activationTemplate, s);
 
-      final activationResponse = await api.activateUser(
-        userId,
-        notifyPhone: s.phone,
-        notifyMessage: activationMessage,
-      ).timeout(
-        const Duration(seconds: 30),
-        onTimeout: () => throw Exception('انتهت مهلة طلب التفعيل'),
-      );
-
-      debugPrint('Activation API Response: $activationResponse');
+      final activationResponse = await api
+          .activateUser(
+            userId,
+            notifyPhone: s.phone,
+            notifyMessage: activationMessage,
+          )
+          .timeout(
+            const Duration(seconds: 30),
+            onTimeout: () => throw Exception('انتهت مهلة طلب التفعيل'),
+          );
 
       // جلب بيانات المشترك المحدثة من SAS
       dynamic userOverview;
       try {
-        userOverview = await api.fetchUserOverview(userId).timeout(
-          const Duration(seconds: 15),
-        );
+        userOverview = await api
+            .fetchUserOverview(userId)
+            .timeout(const Duration(seconds: 15));
         debugPrint('User Overview: $userOverview');
       } catch (e) {
         debugPrint('Could not fetch user overview: $e');
@@ -574,55 +613,51 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       s.active = true;
       s.disabled = false;
       s.points++;
-      _setStartDateAsActivationDay(s);
 
-      final activationAmount = _activationReceivedAmount(activationResponse, s);
-      await AppStore.addDailyTaskEvent(
-        DailyTaskEvent(
-          type: 'activation',
+      final activationAmount = _activationReceivedAmount(activationResponse);
+      final activatedAt =
+          SasSyncService.activationDateFromSas(userOverview) ??
+          SasSyncService.activationDateFromSas(activationResponse) ??
+          DateTime.now();
+      _setStartDateAsActivationDay(s, at: activatedAt);
+      await AppStore.addAccountingActivation(
+        AccountingActivationRecord(
           subscriberUser: s.user,
           subscriberName: s.name,
-          at: DateTime.now(),
-          amount: activationAmount,
-          remainingAfter: s.remaining,
-          note: 'تفعيل من قائمة المشتركين',
+          packageName: s.packageDisplay,
+          saleAmount: s.price,
+          sasDeduction: activationAmount,
+          at: activatedAt,
         ),
         persist: false,
       );
+      for (final event in DailyTaskEvent.activationSettlement(
+        subscriberUser: s.user,
+        subscriberName: s.name,
+        at: activatedAt,
+        collected: s.paid,
+        remaining: s.remaining,
+        note: 'تفعيل من قائمة المشتركين',
+      )) {
+        await AppStore.addDailyTaskEvent(event, persist: false);
+      }
 
       // تحديث بيانات SAS إذا تم جلبها
       if (userOverview is Map) {
         s.sasData.addAll(Map<String, dynamic>.from(userOverview));
-        
+
         // تحديث الحالة
-        final isActive = userOverview['is_active'] ?? userOverview['active'] ?? true;
-        final isDisabled = userOverview['disabled'] ?? userOverview['is_disabled'] ?? false;
-        
+        final isActive =
+            userOverview['is_active'] ?? userOverview['active'] ?? true;
+        final isDisabled =
+            userOverview['disabled'] ?? userOverview['is_disabled'] ?? false;
+
         s.active = isActive == true || isActive == 1;
         s.disabled = isDisabled == true || isDisabled == 1;
       }
 
       // حفظ البيانات المحلية أولاً
       await AppStore.save();
-
-      // بعد نجاح التفعيل: مزامنة SAS تلقائياً حتى تظهر الحالة الجديدة
-      // مباشرةً بدون حاجة المستخدم للضغط على زر المزامنة.
-      try {
-        final syncResult = await SasSyncService.sync(api).timeout(
-          const Duration(seconds: 45),
-          onTimeout: () => throw Exception('انتهت مهلة المزامنة التلقائية'),
-        );
-        _setStartDateAsActivationDay(s);
-        AppStore.lastSasSync = DateTime.now();
-        await AppStore.save();
-        debugPrint(
-          'Auto sync after activation: '
-          'added=${syncResult.added}, updated=${syncResult.updated}, read=${syncResult.read}',
-        );
-      } catch (e) {
-        // التفعيل نفسه نجح؛ فشل التحديث لا يحوّل العملية إلى فشل تفعيل.
-        debugPrint('Auto sync after activation failed: $e');
-      }
 
       if (mounted) {
         if (loadingDialogShown && Navigator.of(context).canPop()) {
@@ -640,7 +675,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('✅ تم التفعيل وتحديث حالة المشترك تلقائياً'),
+            content: const Text('✅ تم التفعيل وتحديث بيانات المشترك'),
             backgroundColor: Colors.green.shade600,
             duration: const Duration(seconds: 3),
           ),
@@ -662,19 +697,26 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         if (errorStr.contains('نقاط المكافآت غير كافية')) {
           msg = '❌ نقاط المكافآت غير كافية - اطلب من المشترك تجميع نقاط إضافية';
         } else if (errorStr.contains('لا يوجد رصيد متاح')) {
-          msg = '❌ لا يوجد رصيد - رصيد المشترك والمدير معاً صفر. أضف رصيد للمشترك أو المدير';
-        } else if (errorStr.contains('الرصيد صفر') || errorStr.contains('zero balance')) {
-          msg = '❌ رصيد المشترك صفر - سيتم الاعتماد على رصيد المدير. تأكد من وجود رصيد لدى المدير';
+          msg =
+              '❌ لا يوجد رصيد - رصيد المشترك والمدير معاً صفر. أضف رصيد للمشترك أو المدير';
+        } else if (errorStr.contains('الرصيد صفر') ||
+            errorStr.contains('zero balance')) {
+          msg =
+              '❌ رصيد المشترك صفر - سيتم الاعتماد على رصيد المدير. تأكد من وجود رصيد لدى المدير';
         } else if (errorStr.contains('الرصيد غير كافٍ')) {
           msg = '❌ الرصيد غير كافٍ للتفعيل (المشترك والمدير)';
         } else if (errorStr.contains('تم الوصول إلى الحد الأقصى')) {
-          msg = '⚠️ تم الوصول إلى الحد الأقصى - الحساب أو المدير وصل للحد. حاول لاحقاً';
-        } else if (errorStr.contains('Failed host lookup') || errorStr.contains('SocketException')) {
-          msg = '❌ فشل الاتصال بخادم SAS - تحقق من الإنترنت أو تواصل مع دعم SAS';
+          msg =
+              '⚠️ تم الوصول إلى الحد الأقصى - الحساب أو المدير وصل للحد. حاول لاحقاً';
+        } else if (errorStr.contains('Failed host lookup') ||
+            errorStr.contains('SocketException')) {
+          msg =
+              '❌ فشل الاتصال بخادم SAS - تحقق من الإنترنت أو تواصل مع دعم SAS';
         } else if (errorStr.contains('تعذر الاتصال')) {
           msg = '❌ الاتصال بخادم SAS منقطع - تحقق من الإنترنت أو اسم الخادم';
         } else if (errorStr.contains('403')) {
-          msg = '❌ خطأ 403: تحقق من صلاحيات المستخدم أو معرف SAS (userId=$userId)';
+          msg =
+              '❌ خطأ 403: تحقق من صلاحيات المستخدم أو معرف SAS (userId=$userId)';
         } else if (errorStr.contains('401')) {
           msg = '❌ خطأ 401: فشل التحقق من البيانات. تحقق من بيانات الربط';
         } else if (errorStr.contains('404')) {
@@ -694,10 +736,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             content: Text(
               msg,
               textAlign: TextAlign.right,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
             ),
             backgroundColor: Colors.red.shade600,
             duration: const Duration(seconds: 5),
@@ -734,8 +773,17 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(s.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-                            Text(s.user, style: TextStyle(color: Colors.grey.shade600)),
+                            Text(
+                              s.name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 17,
+                              ),
+                            ),
+                            Text(
+                              s.user,
+                              style: TextStyle(color: Colors.grey.shade600),
+                            ),
                           ],
                         ),
                       ),
@@ -750,14 +798,21 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   Navigator.pop(ctx);
                   _debt(s);
                 }),
-                _op(Icons.badge_outlined, Colors.indigo, 'تعديل بيانات المشترك', () async {
-                  Navigator.pop(ctx);
-                  final changed = await Navigator.push<bool>(
-                    context,
-                    MaterialPageRoute(builder: (_) => AddSubscriberScreen(subscriber: s)),
-                  );
-                  if (changed == true && mounted) setState(() {});
-                }),
+                _op(
+                  Icons.badge_outlined,
+                  Colors.indigo,
+                  'تعديل بيانات المشترك',
+                  () async {
+                    Navigator.pop(ctx);
+                    final changed = await Navigator.push<bool>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AddSubscriberScreen(subscriber: s),
+                      ),
+                    );
+                    if (changed == true && mounted) setState(() {});
+                  },
+                ),
                 _op(Icons.person_add, Colors.teal, 'إضافة', () {
                   Navigator.pop(ctx);
                   add();
@@ -774,14 +829,20 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   // لا نغيّر الحالة محلياً إلا بعد نجاح التعطيل الحقيقي في SAS.
                   final rawId = s.sasId.trim().isNotEmpty
                       ? s.sasId.trim()
-                      : (s.sasData['id'] ?? s.sasData['user_id'] ?? '').toString().trim();
+                      : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
+                            .toString()
+                            .trim();
                   final userId = int.tryParse(rawId);
 
                   if (userId == null || userId == 0) {
                     if (ctx.mounted) Navigator.pop(ctx);
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('تعذر التعطيل: معرف SAS غير صحيح (rawId=$rawId)')),
+                        SnackBar(
+                          content: Text(
+                            'تعذر التعطيل: معرف SAS غير صحيح (rawId=$rawId)',
+                          ),
+                        ),
                       );
                     }
                     return;
@@ -789,15 +850,19 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
                   try {
                     final settings = await SasSettings.load();
-                    if (settings.username.trim().isEmpty || settings.password.isEmpty) {
+                    if (settings.username.trim().isEmpty ||
+                        settings.password.isEmpty) {
                       throw Exception('أكمل إعدادات ربط SAS أولاً');
                     }
 
                     final api = SasApiService(settings);
-                    await api.disableUser(userId).timeout(
-                      const Duration(seconds: 30),
-                      onTimeout: () => throw Exception('انتهت مهلة طلب التعطيل'),
-                    );
+                    await api
+                        .disableUser(userId)
+                        .timeout(
+                          const Duration(seconds: 30),
+                          onTimeout: () =>
+                              throw Exception('انتهت مهلة طلب التعطيل'),
+                        );
 
                     s.disabled = true;
                     s.active = false;
@@ -807,7 +872,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     if (mounted) {
                       setState(() {});
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('✅ تم تعطيل المشترك في SAS بنجاح')),
+                        const SnackBar(
+                          content: Text('✅ تم تعطيل المشترك في SAS بنجاح'),
+                        ),
                       );
                     }
                   } catch (e) {
@@ -817,11 +884,14 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       String msg;
 
                       if (errorStr.contains('403')) {
-                        msg = '❌ خطأ 403: تحقق من صلاحيات المستخدم أو معرف SAS (userId=$userId)';
+                        msg =
+                            '❌ خطأ 403: تحقق من صلاحيات المستخدم أو معرف SAS (userId=$userId)';
                       } else if (errorStr.contains('401')) {
-                        msg = '❌ خطأ 401: فشل التحقق من البيانات. تحقق من بيانات الربط';
+                        msg =
+                            '❌ خطأ 401: فشل التحقق من البيانات. تحقق من بيانات الربط';
                       } else if (errorStr.contains('404')) {
-                        msg = '❌ خطأ 404: المشترك غير موجود في SAS (userId=$userId)';
+                        msg =
+                            '❌ خطأ 404: المشترك غير موجود في SAS (userId=$userId)';
                       } else {
                         msg = '❌ فشل تعطيل المشترك في SAS: $errorStr';
                       }
@@ -839,14 +909,20 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   // لا نغيّر الحالة محلياً إلا بعد نجاح إلغاء التعطيل الحقيقي في SAS.
                   final rawId = s.sasId.trim().isNotEmpty
                       ? s.sasId.trim()
-                      : (s.sasData['id'] ?? s.sasData['user_id'] ?? '').toString().trim();
+                      : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
+                            .toString()
+                            .trim();
                   final userId = int.tryParse(rawId);
 
                   if (userId == null || userId == 0) {
                     if (ctx.mounted) Navigator.pop(ctx);
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('تعذر إلغاء التعطيل: معرف SAS غير صحيح (rawId=$rawId)')),
+                        SnackBar(
+                          content: Text(
+                            'تعذر إلغاء التعطيل: معرف SAS غير صحيح (rawId=$rawId)',
+                          ),
+                        ),
                       );
                     }
                     return;
@@ -854,15 +930,19 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
                   try {
                     final settings = await SasSettings.load();
-                    if (settings.username.trim().isEmpty || settings.password.isEmpty) {
+                    if (settings.username.trim().isEmpty ||
+                        settings.password.isEmpty) {
                       throw Exception('أكمل إعدادات ربط SAS أولاً');
                     }
 
                     final api = SasApiService(settings);
-                    await api.enableUser(userId).timeout(
-                      const Duration(seconds: 30),
-                      onTimeout: () => throw Exception('انتهت مهلة طلب إلغاء التعطيل'),
-                    );
+                    await api
+                        .enableUser(userId)
+                        .timeout(
+                          const Duration(seconds: 30),
+                          onTimeout: () =>
+                              throw Exception('انتهت مهلة طلب إلغاء التعطيل'),
+                        );
 
                     s.disabled = false;
                     s.active = true;
@@ -872,7 +952,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     if (mounted) {
                       setState(() {});
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('✅ تم إلغاء تعطيل المشترك في SAS بنجاح')),
+                        const SnackBar(
+                          content: Text(
+                            '✅ تم إلغاء تعطيل المشترك في SAS بنجاح',
+                          ),
+                        ),
                       );
                     }
                   } catch (e) {
@@ -882,11 +966,14 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       String msg;
 
                       if (errorStr.contains('403')) {
-                        msg = '❌ خطأ 403: تحقق من صلاحيات المستخدم أو معرف SAS (userId=$userId)';
+                        msg =
+                            '❌ خطأ 403: تحقق من صلاحيات المستخدم أو معرف SAS (userId=$userId)';
                       } else if (errorStr.contains('401')) {
-                        msg = '❌ خطأ 401: فشل التحقق من البيانات. تحقق من بيانات الربط';
+                        msg =
+                            '❌ خطأ 401: فشل التحقق من البيانات. تحقق من بيانات الربط';
                       } else if (errorStr.contains('404')) {
-                        msg = '❌ خطأ 404: المشترك غير موجود في SAS (userId=$userId)';
+                        msg =
+                            '❌ خطأ 404: المشترك غير موجود في SAS (userId=$userId)';
                       } else {
                         msg = '❌ فشل إلغاء التعطيل في SAS: $errorStr';
                       }
@@ -916,7 +1003,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   Navigator.pop(ctx);
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => ReceiptScreen(subscriber: s)),
+                    MaterialPageRoute(
+                      builder: (_) => ReceiptScreen(subscriber: s),
+                    ),
                   );
                 }),
                 _op(Icons.delete_outline, Colors.red, 'حذف المشترك', () {
@@ -932,8 +1021,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
   }
 
-  Widget _op(IconData i, Color c, String t, VoidCallback f) =>
-      ListTile(leading: Icon(i, color: c), title: Text(t), onTap: f);
+  Widget _op(IconData i, Color c, String t, VoidCallback f) => ListTile(
+    leading: Icon(i, color: c),
+    title: Text(t),
+    onTap: f,
+  );
 
   String _newGuid() {
     final r = Random.secure();
@@ -943,26 +1035,29 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     return '${hex(8)}-${hex(4)}-${hex(4)}-${hex(4)}-${hex(12)}';
   }
 
-  InputDecoration _greenDropdownDecoration(String label, IconData icon) => InputDecoration(
-        labelText: label,
-        labelStyle: const TextStyle(color: Colors.black87),
-        floatingLabelStyle: const TextStyle(color: Colors.black87),
-        prefixIcon: Icon(icon, color: Colors.black87),
-        filled: true,
-        fillColor: const Color(0xFFF8FFF9),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.grey.shade300, width: 1.2),
-        ),
-        focusedBorder: const OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(14)),
-          borderSide: BorderSide(color: Color(0xFF2E7D32), width: 2),
-        ),
-      );
+  InputDecoration _greenDropdownDecoration(String label, IconData icon) {
+    final colors = Theme.of(context).colorScheme;
+    return InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: colors.onSurfaceVariant),
+      floatingLabelStyle: TextStyle(color: colors.primary),
+      prefixIcon: Icon(icon, color: colors.onSurfaceVariant),
+      filled: true,
+      fillColor: colors.surfaceContainerHighest,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: Colors.grey.shade300),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: Colors.grey.shade300, width: 1.2),
+      ),
+      focusedBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(14)),
+        borderSide: BorderSide(color: Color(0xFF2E7D32), width: 2),
+      ),
+    );
+  }
 
   void _extend(Subscriber s) {
     int? selectedProfileId;
@@ -981,12 +1076,21 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             try {
               final settings = await SasSettings.load();
               final api = SasApiService(settings);
-              final rows = await api.fetchExtendProfiles(int.parse(s.sasId.toString()));
+              final rows = await api.fetchExtendProfiles(
+                int.parse(s.sasId.toString()),
+              );
               if (!ctx.mounted) return;
-              setLocal(() { profiles = rows; loading = false; loadError = null; });
+              setLocal(() {
+                profiles = rows;
+                loading = false;
+                loadError = null;
+              });
             } catch (e) {
               if (!ctx.mounted) return;
-              setLocal(() { loading = false; loadError = e.toString(); });
+              setLocal(() {
+                loading = false;
+                loadError = e.toString();
+              });
             }
           }
 
@@ -998,147 +1102,206 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           int? idOf(Map<String, dynamic> p) =>
               int.tryParse((p['id'] ?? p['profile_id'] ?? '').toString());
           String nameOf(Map<String, dynamic> p) =>
-              (p['name'] ?? p['profile_name'] ?? 'ID ${idOf(p) ?? '-'}').toString();
+              (p['name'] ?? p['profile_name'] ?? 'ID ${idOf(p) ?? '-'}')
+                  .toString();
 
           return Directionality(
             textDirection: TextDirection.rtl,
             child: AlertDialog(
               title: const Text('تمديد الاشتراك'),
               content: loading
-                  ? const SizedBox(height: 80, child: Center(child: CircularProgressIndicator()))
+                  ? const SizedBox(
+                      height: 80,
+                      child: Center(child: CircularProgressIndicator()),
+                    )
                   : loadError != null
-                      ? Column(mainAxisSize: MainAxisSize.min, children: [
-                          Text('تعذر جلب الباقات: $loadError'),
-                          TextButton.icon(
-                            onPressed: () {
-                              setLocal(() { loading = true; loadError = null; });
-                              loadProfiles();
-                            },
-                            icon: const Icon(Icons.refresh),
-                            label: const Text('إعادة المحاولة'),
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('تعذر جلب الباقات: $loadError'),
+                        TextButton.icon(
+                          onPressed: () {
+                            setLocal(() {
+                              loading = true;
+                              loadError = null;
+                            });
+                            loadProfiles();
+                          },
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('إعادة المحاولة'),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DropdownButtonFormField<int>(
+                          initialValue: selectedProfileId,
+                          decoration: _greenDropdownDecoration(
+                            'اختر الباقة',
+                            Icons.inventory_2_outlined,
                           ),
-                        ])
-                      : Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            DropdownButtonFormField<int>(
-                              initialValue: selectedProfileId,
-                              decoration: _greenDropdownDecoration('اختر الباقة', Icons.inventory_2_outlined),
-                              dropdownColor: const Color(0xFFF8FFF9),
-                              iconEnabledColor: Colors.black87,
-                              style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600),
-                              items: profiles.where((p) => idOf(p) != null).map((p) =>
-                                DropdownMenuItem<int>(
+                          dropdownColor: Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainer,
+                          iconEnabledColor: Theme.of(
+                            context,
+                          ).colorScheme.onSurfaceVariant,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          items: profiles
+                              .where((p) => idOf(p) != null)
+                              .map(
+                                (p) => DropdownMenuItem<int>(
                                   value: idOf(p),
                                   child: Text(nameOf(p)),
-                                )
-                              ).toList(),
-                              onChanged: (v) => setLocal(() => selectedProfileId = v),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) =>
+                              setLocal(() => selectedProfileId = v),
+                        ),
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<String>(
+                          initialValue: selectedMethod,
+                          decoration: _greenDropdownDecoration(
+                            'نوع التمديد',
+                            Icons.autorenew,
+                          ),
+                          dropdownColor: Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainer,
+                          iconEnabledColor: Theme.of(
+                            context,
+                          ).colorScheme.onSurfaceVariant,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'credit',
+                              child: Text('رصيد المدير'),
                             ),
-                            const SizedBox(height: 16),
-                            DropdownButtonFormField<String>(
-                              initialValue: selectedMethod,
-                              decoration: _greenDropdownDecoration('نوع التمديد', Icons.autorenew),
-                              dropdownColor: const Color(0xFFF8FFF9),
-                              iconEnabledColor: Colors.black87,
-                              style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'credit',
-                                  child: Text('رصيد المدير'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'reward_points',
-                                  child: Text('النقاط التشجيعية'),
-                                ),
-                              ],
-                              onChanged: (v) {
-                                if (v != null) setLocal(() => selectedMethod = v);
-                              },
+                            DropdownMenuItem(
+                              value: 'reward_points',
+                              child: Text('النقاط التشجيعية'),
                             ),
                           ],
+                          onChanged: (v) {
+                            if (v != null) setLocal(() => selectedMethod = v);
+                          },
                         ),
+                      ],
+                    ),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('إلغاء'),
+                ),
                 FilledButton(
-                  onPressed: loading || selectedProfileId == null ? null : () async {
-                    final rawUserId = s.sasId.trim().isNotEmpty
-                        ? s.sasId.trim()
-                        : (s.sasData['id'] ?? s.sasData['user_id'] ?? '').toString().trim();
-                    final userId = int.tryParse(rawUserId);
-                    if (userId == null) {
-                      if (ctx.mounted) {
-                        Navigator.pop(ctx);
-                      }
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('لا يوجد SAS ID صحيح للمشترك')),
-                        );
-                      }
-                      return;
-                    }
-                    try {
-                      final settings = await SasSettings.load();
-                      final api = SasApiService(settings);
-                      final transactionId = _newGuid();
+                  onPressed: loading || selectedProfileId == null
+                      ? null
+                      : () async {
+                          final rawUserId = s.sasId.trim().isNotEmpty
+                              ? s.sasId.trim()
+                              : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
+                                    .toString()
+                                    .trim();
+                          final userId = int.tryParse(rawUserId);
+                          if (userId == null) {
+                            if (ctx.mounted) {
+                              Navigator.pop(ctx);
+                            }
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('لا يوجد SAS ID صحيح للمشترك'),
+                                ),
+                              );
+                            }
+                            return;
+                          }
+                          try {
+                            final settings = await SasSettings.load();
+                            final api = SasApiService(settings);
+                            final transactionId = _newGuid();
 
-                      await api.extendUser(
-                        userId: userId,
-                        profileId: selectedProfileId!,
-                        method: selectedMethod,
-                        transactionId: transactionId,
-                      ).timeout(const Duration(seconds: 30),
-                        onTimeout: () => throw Exception('انتهت مهلة طلب التمديد'));
-                      if (ctx.mounted) Navigator.pop(ctx);
+                            await api
+                                .extendUser(
+                                  userId: userId,
+                                  profileId: selectedProfileId!,
+                                  method: selectedMethod,
+                                  transactionId: transactionId,
+                                )
+                                .timeout(
+                                  const Duration(seconds: 30),
+                                  onTimeout: () =>
+                                      throw Exception('انتهت مهلة طلب التمديد'),
+                                );
+                            if (ctx.mounted) Navigator.pop(ctx);
 
-                      // v091: لا ننتظر مزامنة جميع المشتركين بعد التمديد.
-                      // نجلب المشترك نفسه فقط، ثم نحدّث الواجهة فوراً.
-                      try {
-                        final fresh = await api.fetchUser(userId);
-                        if (fresh is Map) {
-                          s.sasData = Map<String, dynamic>.from(fresh);
-                          final endRaw = fresh['expiration'] ??
-                              fresh['expiration_date'] ??
-                              fresh['expires_at'] ??
-                              fresh['end_date'];
-                          final parsedEnd = DateTime.tryParse((endRaw ?? '').toString());
-                          if (parsedEnd != null) s.endDate = parsedEnd;
-                          await AppStore.save();
-                        }
-                      } catch (_) {
-                        // نجاح التمديد لا يُلغى إذا تعذر تحديث التفاصيل اللحظي.
-                      }
-                      if (mounted) setState(() {});
+                            // v091: لا ننتظر مزامنة جميع المشتركين بعد التمديد.
+                            // نجلب المشترك نفسه فقط، ثم نحدّث الواجهة فوراً.
+                            try {
+                              final fresh = await api.fetchUser(userId);
+                              if (fresh is Map) {
+                                s.sasData = Map<String, dynamic>.from(fresh);
+                                final endRaw =
+                                    fresh['expiration'] ??
+                                    fresh['expiration_date'] ??
+                                    fresh['expires_at'] ??
+                                    fresh['end_date'];
+                                final parsedEnd = DateTime.tryParse(
+                                  (endRaw ?? '').toString(),
+                                );
+                                if (parsedEnd != null) s.endDate = parsedEnd;
+                                await AppStore.save();
+                              }
+                            } catch (_) {
+                              // نجاح التمديد لا يُلغى إذا تعذر تحديث التفاصيل اللحظي.
+                            }
+                            if (mounted) setState(() {});
 
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'تم تمديد المشترك في SAS بنجاح',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (mounted) {
-                        final msg = e.toString().contains('الرصيد غير كافٍ')
-                            ? 'الرصيد غير كافٍ' : 'فشل التمديد في SAS: $e';
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              msg,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                            ),
-                            duration: const Duration(seconds: 4),
-                          ),
-                        );
-                      }
-                    }
-                  },
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'تم تمديد المشترك في SAS بنجاح',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (mounted) {
+                              final msg =
+                                  e.toString().contains('الرصيد غير كافٍ')
+                                  ? 'الرصيد غير كافٍ'
+                                  : 'فشل التمديد في SAS: $e';
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    msg,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  duration: const Duration(seconds: 4),
+                                ),
+                              );
+                            }
+                          }
+                        },
                   child: const Text('تمديد'),
                 ),
               ],
@@ -1165,136 +1328,195 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       final settings = await SasSettings.load();
       final api = SasApiService(settings);
       if (!mounted) return;
-      showDialog(context: context, barrierDismissible: false,
-        builder: (_) => const Center(child: CircularProgressIndicator()));
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
 
-      final profiles = await api.fetchProfiles().timeout(const Duration(seconds: 30));
+      final profiles = await api.fetchProfiles().timeout(
+        const Duration(seconds: 30),
+      );
       if (mounted) Navigator.pop(context);
       if (!mounted) return;
 
-      int? idOf(Map<String,dynamic> p) =>
+      int? idOf(Map<String, dynamic> p) =>
           int.tryParse((p['id'] ?? p['profile_id'] ?? '').toString());
-      String nameOf(Map<String,dynamic> p) =>
+      String nameOf(Map<String, dynamic> p) =>
           (p['name'] ?? p['profile_name'] ?? 'بدون اسم').toString();
       final usable = profiles.where((p) => idOf(p) != null).toList();
 
-      final selected = await showDialog<Map<String,dynamic>>(
+      final selected = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (ctx) => Directionality(
           textDirection: TextDirection.rtl,
           child: AlertDialog(
             title: Text('تغيير باقة ${s.name}'),
-            content: SizedBox(width: 420, child: ListView.separated(
-              shrinkWrap: true,
-              itemCount: usable.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (_,i) {
-                final p=usable[i];
-                return ListTile(
-                  leading: const Icon(Icons.speed_outlined),
-                  title: Text(nameOf(p)),
-                  subtitle: Text('ID: ${idOf(p)}'),
-                  onTap: () => Navigator.pop(ctx,p),
-                );
-              },
-            )),
-            actions: [TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text('إلغاء'))],
+            content: SizedBox(
+              width: 420,
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: usable.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (_, i) {
+                  final p = usable[i];
+                  return ListTile(
+                    leading: const Icon(Icons.speed_outlined),
+                    title: Text(nameOf(p)),
+                    subtitle: Text('ID: ${idOf(p)}'),
+                    onTap: () => Navigator.pop(ctx, p),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إلغاء'),
+              ),
+            ],
           ),
         ),
       );
       if (selected == null || !mounted) return;
 
-      final profileId=idOf(selected)!;
-      final profileName=nameOf(selected);
-      final ok=await showDialog<bool>(
+      final profileId = idOf(selected)!;
+      final profileName = nameOf(selected);
+      final ok = await showDialog<bool>(
         context: context,
-        builder:(ctx)=>Directionality(
+        builder: (ctx) => Directionality(
           textDirection: TextDirection.rtl,
           child: AlertDialog(
             title: const Text('تأكيد تغيير الباقة'),
             content: Text('تغيير باقة ${s.name} إلى $profileName الآن؟'),
-            actions:[
-              TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('إلغاء')),
-              FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('تغيير')),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('تغيير'),
+              ),
             ],
           ),
         ),
       );
-      if(ok!=true || !mounted) return;
+      if (ok != true || !mounted) return;
 
-      showDialog(context: context, barrierDismissible:false,
-        builder:(_)=>const Center(child:CircularProgressIndicator()));
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
 
-      await api.changeUserProfile(
-        userId:userId, profileId:profileId, changeType:'immediate'
-      ).timeout(const Duration(seconds:30));
+      await api
+          .changeUserProfile(
+            userId: userId,
+            profileId: profileId,
+            changeType: 'immediate',
+          )
+          .timeout(const Duration(seconds: 30));
 
       try {
-        final overview=await api.fetchUserOverview(userId);
-        if(overview is Map) s.sasData.addAll(Map<String,dynamic>.from(overview));
-      } catch(_) {}
+        final overview = await api.fetchUserOverview(userId);
+        if (overview is Map)
+          s.sasData.addAll(Map<String, dynamic>.from(overview));
+      } catch (_) {}
 
       s.setPackageValue(profileName);
       await AppStore.save();
-      if(mounted) Navigator.pop(context);
-      if(!mounted) return;
-      setState((){});
+      if (mounted) Navigator.pop(context);
+      if (!mounted) return;
+      setState(() {});
 
-      final isExpired=s.endDate.isBefore(DateTime.now()) || s.expired;
-      if(isExpired){
-        final activate=await showDialog<bool>(
-          context:context,
-          builder:(ctx)=>Directionality(
-            textDirection:TextDirection.rtl,
-            child:AlertDialog(
-              title:const Text('تم تغيير الباقة بنجاح'),
-              content:const Text('المشترك منتهي الاشتراك. تغيير الباقة لا يفعّله تلقائياً.\nهل تريد تفعيله الآن؟'),
-              actions:[
-                TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('لاحقاً')),
-                FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('تفعيل الآن')),
+      final isExpired = s.endDate.isBefore(DateTime.now()) || s.expired;
+      if (isExpired) {
+        final activate = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => Directionality(
+            textDirection: TextDirection.rtl,
+            child: AlertDialog(
+              title: const Text('تم تغيير الباقة بنجاح'),
+              content: const Text(
+                'المشترك منتهي الاشتراك. تغيير الباقة لا يفعّله تلقائياً.\nهل تريد تفعيله الآن؟',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('لاحقاً'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('تفعيل الآن'),
+                ),
               ],
             ),
           ),
         );
-        if(activate==true && mounted){
-          showDialog(context:context,barrierDismissible:false,
-            builder:(_)=>const Center(child:CircularProgressIndicator()));
-          final activationResponse = await api.activateUser(userId)
-              .timeout(const Duration(seconds:30));
-          s.active=true; s.disabled=false;
-          _setStartDateAsActivationDay(s);
-          await AppStore.addDailyTaskEvent(
-            DailyTaskEvent(
-              type: 'activation',
+        if (activate == true && mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => const Center(child: CircularProgressIndicator()),
+          );
+          final activationResponse = await api
+              .activateUser(userId)
+              .timeout(const Duration(seconds: 30));
+          s.active = true;
+          s.disabled = false;
+          final activatedAt =
+              SasSyncService.activationDateFromSas(activationResponse) ??
+              DateTime.now();
+          _setStartDateAsActivationDay(s, at: activatedAt);
+          final activationAmount = _activationReceivedAmount(
+            activationResponse,
+          );
+          await AppStore.addAccountingActivation(
+            AccountingActivationRecord(
               subscriberUser: s.user,
               subscriberName: s.name,
-              at: DateTime.now(),
-              amount: _activationReceivedAmount(activationResponse, s),
-              remainingAfter: s.remaining,
-              note: 'تفعيل بعد تغيير الباقة',
+              packageName: s.packageDisplay,
+              saleAmount: s.price,
+              sasDeduction: activationAmount,
+              at: activatedAt,
             ),
             persist: false,
           );
+          for (final event in DailyTaskEvent.activationSettlement(
+            subscriberUser: s.user,
+            subscriberName: s.name,
+            at: activatedAt,
+            collected: s.paid,
+            remaining: s.remaining,
+            note: 'تفعيل بعد تغيير الباقة',
+          )) {
+            await AppStore.addDailyTaskEvent(event, persist: false);
+          }
           await AppStore.save();
-          if(mounted) Navigator.pop(context);
+          if (mounted) Navigator.pop(context);
           await _sendActivationWhatsApp(s);
           if (!mounted) return;
-          if(mounted){
-            setState((){});
+          if (mounted) {
+            setState(() {});
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content:Text('تم تغيير الباقة وتفعيل المشترك في SAS بنجاح')));
+              const SnackBar(
+                content: Text('تم تغيير الباقة وتفعيل المشترك في SAS بنجاح'),
+              ),
+            );
           }
         }
       } else {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content:Text('تم تغيير الباقة إلى $profileName بنجاح')),
+          SnackBar(content: Text('تم تغيير الباقة إلى $profileName بنجاح')),
         );
       }
-    } catch(e) {
-      if(mounted){
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content:Text('فشل تغيير الباقة: $e')));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('فشل تغيير الباقة: $e')));
       }
     }
   }
@@ -1315,50 +1537,76 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               children: [
                 TextField(
                   controller: price,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'مبلغ الاشتراك', border: OutlineInputBorder()),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'مبلغ الاشتراك',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: paid,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   onChanged: (_) => setLocal(() {}),
-                  decoration: const InputDecoration(labelText: 'الواصل', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                    labelText: 'الواصل',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
                 const SizedBox(height: 8),
-                Builder(builder: (_) {
-                  final priceAmount = _parseAmount(price.text.trim()) ?? s.price;
-                  final paidAmount = _parseAmount(paid.text.trim()) ?? s.paid;
-                  final targetPaidAmount = (paidAmount).clamp(0, priceAmount);
-                  final previewRemaining = (priceAmount - targetPaidAmount).clamp(0, double.infinity);
-                  return Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('مبلغ الاشتراك: ${priceAmount.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 6),
-                        Text('الواصل: ${targetPaidAmount.toStringAsFixed(0)}'),
-                        const SizedBox(height: 6),
-                        Text('المتبقي: ${previewRemaining.toStringAsFixed(0)}'),
-                      ],
-                    ),
-                  );
-                }),
+                Builder(
+                  builder: (_) {
+                    final priceAmount =
+                        _parseAmount(price.text.trim()) ?? s.price;
+                    final paidAmount = _parseAmount(paid.text.trim()) ?? s.paid;
+                    final targetPaidAmount = (paidAmount).clamp(0, priceAmount);
+                    final previewRemaining = (priceAmount - targetPaidAmount)
+                        .clamp(0, double.infinity);
+                    return Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'مبلغ الاشتراك: ${priceAmount.toStringAsFixed(0)}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'الواصل: ${targetPaidAmount.toStringAsFixed(0)}',
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'المتبقي: ${previewRemaining.toStringAsFixed(0)}',
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إلغاء'),
+              ),
               FilledButton(
                 onPressed: () async {
-                  final oldPrice = s.price;
                   final oldPaid = s.paid;
                   final oldRemaining = s.remaining;
+                  final hadRecordedActivation = AppStore.hasRecordedActivation(
+                    s,
+                  );
                   final newPrice = _parseAmount(price.text.trim());
                   final newPaidAmount = _parseAmount(paid.text.trim());
                   if (newPrice == null || newPrice < 0) {
@@ -1382,33 +1630,46 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   s.normalizeDebtFields();
 
                   final now = DateTime.now();
-                  final targetPaidAmount = newPaidAmount.clamp(0, newPrice).toDouble();
+                  final targetPaidAmount = newPaidAmount
+                      .clamp(0, newPrice)
+                      .toDouble();
                   final delta = s.adjustPaidToTarget(
                     targetPaidAmount,
                     at: now,
                     increaseNote: 'تعديل الواصل من شاشة الديون',
                     decreaseNote: 'تخفيض الواصل من شاشة الديون',
                   );
-                  if (delta.abs() <= 0.0001) {
+                  final addedDebt = DailyTaskEvent.addedDebtAmount(
+                    previousRemaining: oldRemaining,
+                    currentRemaining: s.remaining,
+                  );
+                  if (delta.abs() <= 0.0001 && addedDebt <= 0.0001) {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('لا يوجد تعديل فعلي على الديون')),
+                        const SnackBar(
+                          content: Text('لا يوجد تعديل فعلي على الديون'),
+                        ),
                       );
                     }
                     return;
                   }
 
-                  final receiptNumber = await AppStore.issueReceiptNumber(persist: false);
-                  final invoice = s.registerInvoiceFromPayment(
-                    receiptNumber: receiptNumber,
-                    amount: delta.abs(),
-                    at: now,
-                    note: s.remaining <= 0.0001
-                        ? 'تعديل تسديد كامل'
-                        : 'تعديل تسديد جزئي',
-                  );
+                  InvoiceRecord? invoice;
+                  if (delta.abs() > 0.0001) {
+                    final receiptNumber = await AppStore.issueReceiptNumber(
+                      persist: false,
+                    );
+                    invoice = s.registerInvoiceFromPayment(
+                      receiptNumber: receiptNumber,
+                      amount: delta.abs(),
+                      at: now,
+                      note: s.remaining <= 0.0001
+                          ? 'تعديل تسديد كامل'
+                          : 'تعديل تسديد جزئي',
+                    );
+                  }
 
-                  if (delta > 0) {
+                  if (delta > 0 && hadRecordedActivation) {
                     await AppStore.addDailyTaskEvent(
                       DailyTaskEvent(
                         type: 'debt_payment',
@@ -1425,7 +1686,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     );
                   }
 
-                  final addedDebt = newPrice - oldPrice;
                   if (addedDebt > 0.0001) {
                     await AppStore.addDailyTaskEvent(
                       DailyTaskEvent(
@@ -1449,10 +1709,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   if (autoOpenReceiptAfterSave && mounted) {
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => ReceiptScreen(
-                          subscriber: s,
-                          invoice: invoice,
-                        ),
+                        builder: (_) =>
+                            ReceiptScreen(subscriber: s, invoice: invoice),
                       ),
                     );
                   }
@@ -1516,7 +1774,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   subtitle: const Text('عرض عدد الأيام المتبقية للاشتراك'),
                   value: _columnVisibility['remainingDays'] == true,
                   onChanged: (v) {
-                    setLocal(() => _columnVisibility['remainingDays'] = v ?? false);
+                    setLocal(
+                      () => _columnVisibility['remainingDays'] = v ?? false,
+                    );
                     setState(() {});
                     _saveColumnPreferences();
                   },
@@ -1544,7 +1804,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           title: const Text('حذف المشترك'),
           content: Text('هل تريد حذف ${s.name}؟'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
             FilledButton(
               onPressed: () async {
                 AppStore.subscribers.remove(s);
@@ -1564,19 +1827,32 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   String _sasText(Subscriber s, List<String> keys, [String fallback = '—']) {
     for (final key in keys) {
       final v = s.sasData[key];
-      if (v != null && v.toString().trim().isNotEmpty) return v.toString().trim();
+      if (v != null && v.toString().trim().isNotEmpty)
+        return v.toString().trim();
     }
     return fallback;
   }
 
   Future<void> _showAdvancedSearch() async {
-    final packages = AppStore.subscribers.map((e) => e.packageDisplay.trim())
-        .where((e) => e.isNotEmpty).toSet().toList()..sort();
-    final parents = AppStore.subscribers.map(_parentText)
-        .where((e) => e.isNotEmpty).toSet().toList()..sort();
+    final packages =
+        AppStore.subscribers
+            .map((e) => e.packageDisplay.trim())
+            .where((e) => e.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    final parents =
+        AppStore.subscribers
+            .map(_parentText)
+            .where((e) => e.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
 
     var status = _advancedStatus;
-    var package = packages.contains(_advancedPackage) ? _advancedPackage : 'الكل';
+    var package = packages.contains(_advancedPackage)
+        ? _advancedPackage
+        : 'الكل';
     var parent = parents.contains(_advancedParent) ? _advancedParent : 'الكل';
     var connection = _advancedConnection;
     var includeSubs = _includeSubUsers;
@@ -1587,11 +1863,13 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         builder: (ctx, setLocal) => Directionality(
           textDirection: TextDirection.rtl,
           child: AlertDialog(
-            title: const Row(children: [
-              Icon(Icons.filter_alt_outlined),
-              SizedBox(width: 8),
-              Text('البحث المتقدم'),
-            ]),
+            title: const Row(
+              children: [
+                Icon(Icons.filter_alt_outlined),
+                SizedBox(width: 8),
+                Text('البحث المتقدم'),
+              ],
+            ),
             content: SizedBox(
               width: 480,
               child: SingleChildScrollView(
@@ -1600,52 +1878,109 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   children: [
                     DropdownButtonFormField<String>(
                       initialValue: status,
-                      decoration: _greenDropdownDecoration('الحالة', Icons.info_outline),
-                      dropdownColor: const Color(0xFFF8FFF9),
+                      decoration: _greenDropdownDecoration(
+                        'الحالة',
+                        Icons.info_outline,
+                      ),
+                      dropdownColor: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainer,
                       iconEnabledColor: const Color(0xFF2E7D32),
-                      style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w600),
-                        items: const ['الكل','فعال','منتهي الصلاحية','معطل','ينتهي قريباً','خلال 3 أيام','ينتهي اشتراكهم اليوم']
-                          .map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                      style: const TextStyle(
+                        color: Color(0xFF2E7D32),
+                        fontWeight: FontWeight.w600,
+                      ),
+                      items:
+                          const [
+                                'الكل',
+                                'فعال',
+                                'منتهي الصلاحية',
+                                'معطل',
+                                'ينتهي قريباً',
+                                'خلال 3 أيام',
+                                'ينتهي اشتراكهم اليوم',
+                              ]
+                              .map(
+                                (e) =>
+                                    DropdownMenuItem(value: e, child: Text(e)),
+                              )
+                              .toList(),
                       onChanged: (v) => setLocal(() => status = v ?? 'الكل'),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: connection,
-                      decoration: _greenDropdownDecoration('الاتصال', Icons.wifi_outlined),
-                      dropdownColor: const Color(0xFFF8FFF9),
+                      decoration: _greenDropdownDecoration(
+                        'الاتصال',
+                        Icons.wifi_outlined,
+                      ),
+                      dropdownColor: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainer,
                       iconEnabledColor: const Color(0xFF2E7D32),
-                      style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        color: Color(0xFF2E7D32),
+                        fontWeight: FontWeight.w600,
+                      ),
                       items: const ['الكل', 'متصل', 'غير متصل']
-                          .map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                      onChanged: (v) => setLocal(() => connection = v ?? 'الكل'),
+                          .map(
+                            (e) => DropdownMenuItem(value: e, child: Text(e)),
+                          )
+                          .toList(),
+                      onChanged: (v) =>
+                          setLocal(() => connection = v ?? 'الكل'),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: package,
-                      decoration: _greenDropdownDecoration('الباقة', Icons.inventory_2_outlined),
-                      dropdownColor: const Color(0xFFF8FFF9),
+                      decoration: _greenDropdownDecoration(
+                        'الباقة',
+                        Icons.inventory_2_outlined,
+                      ),
+                      dropdownColor: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainer,
                       iconEnabledColor: const Color(0xFF2E7D32),
-                      style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        color: Color(0xFF2E7D32),
+                        fontWeight: FontWeight.w600,
+                      ),
                       items: ['الكل', ...packages]
-                          .map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                          .map(
+                            (e) => DropdownMenuItem(value: e, child: Text(e)),
+                          )
+                          .toList(),
                       onChanged: (v) => setLocal(() => package = v ?? 'الكل'),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: parent,
-                      decoration: _greenDropdownDecoration('تابع إلى', Icons.person_outline),
-                      dropdownColor: const Color(0xFFF8FFF9),
+                      decoration: _greenDropdownDecoration(
+                        'تابع إلى',
+                        Icons.person_outline,
+                      ),
+                      dropdownColor: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainer,
                       iconEnabledColor: const Color(0xFF2E7D32),
-                      style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        color: Color(0xFF2E7D32),
+                        fontWeight: FontWeight.w600,
+                      ),
                       items: ['الكل', ...parents]
-                          .map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                          .map(
+                            (e) => DropdownMenuItem(value: e, child: Text(e)),
+                          )
+                          .toList(),
                       onChanged: (v) => setLocal(() => parent = v ?? 'الكل'),
                     ),
                     const SizedBox(height: 12),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('المشتركين الفرعيين'),
-                      subtitle: const Text('تضمين المشتركين الفرعيين في النتائج'),
+                      subtitle: const Text(
+                        'تضمين المشتركين الفرعيين في النتائج',
+                      ),
                       value: includeSubs,
                       onChanged: (v) => setLocal(() => includeSubs = v),
                     ),
@@ -1702,7 +2037,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
   }
 
-  Widget _summaryChip({required IconData icon, required String label, required String value, required Color color}) {
+  Widget _summaryChip({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -1715,9 +2055,15 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         children: [
           Icon(icon, size: 16, color: color),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+          Text(
+            label,
+            style: TextStyle(color: color, fontWeight: FontWeight.w600),
+          ),
           const SizedBox(width: 6),
-          Text(value, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
+          Text(
+            value,
+            style: TextStyle(color: color, fontWeight: FontWeight.bold),
+          ),
         ],
       ),
     );
@@ -1726,10 +2072,13 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   @override
   Widget build(BuildContext context) {
     final data = _filteredSubscribers;
-    final tableWidth = max(946.0, MediaQuery.of(context).size.width - 48);
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final green = const Color(0xFF2E7D32);
     final greenSoft = const Color(0xFFD8F3DC);
-    final activeCount = data.where((s) => s.isActive && !s.disabled && !s.expired).length;
+    final activeCount = data
+        .where((s) => s.isActive && !s.disabled && !s.expired)
+        .length;
     final expiringSoonCount = data.where((s) {
       if (s.disabled || s.expired) return false;
       final days = s.endDate.difference(DateTime.now()).inDays;
@@ -1745,7 +2094,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         setState(() => selected = s);
         await Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => SubscriberDetailsScreen(subscriber: s)),
+          MaterialPageRoute(
+            builder: (_) => SubscriberDetailsScreen(subscriber: s),
+          ),
         );
         if (mounted) setState(() {});
       },
@@ -1766,7 +2117,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           case 'edit':
             final changed = await Navigator.push<bool>(
               context,
-              MaterialPageRoute(builder: (_) => AddSubscriberScreen(subscriber: s)),
+              MaterialPageRoute(
+                builder: (_) => AddSubscriberScreen(subscriber: s),
+              ),
             );
             if (changed == true && mounted) setState(() {});
             break;
@@ -1779,26 +2132,33 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           case 'disable':
             final rawId = s.sasId.trim().isNotEmpty
                 ? s.sasId.trim()
-                : (s.sasData['id'] ?? s.sasData['user_id'] ?? '').toString().trim();
+                : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
+                      .toString()
+                      .trim();
             final userId = int.tryParse(rawId);
             if (userId == null) {
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('تعذر التعطيل: لا يوجد SAS ID صحيح للمشترك')),
+                  const SnackBar(
+                    content: Text('تعذر التعطيل: لا يوجد SAS ID صحيح للمشترك'),
+                  ),
                 );
               }
               break;
             }
             try {
               final settings = await SasSettings.load();
-              if (settings.username.trim().isEmpty || settings.password.isEmpty) {
+              if (settings.username.trim().isEmpty ||
+                  settings.password.isEmpty) {
                 throw Exception('أكمل إعدادات ربط SAS أولاً');
               }
               final api = SasApiService(settings);
-              await api.disableUser(userId).timeout(
-                const Duration(seconds: 30),
-                onTimeout: () => throw Exception('انتهت مهلة طلب التعطيل'),
-              );
+              await api
+                  .disableUser(userId)
+                  .timeout(
+                    const Duration(seconds: 30),
+                    onTimeout: () => throw Exception('انتهت مهلة طلب التعطيل'),
+                  );
               s.disabled = true;
               s.active = false;
               await AppStore.save();
@@ -1814,26 +2174,36 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           case 'enable':
             final rawId = s.sasId.trim().isNotEmpty
                 ? s.sasId.trim()
-                : (s.sasData['id'] ?? s.sasData['user_id'] ?? '').toString().trim();
+                : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
+                      .toString()
+                      .trim();
             final userId = int.tryParse(rawId);
             if (userId == null) {
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('تعذر إلغاء التعطيل: لا يوجد SAS ID صحيح للمشترك')),
+                  const SnackBar(
+                    content: Text(
+                      'تعذر إلغاء التعطيل: لا يوجد SAS ID صحيح للمشترك',
+                    ),
+                  ),
                 );
               }
               break;
             }
             try {
               final settings = await SasSettings.load();
-              if (settings.username.trim().isEmpty || settings.password.isEmpty) {
+              if (settings.username.trim().isEmpty ||
+                  settings.password.isEmpty) {
                 throw Exception('أكمل إعدادات ربط SAS أولاً');
               }
               final api = SasApiService(settings);
-              await api.enableUser(userId).timeout(
-                const Duration(seconds: 30),
-                onTimeout: () => throw Exception('انتهت مهلة طلب إلغاء التعطيل'),
-              );
+              await api
+                  .enableUser(userId)
+                  .timeout(
+                    const Duration(seconds: 30),
+                    onTimeout: () =>
+                        throw Exception('انتهت مهلة طلب إلغاء التعطيل'),
+                  );
               s.disabled = false;
               s.active = true;
               await AppStore.save();
@@ -1864,7 +2234,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           case 'details':
             await Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => SubscriberDetailsScreen(subscriber: s)),
+              MaterialPageRoute(
+                builder: (_) => SubscriberDetailsScreen(subscriber: s),
+              ),
             );
             if (mounted) setState(() {});
             break;
@@ -1886,14 +2258,22 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               tooltip: 'تحديث',
               onPressed: syncing || _isRefreshing ? null : _refreshSubscribers,
               icon: syncing || _isRefreshing
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Icon(Icons.refresh),
             ),
             IconButton(
               tooltip: 'مزامنة SAS الآن',
               onPressed: syncing || _isRefreshing ? null : syncNow,
               icon: syncing || _isRefreshing
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Icon(Icons.sync),
             ),
           ],
@@ -1921,7 +2301,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                     ),
-                    border: Border(bottom: BorderSide(color: Colors.grey.shade200, width: 1)),
+                    border: Border(
+                      bottom: BorderSide(color: Colors.grey.shade200, width: 1),
+                    ),
                   ),
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                   child: Column(
@@ -1935,31 +2317,45 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                               children: [
                                 Text(
                                   'قائمة المشتركين',
-                                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                                  style: Theme.of(context).textTheme.titleLarge
+                                      ?.copyWith(fontWeight: FontWeight.bold),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
                                   'إدارة وتنظيم المشتركين',
-                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: Colors.grey.shade600),
                                 ),
                               ],
                             ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
+                            ),
                             decoration: BoxDecoration(
                               color: greenSoft.withValues(alpha: 0.85),
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: green.withValues(alpha: 0.3)),
+                              border: Border.all(
+                                color: green.withValues(alpha: 0.3),
+                              ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.people_alt_outlined, size: 18, color: green),
+                                Icon(
+                                  Icons.people_alt_outlined,
+                                  size: 18,
+                                  color: green,
+                                ),
                                 const SizedBox(width: 6),
                                 Text(
                                   '${data.length}',
-                                  style: TextStyle(fontWeight: FontWeight.bold, color: green),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: green,
+                                  ),
                                 ),
                               ],
                             ),
@@ -2012,15 +2408,20 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                   icon: const Icon(Icons.clear_rounded),
                                 ),
                           filled: true,
-                          fillColor: Colors.white,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          fillColor: colorScheme.surfaceContainerHighest,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide(color: Colors.grey.shade300),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey.shade300),
+                            borderSide: BorderSide(
+                              color: colorScheme.outlineVariant,
+                            ),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -2029,54 +2430,101 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: FilledButton.icon(
-                              onPressed: selected == null ? null : operations,
-                              icon: const Icon(Icons.settings_outlined, size: 18),
-                              label: const Text('عمليات سريعة'),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: green,
-                                foregroundColor: Colors.white,
-                                minimumSize: const Size(0, 48),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final isPhone = constraints.maxWidth < 520;
+                          final availableWidth = constraints.maxWidth - 16;
+                          final secondaryWidth = isPhone
+                              ? (constraints.maxWidth - 8) / 2
+                              : availableWidth * 2 / 6;
+                          final moreWidth = isPhone
+                              ? secondaryWidth
+                              : availableWidth / 6;
+
+                          return Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              SizedBox(
+                                width: isPhone
+                                    ? constraints.maxWidth
+                                    : availableWidth * 3 / 6,
+                                height: 48,
+                                child: FilledButton.icon(
+                                  onPressed: selected == null
+                                      ? null
+                                      : operations,
+                                  icon: const Icon(
+                                    Icons.settings_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const Text('عمليات سريعة'),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: green,
+                                    foregroundColor: Colors.white,
+                                    minimumSize: const Size(0, 48),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 12,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 2,
-                            child: OutlinedButton.icon(
-                              onPressed: _showAdvancedSearch,
-                              icon: const Icon(Icons.filter_alt_outlined, size: 18),
-                              label: const Text('تصفية'),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: green,
-                                side: BorderSide(color: green.withValues(alpha: 0.35)),
-                                backgroundColor: greenSoft.withValues(alpha: 0.2),
-                                minimumSize: const Size(0, 48),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                              SizedBox(
+                                width: secondaryWidth,
+                                height: 48,
+                                child: OutlinedButton.icon(
+                                  onPressed: _showAdvancedSearch,
+                                  icon: const Icon(
+                                    Icons.filter_alt_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const Text('تصفية'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: green,
+                                    side: BorderSide(
+                                      color: green.withValues(alpha: 0.35),
+                                    ),
+                                    backgroundColor: greenSoft.withValues(
+                                      alpha: 0.2,
+                                    ),
+                                    minimumSize: const Size(0, 48),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 12,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: _showColumnSelector,
-                              icon: const Icon(Icons.view_column_outlined, size: 18),
-                              label: const Text('المزيد'),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: green,
-                                side: BorderSide(color: green.withValues(alpha: 0.35)),
-                                backgroundColor: greenSoft.withValues(alpha: 0.2),
-                                minimumSize: const Size(0, 48),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                              SizedBox(
+                                width: moreWidth,
+                                height: 48,
+                                child: OutlinedButton.icon(
+                                  onPressed: _showColumnSelector,
+                                  icon: const Icon(
+                                    Icons.view_column_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const Text('المزيد'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: green,
+                                    side: BorderSide(
+                                      color: green.withValues(alpha: 0.35),
+                                    ),
+                                    backgroundColor: greenSoft.withValues(
+                                      alpha: 0.2,
+                                    ),
+                                    minimumSize: const Size(0, 48),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 12,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ],
+                            ],
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -2088,163 +2536,275 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.people_outline, size: 64, color: Colors.grey.shade300),
+                        Icon(
+                          Icons.people_outline,
+                          size: 64,
+                          color: Colors.grey.shade300,
+                        ),
                         const SizedBox(height: 16),
                         Text(
                           'لا توجد مشتركين',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.grey.shade600),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(color: Colors.grey.shade600),
                         ),
                       ],
                     ),
                   )
                 else
-                  Card(
-                    margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    elevation: 2,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Scrollbar(
-                        controller: _horizontalScrollController,
-                        thumbVisibility: true,
-                          child: SingleChildScrollView(
-                          controller: _horizontalScrollController,
-                          scrollDirection: Axis.horizontal,
-                          child: SizedBox(
-                            width: tableWidth,
-                            child: Theme(
-                              data: Theme.of(context).copyWith(
-                                dataTableTheme: DataTableThemeData(
-                                  headingRowColor: WidgetStateProperty.all(
-                                    greenSoft.withValues(alpha: 0.85),
-                                  ),
-                                  headingRowHeight: 56,
-                                  dataRowMinHeight: 64,
-                                  dataRowMaxHeight: 64,
-                                  dividerThickness: 1,
-                                  headingTextStyle: const TextStyle(
-                                    color: Color(0xFF2E7D32),
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: Card(
+                      margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      elevation: 2,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: Theme(
+                          data: Theme.of(context).copyWith(
+                            dataTableTheme: DataTableThemeData(
+                              headingRowColor: WidgetStateProperty.all(
+                                isDark
+                                    ? const Color(0xFF263449)
+                                    : greenSoft.withValues(alpha: 0.85),
                               ),
-                              child: PaginatedDataTable(
-                                showCheckboxColumn: false,
-                                horizontalMargin: 8,
-                                columnSpacing: 8,
-                                rowsPerPage: _rowsPerPage,
-                                availableRowsPerPage: const [10, 50, 500],
-                                onRowsPerPageChanged: (value) {
-                                  if (value != null) setState(() => _rowsPerPage = value);
-                                },
-                                sortColumnIndex: _sortColumnIndex,
-                                sortAscending: _sortAsc,
-                                columns: [
-                                  const DataColumn(label: Text('م', style: TextStyle(fontWeight: FontWeight.bold))),
-                                  DataColumn(
-                                    label: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      textDirection: TextDirection.rtl,
-                                      children: [
-                                        const Icon(Icons.info_outline, size: 18),
-                                        const SizedBox(width: 8),
-                                        const Text('الحالة', style: TextStyle(fontWeight: FontWeight.bold)),
-                                        if (_sortBy == 'status')
-                                          Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward, size: 14),
-                                      ],
-                                    ),
-                                    onSort: (index, ascending) => _sort('status', index),
-                                  ),
-                                  DataColumn(
-                                    label: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      textDirection: TextDirection.rtl,
-                                      children: [
-                                        const Icon(Icons.person_outline, size: 18),
-                                        const SizedBox(width: 6),
-                                        const Text('اسم المشترك', style: TextStyle(fontWeight: FontWeight.bold)),
-                                        if (_sortBy == 'name')
-                                          Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward, size: 14),
-                                      ],
-                                    ),
-                                    onSort: (index, ascending) => _sort('name', index),
-                                  ),
-                                  DataColumn(
-                                    label: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      textDirection: TextDirection.rtl,
-                                      children: [
-                                        const Icon(Icons.account_circle_outlined, size: 18),
-                                        const SizedBox(width: 8),
-                                        const Text('اسم المستخدم', style: TextStyle(fontWeight: FontWeight.bold)),
-                                        if (_sortBy == 'user')
-                                          Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward, size: 14),
-                                      ],
-                                    ),
-                                    onSort: (index, ascending) => _sort('user', index),
-                                  ),
-                                  DataColumn(
-                                    label: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      textDirection: TextDirection.rtl,
-                                      children: [
-                                        const Icon(Icons.inventory_2_outlined, size: 18),
-                                        const SizedBox(width: 8),
-                                        const Text('الباقة', style: TextStyle(fontWeight: FontWeight.bold)),
-                                        if (_sortBy == 'package')
-                                          Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward, size: 14),
-                                      ],
-                                    ),
-                                    onSort: (index, ascending) => _sort('package', index),
-                                  ),
-                                  DataColumn(
-                                    label: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      textDirection: TextDirection.rtl,
-                                      children: [
-                                        const Icon(Icons.event_outlined, size: 18),
-                                        const SizedBox(width: 8),
-                                        const Text('تاريخ الانتهاء', style: TextStyle(fontWeight: FontWeight.bold)),
-                                        if (_sortBy == 'date')
-                                          Icon(_sortAsc ? Icons.arrow_upward : Icons.arrow_downward, size: 14),
-                                      ],
-                                    ),
-                                    onSort: (index, ascending) => _sort('date', index),
-                                  ),
-                                  // Connection column removed
-                                  DataColumn(
-                                    label: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      textDirection: TextDirection.rtl,
-                                      children: [
-                                        const Icon(Icons.language, size: 18),
-                                        const SizedBox(width: 8),
-                                        const Text('IP', style: TextStyle(fontWeight: FontWeight.bold)),
-                                      ],
-                                    ),
-                                  ),
-                                  DataColumn(
-                                    label: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      textDirection: TextDirection.rtl,
-                                      children: [
-                                        const Icon(Icons.schedule_outlined, size: 18),
-                                        const SizedBox(width: 8),
-                                        const Text('الأيام', style: TextStyle(fontWeight: FontWeight.bold)),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                                source: dataSource,
+                              headingRowHeight: 56,
+                              dataRowMinHeight: 64,
+                              dataRowMaxHeight: 64,
+                              dividerThickness: 1,
+                              headingTextStyle: TextStyle(
+                                color: isDark
+                                    ? const Color(0xFF86D18F)
+                                    : const Color(0xFF2E7D32),
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
+                          ),
+                          child: PaginatedDataTable(
+                            showCheckboxColumn: false,
+                            horizontalMargin: 8,
+                            columnSpacing: 8,
+                            rowsPerPage: _rowsPerPage,
+                            availableRowsPerPage: const [10, 50, 500],
+                            onRowsPerPageChanged: (value) {
+                              if (value != null)
+                                setState(() => _rowsPerPage = value);
+                            },
+                            sortColumnIndex: _sortColumnIndex,
+                            sortAscending: _sortAsc,
+                            columns: [
+                              const DataColumn(
+                                label: Text(
+                                  'م',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  textDirection: TextDirection.rtl,
+                                  children: [
+                                    const Icon(Icons.info_outline, size: 18),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'الحالة',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (_sortBy == 'status')
+                                      Icon(
+                                        _sortAsc
+                                            ? Icons.arrow_upward
+                                            : Icons.arrow_downward,
+                                        size: 14,
+                                      ),
+                                  ],
+                                ),
+                                onSort: (index, ascending) =>
+                                    _sort('status', index),
+                              ),
+                              DataColumn(
+                                label: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  textDirection: TextDirection.rtl,
+                                  children: [
+                                    const Icon(Icons.person_outline, size: 18),
+                                    const SizedBox(width: 6),
+                                    const Text(
+                                      'اسم المشترك',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (_sortBy == 'name')
+                                      Icon(
+                                        _sortAsc
+                                            ? Icons.arrow_upward
+                                            : Icons.arrow_downward,
+                                        size: 14,
+                                      ),
+                                  ],
+                                ),
+                                onSort: (index, ascending) =>
+                                    _sort('name', index),
+                              ),
+                              DataColumn(
+                                label: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  textDirection: TextDirection.rtl,
+                                  children: [
+                                    const Icon(
+                                      Icons.account_circle_outlined,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'اسم المستخدم',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (_sortBy == 'user')
+                                      Icon(
+                                        _sortAsc
+                                            ? Icons.arrow_upward
+                                            : Icons.arrow_downward,
+                                        size: 14,
+                                      ),
+                                  ],
+                                ),
+                                onSort: (index, ascending) =>
+                                    _sort('user', index),
+                              ),
+                              DataColumn(
+                                label: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  textDirection: TextDirection.rtl,
+                                  children: [
+                                    const Icon(
+                                      Icons.inventory_2_outlined,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'الباقة',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (_sortBy == 'package')
+                                      Icon(
+                                        _sortAsc
+                                            ? Icons.arrow_upward
+                                            : Icons.arrow_downward,
+                                        size: 14,
+                                      ),
+                                  ],
+                                ),
+                                onSort: (index, ascending) =>
+                                    _sort('package', index),
+                              ),
+                              DataColumn(
+                                label: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  textDirection: TextDirection.rtl,
+                                  children: [
+                                    const Icon(Icons.event_outlined, size: 18),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'تاريخ الانتهاء',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (_sortBy == 'date')
+                                      Icon(
+                                        _sortAsc
+                                            ? Icons.arrow_upward
+                                            : Icons.arrow_downward,
+                                        size: 14,
+                                      ),
+                                  ],
+                                ),
+                                onSort: (index, ascending) =>
+                                    _sort('date', index),
+                              ),
+                              // Connection column removed
+                              DataColumn(
+                                label: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  textDirection: TextDirection.rtl,
+                                  children: [
+                                    const Icon(
+                                      Icons.account_balance_wallet_outlined,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'الديون',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (_sortBy == 'debt')
+                                      Icon(
+                                        _sortAsc
+                                            ? Icons.arrow_upward
+                                            : Icons.arrow_downward,
+                                        size: 14,
+                                      ),
+                                  ],
+                                ),
+                                onSort: (index, ascending) =>
+                                    _sort('debt', index),
+                              ),
+                              DataColumn(
+                                label: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  textDirection: TextDirection.rtl,
+                                  children: [
+                                    const Icon(Icons.language, size: 18),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'IP',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              DataColumn(
+                                label: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  textDirection: TextDirection.rtl,
+                                  children: [
+                                    const Icon(
+                                      Icons.schedule_outlined,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'الأيام',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            source: dataSource,
                           ),
                         ),
                       ),
@@ -2278,7 +2838,8 @@ class _SubscribersDataSource extends DataTableSource {
   final Future<void> Function(Subscriber, String) onActionSelected;
   final Map<String, bool> columnVisibility;
 
-  String _fmt(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  String _fmt(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
   Color _statusColor(Subscriber s) {
     // Disabled users keep the orange highlight.
@@ -2299,7 +2860,12 @@ class _SubscribersDataSource extends DataTableSource {
     final selected = identical(selectedSubscriber, s);
     final remainingDays = DateTime.now().difference(s.endDate).inDays * -1;
     final cells = [
-      DataCell(ConstrainedBox(constraints: const BoxConstraints(maxWidth: 48), child: Text('${index + 1}', textAlign: TextAlign.center))),
+      DataCell(
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 48),
+          child: Text('${index + 1}', textAlign: TextAlign.center),
+        ),
+      ),
       DataCell(
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 64),
@@ -2342,7 +2908,12 @@ class _SubscribersDataSource extends DataTableSource {
           ),
         ),
       ),
-      DataCell(ConstrainedBox(constraints: const BoxConstraints(maxWidth: 200), child: Text(s.user, overflow: TextOverflow.ellipsis))),
+      DataCell(
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 200),
+          child: Text(s.user, overflow: TextOverflow.ellipsis),
+        ),
+      ),
       DataCell(
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 160),
@@ -2356,7 +2927,71 @@ class _SubscribersDataSource extends DataTableSource {
           ),
         ),
       ),
-      DataCell(ConstrainedBox(constraints: const BoxConstraints(maxWidth: 160), child: Text(_fmt(s.endDate), overflow: TextOverflow.ellipsis))),
+      DataCell(
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 160),
+          child: Text(_fmt(s.endDate), overflow: TextOverflow.ellipsis),
+        ),
+      ),
+      DataCell(
+        Tooltip(
+          message: s.remaining > 0.0001
+              ? 'اضغط لعرض أو تعديل ديون ${s.name}'
+              : 'لا يوجد مبلغ متبقٍ على ${s.name}',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () async => onActionSelected(s, 'debts'),
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 96, maxWidth: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: s.remaining > 0.0001
+                    ? const Color(0xFFFFEBEE)
+                    : const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: s.remaining > 0.0001
+                      ? const Color(0xFFEF9A9A)
+                      : const Color(0xFFA5D6A7),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    s.remaining > 0.0001
+                        ? Icons.payments_outlined
+                        : Icons.check_circle_outline_rounded,
+                    size: 16,
+                    color: s.remaining > 0.0001
+                        ? const Color(0xFFC62828)
+                        : const Color(0xFF2E7D32),
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      s.remaining > 0.0001
+                          ? '${s.remaining.toStringAsFixed(0)} د.ع'
+                          : 'مسدد',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                        color: s.remaining > 0.0001
+                            ? const Color(0xFFC62828)
+                            : const Color(0xFF2E7D32),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
       // Connection column removed
       // عمود IP (دائماً)
       DataCell(
@@ -2375,12 +3010,18 @@ class _SubscribersDataSource extends DataTableSource {
                     }
                     final uri = Uri.parse(url);
                     try {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      await launchUrl(
+                        uri,
+                        mode: LaunchMode.externalApplication,
+                      );
                     } catch (_) {}
                   },
                   child: Text(
                     s.ip.isEmpty ? '—' : s.ip,
-                    style: TextStyle(fontWeight: FontWeight.w600, color: Colors.blue.shade700),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue.shade700,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -2393,10 +3034,13 @@ class _SubscribersDataSource extends DataTableSource {
             ? ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 140),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: remainingDays < 0
-                      ? Colors.red.withValues(alpha: 0.15)
+                        ? Colors.red.withValues(alpha: 0.15)
                         : remainingDays < 7
                         ? Colors.orange.withValues(alpha: 0.15)
                         : Colors.green.withValues(alpha: 0.15),
@@ -2409,8 +3053,8 @@ class _SubscribersDataSource extends DataTableSource {
                       color: remainingDays < 0
                           ? Colors.red
                           : remainingDays < 7
-                              ? Colors.orange
-                              : Colors.green,
+                          ? Colors.orange
+                          : Colors.green,
                     ),
                     textAlign: TextAlign.center,
                     overflow: TextOverflow.ellipsis,

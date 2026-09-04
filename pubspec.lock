@@ -177,6 +177,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.9"
+  dart_ping:
+    dependency: transitive
+    description:
+      name: dart_ping
+      sha256: "2f5418d0a5c64e53486caaac78677b25725b1e13c33c5be834ce874ea18bd24f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "9.0.1"
+  dart_ping_ios:
+    dependency: transitive
+    description:
+      name: dart_ping_ios
+      sha256: "17df1b369331ec6c30a91a51db64ac8feed47fad71e444208de06edf2a22415f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.2"
   dio:
     dependency: transitive
     description:
@@ -241,6 +257,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.0.1"
+  file_picker:
+    dependency: "direct main"
+    description:
+      name: file_picker
+      sha256: ab13ae8ef5580a411c458d6207b6774a6c237d77ac37011b13994879f68a8810
+      url: "https://pub.dev"
+    source: hosted
+    version: "8.3.7"
   file_saver:
     dependency: "direct main"
     description:
@@ -390,6 +414,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  flutter_icmp_ping:
+    dependency: transitive
+    description:
+      name: flutter_icmp_ping
+      sha256: de9633cf65a8c733fae29d08a35d3d4b343620cd1d13e1bfa88eccf56696d896
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.3"
   flutter_lints:
     dependency: "direct dev"
     description:
@@ -398,6 +430,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.0.0"
+  flutter_network_speed_test:
+    dependency: "direct main"
+    description:
+      name: flutter_network_speed_test
+      sha256: "17a103506cb7e5746c9c98505a3aaf741595d1096aa271bac029f22cb08bcdd4"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
   flutter_plugin_android_lifecycle:
     dependency: transitive
     description:
@@ -784,6 +824,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.9.1"
+  pool:
+    dependency: transitive
+    description:
+      name: pool
+      sha256: "4177f68c237ea2128d1bee66ac17b2ce05ba3dbaafcbdd54c5d40a39d0b6b11c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.5.3"
   printing:
     dependency: "direct main"
     description:

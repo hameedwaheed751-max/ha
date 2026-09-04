@@ -6,20 +6,96 @@ class SasSyncResult {
   final int read;
   final int added;
   final int updated;
-  const SasSyncResult({required this.read, required this.added, required this.updated});
+  const SasSyncResult({
+    required this.read,
+    required this.added,
+    required this.updated,
+  });
 }
 
 class SasSyncService {
+  static DateTime? activationDateFromSas(dynamic node) {
+    const keys = ['activation_date', 'activated_at', 'start_date', 'from_date'];
+
+    DateTime? parse(dynamic value) {
+      if (value is DateTime) return value;
+      if (value is num) {
+        final milliseconds = value.abs() < 100000000000
+            ? value.toInt() * 1000
+            : value.toInt();
+        return DateTime.fromMillisecondsSinceEpoch(milliseconds);
+      }
+      final text = (value ?? '').toString().trim();
+      if (text.isEmpty) return null;
+      final parsed = DateTime.tryParse(text);
+      if (parsed != null) return parsed;
+      final parts = text.split(RegExp(r'[/\-]'));
+      if (parts.length == 3) {
+        final day = int.tryParse(parts[0]);
+        final month = int.tryParse(parts[1]);
+        final year = int.tryParse(parts[2].split(' ').first);
+        if (day != null && month != null && year != null && year > 1900) {
+          return DateTime(year, month, day);
+        }
+      }
+      return null;
+    }
+
+    DateTime? find(dynamic value) {
+      if (value is Map) {
+        for (final key in keys) {
+          if (value.containsKey(key)) {
+            final parsed = parse(value[key]);
+            if (parsed != null) return parsed;
+          }
+        }
+        for (final child in value.values) {
+          final parsed = find(child);
+          if (parsed != null) return parsed;
+        }
+      } else if (value is List) {
+        for (final child in value) {
+          final parsed = find(child);
+          if (parsed != null) return parsed;
+        }
+      }
+      return null;
+    }
+
+    return find(node);
+  }
+
+  static Map<String, dynamic> _mergeSasDataPreservingActivation(
+    Subscriber existing,
+    Map<String, dynamic> remoteData,
+  ) {
+    final merged = Map<String, dynamic>.from(remoteData);
+    final localActivationDate = existing.sasData['local_activation_date'];
+    if (localActivationDate != null &&
+        localActivationDate.toString().trim().isNotEmpty) {
+      merged['local_activation_date'] = localActivationDate;
+      merged['activation_date'] = localActivationDate;
+    }
+    return merged;
+  }
+
   static DateTime resolveStartDateForSync({
     required Subscriber existing,
     required DateTime remoteStartDate,
   }) {
-    final markerValue = existing.sasData['local_activation_date'] ?? existing.sasData['activation_date'];
+    final markerValue =
+        existing.sasData['local_activation_date'] ??
+        existing.sasData['activation_date'];
     if (markerValue is String && markerValue.trim().isNotEmpty) {
       final parsed = DateTime.tryParse(markerValue.trim());
-      if (parsed != null) return DateTime(parsed.year, parsed.month, parsed.day);
+      if (parsed != null)
+        return DateTime(parsed.year, parsed.month, parsed.day);
     }
-    return DateTime(remoteStartDate.year, remoteStartDate.month, remoteStartDate.day);
+    return DateTime(
+      remoteStartDate.year,
+      remoteStartDate.month,
+      remoteStartDate.day,
+    );
   }
 
   static Future<SasSyncResult> sync(SasApiService api) async {
@@ -31,7 +107,9 @@ class SasSyncService {
     // (بعض أنظمة SAS مثل JT لا يدعمون endpoint /index/online)
     List<Map<String, dynamic>> sessions = [];
     try {
-      sessions = await api.fetchConnectedSessions().timeout(const Duration(seconds: 15));
+      sessions = await api.fetchConnectedSessions().timeout(
+        const Duration(seconds: 15),
+      );
     } catch (e) {
       debugPrint('fetchConnectedSessions failed (non-fatal): $e');
     }
@@ -39,8 +117,19 @@ class SasSyncService {
     final sessionIpByUser = <String, String>{};
     final sessionIpBySasId = <String, String>{};
     for (final session in sessions) {
-      final username = _extractSessionText(session, ['username', 'user', 'user_name', 'login', 'name']);
-      final sasId = _extractSessionText(session, ['user_id', 'id', 'uid', 'uuid']);
+      final username = _extractSessionText(session, [
+        'username',
+        'user',
+        'user_name',
+        'login',
+        'name',
+      ]);
+      final sasId = _extractSessionText(session, [
+        'user_id',
+        'id',
+        'uid',
+        'uuid',
+      ]);
       final ip = _extractIp(session);
       debugPrint('session sasId=$sasId username=$username ip=$ip');
       if (ip.isEmpty) continue;
@@ -52,14 +141,24 @@ class SasSyncService {
     var updated = 0;
 
     for (final row in rows) {
-      final profileName = await _resolveProfileNameForRow(row, api, profileNameCache);
-      if (profileName != null && (row['profile_name'] == null || row['profile_name'].toString().trim().isEmpty)) {
+      final profileName = await _resolveProfileNameForRow(
+        row,
+        api,
+        profileNameCache,
+      );
+      if (profileName != null &&
+          (row['profile_name'] == null ||
+              row['profile_name'].toString().trim().isEmpty)) {
         row['profile_name'] = profileName;
       }
-      debugPrint('SAS sync raw profile_name=${row['profile_name'] ?? ''}, profile_id=${row['profile_id'] ?? ''}');
+      debugPrint(
+        'SAS sync raw profile_name=${row['profile_name'] ?? ''}, profile_id=${row['profile_id'] ?? ''}',
+      );
       final mapped = _map(row);
       if (mapped.user.trim().isEmpty) continue;
-      debugPrint('SAS sync mapped profile_name=${mapped.sasData['profile_name'] ?? ''}, type=${mapped.type}');
+      debugPrint(
+        'SAS sync mapped profile_name=${mapped.sasData['profile_name'] ?? ''}, type=${mapped.type}',
+      );
 
       final userKey = mapped.user.trim().toLowerCase();
       debugPrint('CHECK user=${mapped.user} ip=${mapped.ip}');
@@ -76,11 +175,14 @@ class SasSyncService {
       final sasId = mapped.sasId;
       var index = -1;
       if (sasId.isNotEmpty) {
-        index = AppStore.subscribers.indexWhere((s) => s.source == 'sas' && s.sasId == sasId);
+        index = AppStore.subscribers.indexWhere(
+          (s) => s.source == 'sas' && s.sasId == sasId,
+        );
       }
       if (index < 0) {
         index = AppStore.subscribers.indexWhere(
-          (s) => s.user.trim().toLowerCase() == mapped.user.trim().toLowerCase(),
+          (s) =>
+              s.user.trim().toLowerCase() == mapped.user.trim().toLowerCase(),
         );
       }
 
@@ -93,7 +195,9 @@ class SasSyncService {
         final nextUser = mapped.user.isNotEmpty ? mapped.user : old.user;
         final nextName = mapped.name.isNotEmpty ? mapped.name : old.name;
         final nextPhone = mapped.phone.isNotEmpty ? mapped.phone : old.phone;
-        final nextAddress = mapped.address.isNotEmpty ? mapped.address : old.address;
+        final nextAddress = mapped.address.isNotEmpty
+            ? mapped.address
+            : old.address;
         final nextIp = mapped.ip.isNotEmpty ? mapped.ip : old.ip;
         final nextType = mapped.type.isNotEmpty ? mapped.type : old.type;
         final nextSasId = mapped.sasId.isNotEmpty ? mapped.sasId : old.sasId;
@@ -131,12 +235,12 @@ class SasSyncService {
             ..disabled = mapped.disabled
             ..source = 'sas'
             ..sasId = nextSasId
-            ..sasData = Map<String, dynamic>.from(mapped.sasData)
+            ..sasData = _mergeSasDataPreservingActivation(old, mapped.sasData)
             ..sasOnline = mapped.sasOnline;
           updated++;
         } else {
           old
-            ..sasData = Map<String, dynamic>.from(mapped.sasData)
+            ..sasData = _mergeSasDataPreservingActivation(old, mapped.sasData)
             ..sasOnline = mapped.sasOnline;
         }
       }
@@ -148,7 +252,15 @@ class SasSyncService {
 
   static String _extractIp(dynamic node) {
     if (node is Map) {
-      for (final key in ['last_session', 'lastSession', 'session', 'online', 'active_session', 'radacct', 'acct']) {
+      for (final key in [
+        'last_session',
+        'lastSession',
+        'session',
+        'online',
+        'active_session',
+        'radacct',
+        'acct',
+      ]) {
         if (node.containsKey(key) && node[key] != null) {
           final nested = _extractIp(node[key]);
           if (nested.isNotEmpty) return nested;
@@ -218,7 +330,9 @@ class SasSyncService {
   }
 
   static bool _isValidIpv6(String value) {
-    return RegExp(r'^([0-9a-fA-F]{1,4}:){1,7}[0-9a-fA-F]{1,4}').hasMatch(value) ||
+    return RegExp(
+          r'^([0-9a-fA-F]{1,4}:){1,7}[0-9a-fA-F]{1,4}',
+        ).hasMatch(value) ||
         RegExp(r'^::[0-9a-fA-F]{1,4}').hasMatch(value) ||
         RegExp(r'^[0-9a-fA-F]{1,4}::[0-9a-fA-F]{1,4}').hasMatch(value);
   }
@@ -275,7 +389,16 @@ class SasSyncService {
 
   static String? _extractProfileName(dynamic node) {
     if (node is Map) {
-      for (final key in const ['profile_name', 'profile', 'package_name', 'package', 'plan_name', 'service_name', 'name', 'title']) {
+      for (final key in const [
+        'profile_name',
+        'profile',
+        'package_name',
+        'package',
+        'plan_name',
+        'service_name',
+        'name',
+        'title',
+      ]) {
         final value = node[key];
         if (value is String || value is num || value is bool) {
           final text = value.toString().trim();
@@ -328,68 +451,140 @@ class SasSyncService {
       return walk(row);
     }
 
-    String text(List<String> keys, [String fallback = '']) => (pick(keys) ?? fallback).toString().trim();
+    String text(List<String> keys, [String fallback = '']) =>
+        (pick(keys) ?? fallback).toString().trim();
     DateTime date(List<String> keys, DateTime fallback) {
       final v = pick(keys);
       if (v == null) return fallback;
       if (v is num) {
         final n = v.toInt();
-        return DateTime.fromMillisecondsSinceEpoch(n > 9999999999 ? n : n * 1000);
+        return DateTime.fromMillisecondsSinceEpoch(
+          n > 9999999999 ? n : n * 1000,
+        );
       }
       return DateTime.tryParse(v.toString()) ?? fallback;
     }
+
     bool truthy(List<String> keys, bool fallback) {
       final v = pick(keys);
       if (v == null) return fallback;
       if (v is bool) return v;
       if (v is num) return v != 0;
       final x = v.toString().toLowerCase().trim();
-      if (['1','true','active','enabled','yes','on'].contains(x)) return true;
-      if (['0','false','inactive','disabled','no','off','expired'].contains(x)) return false;
+      if (['1', 'true', 'active', 'enabled', 'yes', 'on'].contains(x))
+        return true;
+      if ([
+        '0',
+        'false',
+        'inactive',
+        'disabled',
+        'no',
+        'off',
+        'expired',
+      ].contains(x))
+        return false;
       return fallback;
     }
 
     final now = DateTime.now();
-    final end = date(['expiration','expiration_date','expire_date','end_date','endDate','expires_at','expiry_date'], now);
+    final end = date([
+      'expiration',
+      'expiration_date',
+      'expire_date',
+      'end_date',
+      'endDate',
+      'expires_at',
+      'expiry_date',
+    ], now);
 
-    final explicitDisabled = truthy(
-      ['disabled','is_disabled','blocked','is_blocked','disable','isDisable','isDisabled'],
-      false,
-    );
-    final statusText = text(['status','state','user_status','account_status']).toLowerCase();
+    final explicitDisabled = truthy([
+      'disabled',
+      'is_disabled',
+      'blocked',
+      'is_blocked',
+      'disable',
+      'isDisable',
+      'isDisabled',
+    ], false);
+    final statusText = text([
+      'status',
+      'state',
+      'user_status',
+      'account_status',
+    ]).toLowerCase();
     final statusDisabled = [
-      'disabled','disable','blocked','block','inactive','suspended','stopped',
-      'معطل','موقوف'
+      'disabled',
+      'disable',
+      'blocked',
+      'block',
+      'inactive',
+      'suspended',
+      'stopped',
+      'معطل',
+      'موقوف',
     ].contains(statusText);
 
     final hasActiveFlag = [
-      'active','is_active','enabled','is_enabled','enable'
+      'active',
+      'is_active',
+      'enabled',
+      'is_enabled',
+      'enable',
     ].any((k) => row.containsKey(k) && row[k] != null);
-    final sasActiveFlag = truthy(
-      ['active','is_active','enabled','is_enabled','enable'],
-      !end.isBefore(now),
-    );
+    final sasActiveFlag = truthy([
+      'active',
+      'is_active',
+      'enabled',
+      'is_enabled',
+      'enable',
+    ], !end.isBefore(now));
 
-    final disabled = explicitDisabled || statusDisabled || (hasActiveFlag && !sasActiveFlag);
+    final disabled =
+        explicitDisabled || statusDisabled || (hasActiveFlag && !sasActiveFlag);
     final active = !disabled && sasActiveFlag;
 
-    final packageValue = text(['profile_name','profile','package_name','package','plan_name','service_name']);
-    debugPrint('SAS _map profile_name=${row['profile_name'] ?? ''}, packageValue=$packageValue');
+    final packageValue = text([
+      'profile_name',
+      'profile',
+      'package_name',
+      'package',
+      'plan_name',
+      'service_name',
+    ]);
+    debugPrint(
+      'SAS _map profile_name=${row['profile_name'] ?? ''}, packageValue=$packageValue',
+    );
 
     return Subscriber(
-      user: text(['username','user','user_name','login','name']),
-      name: text(['firstname','full_name','fullname','customer_name','display_name','name','username']),
-      phone: text(['phone','mobile','phone_number','mobile_number']),
-      address: text(['address','location','city']),
+      user: text(['username', 'user', 'user_name', 'login', 'name']),
+      name: text([
+        'firstname',
+        'full_name',
+        'fullname',
+        'customer_name',
+        'display_name',
+        'name',
+        'username',
+      ]),
+      phone: text(['phone', 'mobile', 'phone_number', 'mobile_number']),
+      address: text(['address', 'location', 'city']),
       ip: _extractIp(row),
       type: packageValue,
       price: 0,
-      startDate: date(['start_date','created_at','creation_date','registered_at'], now),
+      startDate: date([
+        'activation_date',
+        'activated_at',
+        'start_date',
+        'from_date',
+        'created_at',
+        'creation_date',
+        'registered_at',
+      ], now),
       endDate: end,
       active: active,
       disabled: disabled,
       source: 'sas',
-      sasId: text(['id','user_id','uid','uuid','username','user']),
+      sasId: text(['id', 'user_id', 'uid', 'uuid', 'username', 'user']),
       sasOnline: Subscriber.detectOnline(row),
       sasData: Map<String, dynamic>.from(row),
     );

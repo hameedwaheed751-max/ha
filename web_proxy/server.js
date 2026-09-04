@@ -183,6 +183,10 @@ function normalizeSasPath(reqUrl) {
     pathname.startsWith('/index.php/')
   ) {
     path = pathname;
+  } else if (pathname.includes('/api/')) {
+    // Accept paths with a custom prefix before the API base
+    // (e.g. /speednet/admin/api/index.php/api/login).
+    path = pathname;
   } else {
     return null;
   }
@@ -1033,11 +1037,17 @@ function handleRequest(req, res) {
     const hasXSasProxy = String(req.headers['x-sas-proxy-token'] || '').trim().length > 0;
     const hasApiKey = String(req.headers['x-api-key'] || '').trim().length > 0;
     const hasBearer = String(req.headers.authorization || '').toLowerCase().startsWith('bearer ');
-    console.warn(
-      `[auth] 401 ${req.method} ${req.url} tokenHeaders: x-proxy-token=${hasXProxy} x-sas-proxy-token=${hasXSasProxy} x-api-key=${hasApiKey} bearer=${hasBearer}`
-    );
-    sendJson(req, res, 401, {error: 'Unauthorized'});
-    return;
+    const isLoginRequest =
+      parsedHealthUrl.pathname === '/login' ||
+      parsedHealthUrl.pathname === '/sas/login' ||
+      parsedHealthUrl.pathname.split('/').last === 'login';
+    if (!isLoginRequest) {
+      console.warn(
+        `[auth] 401 ${req.method} ${req.url} tokenHeaders: x-proxy-token=${hasXProxy} x-sas-proxy-token=${hasXSasProxy} x-api-key=${hasApiKey} bearer=${hasBearer}`
+      );
+      sendJson(req, res, 401, {error: 'Unauthorized'});
+      return;
+    }
   }
 
   if (parsedHealthUrl.pathname === '/whatsapp/template-contract') {

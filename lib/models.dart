@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'services/user_role_service.dart';
 import 'dart:async';
 
 class PaymentRecord {
@@ -40,20 +43,20 @@ class InvoiceRecord {
   String note;
 
   Map<String, dynamic> toJson() => {
-        'receiptNumber': receiptNumber,
-        'amount': amount,
-        'at': at.toIso8601String(),
-        'monthKey': monthKey,
-        'note': note,
-      };
+    'receiptNumber': receiptNumber,
+    'amount': amount,
+    'at': at.toIso8601String(),
+    'monthKey': monthKey,
+    'note': note,
+  };
 
   factory InvoiceRecord.fromJson(Map<String, dynamic> j) => InvoiceRecord(
-        receiptNumber: int.tryParse((j['receiptNumber'] ?? '').toString()) ?? 0,
-        amount: (j['amount'] ?? 0).toDouble(),
-        at: DateTime.tryParse((j['at'] ?? '').toString()) ?? DateTime.now(),
-        monthKey: (j['monthKey'] ?? '').toString().trim(),
-        note: (j['note'] ?? '').toString(),
-      );
+    receiptNumber: int.tryParse((j['receiptNumber'] ?? '').toString()) ?? 0,
+    amount: (j['amount'] ?? 0).toDouble(),
+    at: DateTime.tryParse((j['at'] ?? '').toString()) ?? DateTime.now(),
+    monthKey: (j['monthKey'] ?? '').toString().trim(),
+    note: (j['note'] ?? '').toString(),
+  );
 }
 
 class DailyTaskEvent {
@@ -76,23 +79,216 @@ class DailyTaskEvent {
   String note;
 
   Map<String, dynamic> toJson() => {
-        'type': type,
-        'subscriberUser': subscriberUser,
-        'subscriberName': subscriberName,
-        'at': at.toIso8601String(),
-        'amount': amount,
-        'remainingAfter': remainingAfter,
-        'note': note,
-      };
+    'type': type,
+    'subscriberUser': subscriberUser,
+    'subscriberName': subscriberName,
+    'at': at.toIso8601String(),
+    'amount': amount,
+    'remainingAfter': remainingAfter,
+    'note': note,
+  };
 
   factory DailyTaskEvent.fromJson(Map<String, dynamic> j) => DailyTaskEvent(
-        type: (j['type'] ?? '').toString(),
-        subscriberUser: (j['subscriberUser'] ?? '').toString(),
-        subscriberName: (j['subscriberName'] ?? '').toString(),
-        at: DateTime.tryParse((j['at'] ?? '').toString()) ?? DateTime.now(),
-        amount: (j['amount'] ?? 0).toDouble(),
-        remainingAfter: (j['remainingAfter'] ?? 0).toDouble(),
-        note: (j['note'] ?? '').toString(),
+    type: (j['type'] ?? '').toString(),
+    subscriberUser: (j['subscriberUser'] ?? '').toString(),
+    subscriberName: (j['subscriberName'] ?? '').toString(),
+    at: DateTime.tryParse((j['at'] ?? '').toString()) ?? DateTime.now(),
+    amount: (j['amount'] ?? 0).toDouble(),
+    remainingAfter: (j['remainingAfter'] ?? 0).toDouble(),
+    note: (j['note'] ?? '').toString(),
+  );
+
+  static List<DailyTaskEvent> activationSettlement({
+    required String subscriberUser,
+    required String subscriberName,
+    required DateTime at,
+    required double collected,
+    required double remaining,
+    required String note,
+  }) {
+    final safeCollected = collected.isFinite && collected > 0 ? collected : 0.0;
+    final safeRemaining = remaining.isFinite && remaining > 0 ? remaining : 0.0;
+    return [
+      DailyTaskEvent(
+        type: 'activation',
+        subscriberUser: subscriberUser,
+        subscriberName: subscriberName,
+        at: at,
+        amount: safeCollected,
+        remainingAfter: safeRemaining,
+        note: note,
+      ),
+      if (safeRemaining > 0.0001)
+        DailyTaskEvent(
+          type: 'debt_added',
+          subscriberUser: subscriberUser,
+          subscriberName: subscriberName,
+          at: at,
+          amount: safeRemaining,
+          remainingAfter: safeRemaining,
+          note: 'دين متبقٍ عند التفعيل',
+        ),
+    ];
+  }
+
+  static double addedDebtAmount({
+    required double previousRemaining,
+    required double currentRemaining,
+  }) {
+    if (!previousRemaining.isFinite || !currentRemaining.isFinite) return 0;
+    final increase = currentRemaining - previousRemaining;
+    return increase > 0.0001 ? increase : 0;
+  }
+}
+
+class AccountingActivationRecord {
+  AccountingActivationRecord({
+    required this.subscriberUser,
+    required this.subscriberName,
+    required this.packageName,
+    required this.saleAmount,
+    required this.sasDeduction,
+    required this.at,
+    this.sasBalanceBefore,
+    this.sasBalanceAfter,
+    this.needsSaleAmountMigration = false,
+  });
+
+  final String subscriberUser;
+  final String subscriberName;
+  final String packageName;
+  final double saleAmount;
+  final double sasDeduction;
+  final DateTime at;
+  final double? sasBalanceBefore;
+  final double? sasBalanceAfter;
+  final bool needsSaleAmountMigration;
+
+  double get profit => saleAmount - sasDeduction;
+
+  Map<String, dynamic> toJson() => {
+    'subscriberUser': subscriberUser,
+    'subscriberName': subscriberName,
+    'packageName': packageName,
+    'saleAmount': saleAmount,
+    'sasDeduction': sasDeduction,
+    'profit': profit,
+    'at': at.toIso8601String(),
+    if (sasBalanceBefore != null) 'sasBalanceBefore': sasBalanceBefore,
+    if (sasBalanceAfter != null) 'sasBalanceAfter': sasBalanceAfter,
+  };
+
+  factory AccountingActivationRecord.fromJson(Map<String, dynamic> json) {
+    final hasExplicitSaleAmount =
+        json.containsKey('saleAmount') ||
+        json.containsKey('subscriptionAmount');
+    return AccountingActivationRecord(
+      subscriberUser: (json['subscriberUser'] ?? '').toString(),
+      subscriberName: (json['subscriberName'] ?? '').toString(),
+      packageName: (json['packageName'] ?? '').toString(),
+      saleAmount: _number(
+        json['saleAmount'] ?? json['subscriptionAmount'] ?? json['paidAmount'],
+      ),
+      sasDeduction: _number(json['sasDeduction']),
+      at: DateTime.tryParse((json['at'] ?? '').toString()) ?? DateTime.now(),
+      sasBalanceBefore: _nullableNumber(json['sasBalanceBefore']),
+      sasBalanceAfter: _nullableNumber(json['sasBalanceAfter']),
+      needsSaleAmountMigration: !hasExplicitSaleAmount,
+    );
+  }
+
+  static double _number(dynamic value) =>
+      value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
+
+  static double? _nullableNumber(dynamic value) {
+    if (value == null) return null;
+    return value is num ? value.toDouble() : double.tryParse('$value');
+  }
+}
+
+class AccountingMonthlySummary {
+  const AccountingMonthlySummary({
+    required this.sasDeductions,
+    required this.subscriberSales,
+    required this.profit,
+    required this.activationCount,
+  });
+
+  final double sasDeductions;
+  final double subscriberSales;
+  final double profit;
+  final int activationCount;
+
+  factory AccountingMonthlySummary.fromRecords({
+    required Iterable<AccountingActivationRecord> activations,
+  }) {
+    var sasDeductions = 0.0;
+    var subscriberSales = 0.0;
+    var profit = 0.0;
+    var activationCount = 0;
+
+    for (final activation in activations) {
+      activationCount++;
+      sasDeductions += activation.sasDeduction;
+      subscriberSales += activation.saleAmount;
+      profit += activation.profit;
+    }
+
+    return AccountingMonthlySummary(
+      sasDeductions: sasDeductions,
+      subscriberSales: subscriberSales,
+      profit: profit,
+      activationCount: activationCount,
+    );
+  }
+}
+
+class ChatMessage {
+  ChatMessage({
+    required this.id,
+    required this.senderName,
+    required this.senderEmail,
+    required this.text,
+    required this.sentAt,
+    this.editedAt,
+    this.deletedAt,
+    this.imageUrl,
+  });
+
+  final String id;
+  final String senderName;
+  final String senderEmail;
+  final String text;
+  final DateTime sentAt;
+  final DateTime? editedAt;
+  final DateTime? deletedAt;
+  final String? imageUrl;
+
+  Map<String, dynamic> toJson() => {
+    'senderName': senderName,
+    'senderEmail': senderEmail,
+    'text': text,
+    'sentAt': sentAt.toIso8601String(),
+    if (editedAt != null) 'editedAt': editedAt!.toIso8601String(),
+    if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
+    if (imageUrl != null) 'imageUrl': imageUrl,
+  };
+
+  factory ChatMessage.fromJson(String id, Map<String, dynamic> j) =>
+      ChatMessage(
+        id: id,
+        senderName: (j['senderName'] ?? 'مجهول').toString(),
+        senderEmail: (j['senderEmail'] ?? '').toString(),
+        text: (j['text'] ?? '').toString(),
+        sentAt:
+            DateTime.tryParse((j['sentAt'] ?? '').toString()) ?? DateTime.now(),
+        editedAt: j['editedAt'] != null
+            ? DateTime.tryParse(j['editedAt'].toString())
+            : null,
+        deletedAt: j['deletedAt'] != null
+            ? DateTime.tryParse(j['deletedAt'].toString())
+            : null,
+        imageUrl: j['imageUrl']?.toString(),
       );
 }
 
@@ -168,7 +364,7 @@ class Subscriber {
     this.sasOnline = false,
     Map<String, dynamic>? sasData,
     List<PaymentRecord>? payments,
-     List<InvoiceRecord>? invoices,
+    List<InvoiceRecord>? invoices,
   }) : payments = payments ?? <PaymentRecord>[],
        invoices = invoices ?? <InvoiceRecord>[],
        sasData = sasData ?? <String, dynamic>{};
@@ -195,10 +391,10 @@ class Subscriber {
   List<PaymentRecord> payments;
   List<InvoiceRecord> invoices;
 
-    double get paymentsTotal =>
+  double get paymentsTotal =>
       payments.fold<double>(0, (sum, p) => sum + p.amount);
 
-    double get invoicesTotal =>
+  double get invoicesTotal =>
       invoices.fold<double>(0, (sum, inv) => sum + inv.amount);
 
   double get remaining => (price - paid).clamp(0, double.infinity).toDouble();
@@ -207,7 +403,11 @@ class Subscriber {
   bool get isOnline => sasOnline || _detectOnline(sasData);
 
   void markActivationDate({DateTime? at}) {
-    final activationDay = DateTime(at?.year ?? DateTime.now().year, at?.month ?? DateTime.now().month, at?.day ?? DateTime.now().day);
+    final activationDay = DateTime(
+      at?.year ?? DateTime.now().year,
+      at?.month ?? DateTime.now().month,
+      at?.day ?? DateTime.now().day,
+    );
     startDate = activationDay;
     final marker = activationDay.toIso8601String();
     sasData['local_activation_date'] = marker;
@@ -329,11 +529,13 @@ class Subscriber {
 
     paid += applied;
     final stamp = at ?? DateTime.now();
-    payments.add(PaymentRecord(
-      amount: applied,
-      at: stamp,
-      note: note ?? (remaining <= 0.0001 ? 'تسديد كامل' : 'تسديد جزئي'),
-    ));
+    payments.add(
+      PaymentRecord(
+        amount: applied,
+        at: stamp,
+        note: note ?? (remaining <= 0.0001 ? 'تسديد كامل' : 'تسديد جزئي'),
+      ),
+    );
     return applied;
   }
 
@@ -382,7 +584,14 @@ class Subscriber {
   String get packageDisplay {
     dynamic findInTree(dynamic node) {
       if (node is Map) {
-        for (final key in const ['profile_name', 'profile', 'package_name', 'package', 'plan_name', 'service_name']) {
+        for (final key in const [
+          'profile_name',
+          'profile',
+          'package_name',
+          'package',
+          'plan_name',
+          'service_name',
+        ]) {
           final value = node[key];
           if (value is String || value is num || value is bool) {
             final text = value.toString().trim();
@@ -429,16 +638,36 @@ class Subscriber {
     bool truthy(dynamic v) {
       if (v == true || v == 1) return true;
       final z = (v ?? '').toString().toLowerCase().trim();
-      return const ['1', 'true', 'yes', 'online', 'connected', 'active', 'up', 'on', 'متصل']
-          .contains(z);
+      return const [
+        '1',
+        'true',
+        'yes',
+        'online',
+        'connected',
+        'active',
+        'up',
+        'on',
+        'متصل',
+      ].contains(z);
     }
 
     bool check(dynamic value) {
       if (value is Map) {
         for (final key in const [
-          'online', 'is_online', 'isOnline', 'connected', 'is_connected', 'isConnected',
-          'user_online', 'status_online', 'online_status', 'connection_status', 'acct_status_type',
-          'session_status', 'logged_in', 'loggedIn'
+          'online',
+          'is_online',
+          'isOnline',
+          'connected',
+          'is_connected',
+          'isConnected',
+          'user_online',
+          'status_online',
+          'online_status',
+          'connection_status',
+          'acct_status_type',
+          'session_status',
+          'logged_in',
+          'loggedIn',
         ]) {
           if (value.containsKey(key) && truthy(value[key])) return true;
         }
@@ -463,66 +692,92 @@ class Subscriber {
   static bool detectOnline(dynamic node) => _detectOnline(node);
 
   Map<String, dynamic> toJson() => {
-        'user': user,
-        'name': name,
-        'phone': phone,
-        'address': address,
-        'ip': ip,
-        'type': type,
-        'price': price,
-        'startDate': startDate.toIso8601String(),
-        'endDate': endDate.toIso8601String(),
-        'notes': notes,
-        'active': active,
-        'disabled': disabled,
-        'paid': paid,
-        'paymentDate': paymentDate,
-        'points': points,
-        'source': source,
-        'sasId': sasId,
-        'sasOnline': sasOnline,
-        'sasData': sasData,
-        'payments': payments.map((e) => e.toJson()).toList(),
-        'invoices': invoices.map((e) => e.toJson()).toList(),
-      };
+    'user': user,
+    'name': name,
+    'phone': phone,
+    'address': address,
+    'ip': ip,
+    'type': type,
+    'price': price,
+    'startDate': startDate.toIso8601String(),
+    'endDate': endDate.toIso8601String(),
+    'notes': notes,
+    'active': active,
+    'disabled': disabled,
+    'paid': paid,
+    'paymentDate': paymentDate,
+    'points': points,
+    'source': source,
+    'sasId': sasId,
+    'sasOnline': sasOnline,
+    'sasData': sasData,
+    'payments': payments.map((e) => e.toJson()).toList(),
+    'invoices': invoices.map((e) => e.toJson()).toList(),
+  };
 
   factory Subscriber.fromJson(Map<String, dynamic> j) {
-    final sasData = j['sasData'] is Map ? Map<String, dynamic>.from(j['sasData']) : <String, dynamic>{};
+    final sasData = j['sasData'] is Map
+        ? Map<String, dynamic>.from(j['sasData'])
+        : <String, dynamic>{};
     final fallbackType = (j['type'] ?? '').toString().trim();
     final packageFromSas = _extractPackageValue(sasData, fallbackType);
-    debugPrint('Subscriber.fromJson profile_name=${sasData['profile_name'] ?? ''}, type=$packageFromSas');
+    debugPrint(
+      'Subscriber.fromJson profile_name=${sasData['profile_name'] ?? ''}, type=$packageFromSas',
+    );
 
     final subscriber = Subscriber(
-        user: j['user'] ?? '',
-        name: j['name'] ?? '',
-        phone: j['phone'] ?? '',
-        address: j['address'] ?? '',
-        ip: j['ip'] ?? '',
-        type: packageFromSas,
-        price: (j['price'] ?? 0).toDouble(),
-        startDate: DateTime.tryParse(j['startDate'] ?? '') ?? DateTime.now(),
-        endDate: DateTime.tryParse(j['endDate'] ?? '') ?? DateTime.now(),
-        notes: j['notes'] ?? '',
-        active: j['active'] ?? true,
-        disabled: j['disabled'] ?? false,
-        paid: (j['paid'] ?? 0).toDouble(),
-        paymentDate: j['paymentDate'] ?? '',
-        points: j['points'] ?? 0,
-        source: j['source'] ?? 'local',
-        sasId: (j['sasId'] ?? '').toString(),
-        sasOnline: j['sasOnline'] == true || _detectOnline(sasData),
-        sasData: sasData,
-        payments: j['payments'] is List ? (j['payments'] as List).map((e) => PaymentRecord.fromJson(Map<String, dynamic>.from(e))).toList() : <PaymentRecord>[],
-        invoices: j['invoices'] is List ? (j['invoices'] as List).map((e) => InvoiceRecord.fromJson(Map<String, dynamic>.from(e))).toList() : <InvoiceRecord>[],
-      );
-        subscriber.reconcilePaidFromPayments();
-      return subscriber;
+      user: j['user'] ?? '',
+      name: j['name'] ?? '',
+      phone: j['phone'] ?? '',
+      address: j['address'] ?? '',
+      ip: j['ip'] ?? '',
+      type: packageFromSas,
+      price: (j['price'] ?? 0).toDouble(),
+      startDate: DateTime.tryParse(j['startDate'] ?? '') ?? DateTime.now(),
+      endDate: DateTime.tryParse(j['endDate'] ?? '') ?? DateTime.now(),
+      notes: j['notes'] ?? '',
+      active: j['active'] ?? true,
+      disabled: j['disabled'] ?? false,
+      paid: (j['paid'] ?? 0).toDouble(),
+      paymentDate: j['paymentDate'] ?? '',
+      points: j['points'] ?? 0,
+      source: j['source'] ?? 'local',
+      sasId: (j['sasId'] ?? '').toString(),
+      sasOnline: j['sasOnline'] == true || _detectOnline(sasData),
+      sasData: sasData,
+      payments: j['payments'] is List
+          ? (j['payments'] as List)
+                .map(
+                  (e) => PaymentRecord.fromJson(Map<String, dynamic>.from(e)),
+                )
+                .toList()
+          : <PaymentRecord>[],
+      invoices: j['invoices'] is List
+          ? (j['invoices'] as List)
+                .map(
+                  (e) => InvoiceRecord.fromJson(Map<String, dynamic>.from(e)),
+                )
+                .toList()
+          : <InvoiceRecord>[],
+    );
+    subscriber.reconcilePaidFromPayments();
+    return subscriber;
   }
 
-  static String _extractPackageValue(Map<String, dynamic> sasData, String fallback) {
+  static String _extractPackageValue(
+    Map<String, dynamic> sasData,
+    String fallback,
+  ) {
     dynamic findInTree(dynamic node) {
       if (node is Map) {
-        for (final key in const ['profile_name', 'profile', 'package_name', 'package', 'plan_name', 'service_name']) {
+        for (final key in const [
+          'profile_name',
+          'profile',
+          'package_name',
+          'package',
+          'plan_name',
+          'service_name',
+        ]) {
           final value = node[key];
           if (value is String || value is num || value is bool) {
             final text = value.toString().trim();
@@ -546,15 +801,19 @@ class Subscriber {
     }
 
     final found = findInTree(sasData);
-    return (found is String && found.trim().isNotEmpty) ? found.trim() : fallback;
+    return (found is String && found.trim().isNotEmpty)
+        ? found.trim()
+        : fallback;
   }
 }
 
 class PackagePlan {
   PackagePlan({required this.name, required this.price});
-  String name; double price;
-  Map<String,dynamic> toJson()=>{'name':name,'price':price};
-  factory PackagePlan.fromJson(Map<String,dynamic> j)=>PackagePlan(name:j['name']??'',price:(j['price']??0).toDouble());
+  String name;
+  double price;
+  Map<String, dynamic> toJson() => {'name': name, 'price': price};
+  factory PackagePlan.fromJson(Map<String, dynamic> j) =>
+      PackagePlan(name: j['name'] ?? '', price: (j['price'] ?? 0).toDouble());
 }
 
 extension PackagePlanListX on List<PackagePlan> {
@@ -564,10 +823,9 @@ extension PackagePlanListX on List<PackagePlan> {
     void addFromMap(Map<String, dynamic> map) {
       final name = (map['name'] ?? '').toString().trim();
       if (name.isEmpty) return;
-      parsed.add(PackagePlan(
-        name: name,
-        price: (map['price'] ?? 0).toDouble(),
-      ));
+      parsed.add(
+        PackagePlan(name: name, price: (map['price'] ?? 0).toDouble()),
+      );
     }
 
     if (payload is List) {
@@ -606,25 +864,36 @@ class AppStore {
   static const String subscribersRevisionKey = 'subscribersRevision';
   static const String packagesRevisionKey = 'packagesRevision';
   static const String dailyTaskEventsKey = 'dailyTaskEvents';
+  static const String accountingActivationsKey = 'accountingActivations';
   static const String subscriptionNodeKey = 'subscription';
   static String? _loadedUid;
-    static const String activationTemplate =
+  static const String activationTemplate =
       'مرحباً {{customer_name}}،\n✅ تم تفعيل اشتراك الإنترنت بنجاح.\n📦 الباقة: {{package_name}}\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المبلغ المتبقي: {{remaining_amount}} دينار عراقي\n📅 يبدأ الاشتراك: {{subscription_start}}\n📅 ينتهي الاشتراك: {{subscription_end}}\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
-      static const String debtPaidTemplate =
-        'مرحباً {{customer_name}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المتبقي: {{remaining_amount}} دينار عراقي\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
-        static const String debtTemplate =
-          'مرحبا {{customer_name}}\nتم تسجيل مبلغ دين جديد على حسابك\nالمبلغ الواصل: {{paid_amount}} دينار عراقي\nالمبلغ المتبقي: {{remaining_amount}} دينار عراقي\nللاستفسار يرجى التواصل مع:\n{{agent_name}}\n{{whatsapp_number}}';
+  static const String debtPaidTemplate =
+      'مرحباً {{customer_name}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المتبقي: {{remaining_amount}} دينار عراقي\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
+  static const String debtTemplate =
+      'مرحبا {{customer_name}}\nتم تسجيل مبلغ دين جديد على حسابك\nالمبلغ الواصل: {{paid_amount}} دينار عراقي\nالمبلغ المتبقي: {{remaining_amount}} دينار عراقي\nللاستفسار يرجى التواصل مع:\n{{agent_name}}\n{{whatsapp_number}}';
   static const String nearExpiryTemplate =
       'مرحباً {{customer_name}}،\n⏳ نود إعلامكم بأن اشتراك الإنترنت سينتهي قريباً.\n📦 الباقة: {{package_name}}\n📅 تاريخ الانتهاء: {{subscription_end}}\nلضمان استمرار الخدمة دون انقطاع، يرجى مراجعة:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
   static final List<Subscriber> subscribers = [];
   static final List<DailyTaskEvent> dailyTaskEvents = [];
+  static final List<AccountingActivationRecord> accountingActivations = [];
   static String agentFirstName = '';
   static String agentLastName = '';
   static String agentName = '';
   static String agentEmail = '';
+  static String agentKey = '';
+  static final List<ChatMessage> chatMessages = [];
+  static final ValueNotifier<int> chatMessagesChange = ValueNotifier<int>(0);
+  static final ValueNotifier<bool> themeModeChange = ValueNotifier<bool>(false);
+  static StreamSubscription<DatabaseEvent>? chatListener;
+  static bool isDarkMode = false;
 
   static String get effectiveAgentName {
-    final names = [agentFirstName, agentLastName].where((e) => e.trim().isNotEmpty).toList();
+    final names = [
+      agentFirstName,
+      agentLastName,
+    ].where((e) => e.trim().isNotEmpty).toList();
     final derived = names.join(' ').trim();
     if (agentName.trim().isNotEmpty) return agentName.trim();
     if (derived.isNotEmpty) return derived;
@@ -697,7 +966,9 @@ class AppStore {
   static void addPackage(PackagePlan package) {
     final normalizedName = package.name.trim();
     if (normalizedName.isEmpty) return;
-    final existing = packages.indexWhere((item) => item.name.trim().toLowerCase() == normalizedName.toLowerCase());
+    final existing = packages.indexWhere(
+      (item) => item.name.trim().toLowerCase() == normalizedName.toLowerCase(),
+    );
     if (existing >= 0) {
       packages[existing].price = package.price;
       return;
@@ -706,17 +977,55 @@ class AppStore {
   }
 
   static void removePackage(PackagePlan package) {
-    packages.removeWhere((item) => item.name.trim().toLowerCase() == package.name.trim().toLowerCase());
+    packages.removeWhere(
+      (item) =>
+          item.name.trim().toLowerCase() == package.name.trim().toLowerCase(),
+    );
   }
-  static final Map<String,String> messageTemplates = {
-    'activation':activationTemplate,
-    'extension':'مرحباً {name}، تم تمديد اشتراكك لدى {office} حتى {endDate}.',
-    'nearExpiry':nearExpiryTemplate,
-    'expired':'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.',
-    'debt':debtTemplate,
-    'debtPaid':debtPaidTemplate,
+
+  static final Map<String, String> messageTemplates = {
+    'activation': activationTemplate,
+    'extension': 'مرحباً {name}، تم تمديد اشتراكك لدى {office} حتى {endDate}.',
+    'nearExpiry': nearExpiryTemplate,
+    'expired':
+        'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.',
+    'debt': debtTemplate,
+    'debtPaid': debtPaidTemplate,
   };
   static StreamSubscription<DatabaseEvent>? realtimeListener;
+
+  static DatabaseReference? get _chatRef {
+    final officeKey = _officeChatKey();
+    if (officeKey != null && officeKey.isNotEmpty) {
+      return FirebaseDatabase.instance.ref('offices/$officeKey/chat');
+    }
+    final key = agentKey.trim();
+    if (key.isNotEmpty) {
+      return FirebaseDatabase.instance.ref('offices/$key/chat');
+    }
+    final uid = _uid;
+    if (uid != null && uid.isNotEmpty) {
+      final derivedKey =
+          '${agentEmail.trim().toLowerCase()}__${sasUsername.trim().toLowerCase()}';
+      if (derivedKey.trim().isNotEmpty) {
+        return FirebaseDatabase.instance.ref('offices/$derivedKey/chat');
+      }
+      return FirebaseDatabase.instance.ref('offices/$uid/chat');
+    }
+    return null;
+  }
+
+  static String? _officeChatKey() {
+    final name = officeName.trim();
+    if (name.isEmpty) return null;
+    final normalized = name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\u0600-\u06FF]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+    if (normalized.isEmpty) return null;
+    return normalized;
+  }
 
   static void _migrateNearExpiryTemplate() {
     // Always normalize activation and near-expiry to the canonical wording.
@@ -736,7 +1045,9 @@ class AppStore {
     return FirebaseDatabase.instance.ref('agents/$uid');
   }
 
-  static Map<String, dynamic> buildEmptyAgentNodePayload({required String uid}) {
+  static Map<String, dynamic> buildEmptyAgentNodePayload({
+    required String uid,
+  }) {
     final resolvedUid = uid.trim();
     return {
       'profile': {
@@ -754,9 +1065,7 @@ class AppStore {
         'createdAt': ServerValue.timestamp,
         'status': 'pending_sas',
       },
-      'settings': <String, dynamic>{
-        subscribersRevisionKey: 0,
-      },
+      'settings': <String, dynamic>{subscribersRevisionKey: 0},
       'packages': <String, dynamic>{},
       'subscription': <String, dynamic>{
         'plan': 'free',
@@ -769,20 +1078,19 @@ class AppStore {
       },
       'messageTemplates': <String, dynamic>{
         'activation': activationTemplate,
-        'extension': 'مرحباً {name}، تم تمديد اشتراكك لدى {office} حتى {endDate}.',
+        'extension':
+            'مرحباً {name}، تم تمديد اشتراكك لدى {office} حتى {endDate}.',
         'nearExpiry': nearExpiryTemplate,
-        'expired': 'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.',
+        'expired':
+            'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.',
         'debt': debtTemplate,
         'debtPaid': debtPaidTemplate,
       },
       'subscribers': <dynamic>[],
       'debts': <String, dynamic>{},
       dailyTaskEventsKey: <String, dynamic>{},
-      'sas': <String, dynamic>{
-        'serverUrl': '',
-        'username': '',
-        'password': '',
-      },
+      accountingActivationsKey: <String, dynamic>{},
+      'sas': <String, dynamic>{'serverUrl': '', 'username': '', 'password': ''},
     };
   }
 
@@ -830,8 +1138,12 @@ class AppStore {
       final profileForDiscovery = agentData['profile'] is Map
           ? Map<String, dynamic>.from(agentData['profile'])
           : <String, dynamic>{};
-      final discoveredUsername = (profileForDiscovery['sasUsername'] ?? '').toString().trim();
-      if (uid != null && sasUsername.trim().isEmpty && discoveredUsername.isNotEmpty) {
+      final discoveredUsername = (profileForDiscovery['sasUsername'] ?? '')
+          .toString()
+          .trim();
+      if (uid != null &&
+          sasUsername.trim().isEmpty &&
+          discoveredUsername.isNotEmpty) {
         sasUsername = discoveredUsername;
         final currentSnapshot = await FirebaseDatabase.instance
             .ref('agents/${uid}_$discoveredUsername')
@@ -852,23 +1164,52 @@ class AppStore {
           localRevisionBeforePull == 0 && subscribers.isEmpty;
       if (agentData['settings'] is Map) {
         final settings = Map<String, dynamic>.from(agentData['settings']);
-        remoteRevision = int.tryParse((settings[subscribersRevisionKey] ?? 0).toString()) ?? 0;
+        remoteRevision =
+            int.tryParse((settings[subscribersRevisionKey] ?? 0).toString()) ??
+            0;
         final shouldApplyRemoteSettings =
             remoteRevision >= localRevisionBeforePull || allowRemoteBootstrap;
 
         if (shouldApplyRemoteSettings) {
-          if (settings['officeName'] != null) { officeName = settings['officeName'].toString(); await p.setString('officeName', officeName); }
-          if (settings['officePhone'] != null) { officePhone = settings['officePhone'].toString(); await p.setString('officePhone', officePhone); }
-          if (settings['officeAddress'] != null) { officeAddress = settings['officeAddress'].toString(); await p.setString('officeAddress', officeAddress); }
-          if (settings['officeLogoBase64'] != null) { officeLogoBase64 = settings['officeLogoBase64'].toString(); await p.setString('officeLogoBase64', officeLogoBase64); }
-          if (settings['receiptFooter'] != null) { receiptFooter = settings['receiptFooter'].toString(); await p.setString('receiptFooter', receiptFooter); }
-          if (settings['balance'] != null) { balance = (settings['balance'] as num).toDouble(); await p.setDouble('balance', balance); }
-          if (settings['nextReceiptNumber'] != null) { nextReceiptNumber = (settings['nextReceiptNumber'] as num).toInt(); await p.setInt('nextReceiptNumber', nextReceiptNumber); }
-          if (settings['lastSasSync'] != null) { lastSasSync = DateTime.tryParse(settings['lastSasSync'].toString()); if (lastSasSync != null) await p.setString('lastSasSync', lastSasSync!.toIso8601String()); }
+          if (settings['officeName'] != null) {
+            officeName = settings['officeName'].toString();
+            await p.setString('officeName', officeName);
+          }
+          if (settings['officePhone'] != null) {
+            officePhone = settings['officePhone'].toString();
+            await p.setString('officePhone', officePhone);
+          }
+          if (settings['officeAddress'] != null) {
+            officeAddress = settings['officeAddress'].toString();
+            await p.setString('officeAddress', officeAddress);
+          }
+          if (settings['officeLogoBase64'] != null) {
+            officeLogoBase64 = settings['officeLogoBase64'].toString();
+            await p.setString('officeLogoBase64', officeLogoBase64);
+          }
+          if (settings['receiptFooter'] != null) {
+            receiptFooter = settings['receiptFooter'].toString();
+            await p.setString('receiptFooter', receiptFooter);
+          }
+          if (settings['balance'] != null) {
+            balance = (settings['balance'] as num).toDouble();
+            await p.setDouble('balance', balance);
+          }
+          if (settings['nextReceiptNumber'] != null) {
+            nextReceiptNumber = (settings['nextReceiptNumber'] as num).toInt();
+            await p.setInt('nextReceiptNumber', nextReceiptNumber);
+          }
+          if (settings['lastSasSync'] != null) {
+            lastSasSync = DateTime.tryParse(settings['lastSasSync'].toString());
+            if (lastSasSync != null) {
+              await p.setString('lastSasSync', lastSasSync!.toIso8601String());
+            }
+          }
         } else {
-          debugPrint('Skip stale Firebase settings snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision');
+          debugPrint(
+            'Skip stale Firebase settings snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision',
+          );
         }
-
       }
 
       final packagesPayload = agentData['packages'];
@@ -892,20 +1233,32 @@ class AppStore {
       }
 
       if (agentData['messageTemplates'] is Map) {
-        for (final entry in (Map<String, dynamic>.from(agentData['messageTemplates'])).entries) {
-          if (entry.value != null) messageTemplates[entry.key] = entry.value.toString();
+        for (final entry in (Map<String, dynamic>.from(
+          agentData['messageTemplates'],
+        )).entries) {
+          if (entry.value != null) {
+            messageTemplates[entry.key] = entry.value.toString();
+          }
         }
         _migrateNearExpiryTemplate();
         await p.setString('messageTemplates', jsonEncode(messageTemplates));
       } else {
         final localMt = p.getString('messageTemplates');
-        if (localMt != null) { try { messageTemplates.addAll(Map<String,String>.from(jsonDecode(localMt))); } catch (_) {} }
+        if (localMt != null) {
+          try {
+            messageTemplates.addAll(
+              Map<String, String>.from(jsonDecode(localMt)),
+            );
+          } catch (_) {}
+        }
         _migrateNearExpiryTemplate();
         await p.setString('messageTemplates', jsonEncode(messageTemplates));
       }
 
       if (agentData['subscription'] is Map) {
-        final subscription = Map<String, dynamic>.from(agentData['subscription']);
+        final subscription = Map<String, dynamic>.from(
+          agentData['subscription'],
+        );
         _applySubscriptionMap(subscription);
         await p.setString('subscriptionPlan', subscriptionPlan);
         await p.setString('subscriptionPlanLabel', subscriptionPlanLabel);
@@ -913,33 +1266,54 @@ class AppStore {
         await p.setString('subscriptionPrice', subscriptionPrice);
         await p.setString('paymentMethod', paymentMethod);
         await p.setBool('subscriptionAutoExpire', subscriptionAutoExpire);
-        await p.setString('subscriptionLastPaymentId', subscriptionLastPaymentId);
+        await p.setString(
+          'subscriptionLastPaymentId',
+          subscriptionLastPaymentId,
+        );
         await p.setString('subscriptionStatus', subscriptionStatus);
         if (subscriptionStartedAt != null) {
-          await p.setString('subscriptionStartedAt', subscriptionStartedAt!.toIso8601String());
+          await p.setString(
+            'subscriptionStartedAt',
+            subscriptionStartedAt!.toIso8601String(),
+          );
         }
         if (subscriptionEndsAt != null) {
-          await p.setString('subscriptionEndsAt', subscriptionEndsAt!.toIso8601String());
+          await p.setString(
+            'subscriptionEndsAt',
+            subscriptionEndsAt!.toIso8601String(),
+          );
         }
       } else {
         final legacyPlan = p.getString('subscriptionPlan') ?? '';
         final legacyStarted = p.getString('subscriptionStartedAt') ?? '';
         final legacyEnded = p.getString('subscriptionEndsAt') ?? '';
         if (legacyPlan.isNotEmpty) subscriptionPlan = legacyPlan;
-        subscriptionPlanLabel = p.getString('subscriptionPlanLabel') ?? subscriptionPlanLabel;
+        subscriptionPlanLabel =
+            p.getString('subscriptionPlanLabel') ?? subscriptionPlanLabel;
         if (subscriptionPlan.isNotEmpty) {
           subscriptionPlanLabel = subscriptionPlanLabelFor(subscriptionPlan);
         }
-        subscriptionDurationDays = p.getInt('subscriptionDurationDays') ?? subscriptionDurationDays;
-        subscriptionPrice = p.getString('subscriptionPrice') ?? subscriptionPrice;
+        subscriptionDurationDays =
+            p.getInt('subscriptionDurationDays') ?? subscriptionDurationDays;
+        subscriptionPrice =
+            p.getString('subscriptionPrice') ?? subscriptionPrice;
         paymentMethod = p.getString('paymentMethod') ?? paymentMethod;
-        subscriptionAutoExpire = p.getBool('subscriptionAutoExpire') ?? subscriptionAutoExpire;
-        subscriptionLastPaymentId = p.getString('subscriptionLastPaymentId') ?? subscriptionLastPaymentId;
-        subscriptionStatus = p.getString('subscriptionStatus') ?? subscriptionStatus;
-        subscriptionStartedAt = _parseDateTime(legacyStarted) ?? subscriptionStartedAt;
+        subscriptionAutoExpire =
+            p.getBool('subscriptionAutoExpire') ?? subscriptionAutoExpire;
+        subscriptionLastPaymentId =
+            p.getString('subscriptionLastPaymentId') ??
+            subscriptionLastPaymentId;
+        subscriptionStatus =
+            p.getString('subscriptionStatus') ?? subscriptionStatus;
+        subscriptionStartedAt =
+            _parseDateTime(legacyStarted) ?? subscriptionStartedAt;
         subscriptionEndsAt = _parseDateTime(legacyEnded) ?? subscriptionEndsAt;
-        if (subscriptionPlan.isNotEmpty && subscriptionStartedAt != null && subscriptionEndsAt == null) {
-          subscriptionEndsAt = subscriptionStartedAt!.add(_subscriptionDurationForPlan(subscriptionPlan));
+        if (subscriptionPlan.isNotEmpty &&
+            subscriptionStartedAt != null &&
+            subscriptionEndsAt == null) {
+          subscriptionEndsAt = subscriptionStartedAt!.add(
+            _subscriptionDurationForPlan(subscriptionPlan),
+          );
         }
       }
 
@@ -958,15 +1332,26 @@ class AppStore {
           await p.setString('agentName', agentName);
         }
         if (agentName.trim().isEmpty) {
-          agentName = [agentFirstName, agentLastName].where((e) => e.isNotEmpty).join(' ').trim();
+          agentName = [
+            agentFirstName,
+            agentLastName,
+          ].where((e) => e.isNotEmpty).join(' ').trim();
           await p.setString('agentName', agentName);
         }
         if (profile['email'] != null) {
           agentEmail = profile['email'].toString().trim();
           await p.setString('agentEmail', agentEmail);
         }
-        if (profile['sasUsername'] != null) sasUsername = profile['sasUsername'].toString();
-        if (profile['phone'] != null) officePhone = profile['phone'].toString().trim();
+        if (profile['agentKey'] != null) {
+          agentKey = profile['agentKey'].toString().trim();
+          await p.setString('agentKey', agentKey);
+        }
+        if (profile['sasUsername'] != null) {
+          sasUsername = profile['sasUsername'].toString();
+        }
+        if (profile['phone'] != null) {
+          officePhone = profile['phone'].toString().trim();
+        }
         refreshSubscriptionStatus();
       }
 
@@ -979,7 +1364,9 @@ class AppStore {
             await p.setInt(subscribersRevisionKey, subscribersRevision);
           }
         } else {
-          debugPrint('Skip stale Firebase subscribers snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision');
+          debugPrint(
+            'Skip stale Firebase subscribers snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision',
+          );
         }
       }
       await _loadSubscribers(p);
@@ -987,11 +1374,15 @@ class AppStore {
         applyDebtsPayload(agentData['debts']);
         await p.setString(
           'subscribers',
-          jsonEncode(subscribers.map((subscriber) => subscriber.toJson()).toList()),
+          jsonEncode(
+            subscribers.map((subscriber) => subscriber.toJson()).toList(),
+          ),
         );
       }
       applyDailyTaskEventsPayload(agentData[dailyTaskEventsKey]);
       await _persistDailyTaskEventsLocally(p);
+      applyAccountingActivationsPayload(agentData[accountingActivationsKey]);
+      await _persistAccountingLocally(p);
     } catch (e) {
       debugPrint('Firebase pull failed: $e');
       final p = await SharedPreferences.getInstance();
@@ -1005,18 +1396,40 @@ class AppStore {
     if (raw != null && raw.isNotEmpty) {
       try {
         final decoded = jsonDecode(raw);
-        final temp=<Subscriber>[];
+        final temp = <Subscriber>[];
         if (decoded is List) {
-          for (final e in decoded){ if(e is Map) temp.add(Subscriber.fromJson(Map<String,dynamic>.from(e))); }
+          for (final e in decoded) {
+            if (e is Map) {
+              temp.add(Subscriber.fromJson(Map<String, dynamic>.from(e)));
+            }
+          }
         } else if (decoded is Map) {
-          final iterable = decoded.containsKey('subscribers') ? (decoded['subscribers'] as Iterable) : decoded.values;
-          for(final e in iterable){ if(e is Map) temp.add(Subscriber.fromJson(Map<String,dynamic>.from(e))); }
+          final iterable = decoded.containsKey('subscribers')
+              ? (decoded['subscribers'] as Iterable)
+              : decoded.values;
+          for (final e in iterable) {
+            if (e is Map) {
+              temp.add(Subscriber.fromJson(Map<String, dynamic>.from(e)));
+            }
+          }
         }
-        subscribers..clear()..addAll(temp);
+        subscribers
+          ..clear()
+          ..addAll(temp);
       } catch (_) {
         final backup = p.getString('subscribers_backup');
         if (backup != null && backup.isNotEmpty && backup != raw) {
-          try { final decoded = jsonDecode(backup); final List list = decoded['subscribers'] as List; subscribers.addAll(list.map((e) => Subscriber.fromJson(Map<String, dynamic>.from(e)))); } catch (_) { subscribers.clear(); }
+          try {
+            final decoded = jsonDecode(backup);
+            final List list = decoded['subscribers'] as List;
+            subscribers.addAll(
+              list.map(
+                (e) => Subscriber.fromJson(Map<String, dynamic>.from(e)),
+              ),
+            );
+          } catch (_) {
+            subscribers.clear();
+          }
         }
       }
     }
@@ -1029,12 +1442,15 @@ class AppStore {
     subscribers.clear();
     packages.clear();
     dailyTaskEvents.clear();
+    accountingActivations.clear();
 
     messageTemplates.clear();
     messageTemplates['activation'] = activationTemplate;
-    messageTemplates['extension'] = 'مرحباً {name}، تم تمديد اشتراكك لدى {office} حتى {endDate}.';
+    messageTemplates['extension'] =
+        'مرحباً {name}، تم تمديد اشتراكك لدى {office} حتى {endDate}.';
     messageTemplates['nearExpiry'] = nearExpiryTemplate;
-    messageTemplates['expired'] = 'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.';
+    messageTemplates['expired'] =
+        'مرحباً {name}، اشتراكك لدى {office} منتهي. يرجى التجديد لاستمرار الخدمة.';
     messageTemplates['debt'] = debtTemplate;
     messageTemplates['debtPaid'] = debtPaidTemplate;
 
@@ -1042,6 +1458,9 @@ class AppStore {
     agentLastName = '';
     agentName = '';
     agentEmail = '';
+    agentKey = '';
+    chatMessages.clear();
+    stopChatSync();
     officeName = '';
     officePhone = '';
     officeAddress = '';
@@ -1102,6 +1521,8 @@ class AppStore {
       'subscribersRevision',
       'packagesRevision',
       'dailyTaskEvents',
+      'accountingActivations',
+      'accountingBalanceAdditions',
       'subscriptionPlan',
       'subscriptionPlanLabel',
       'subscriptionDurationDays',
@@ -1116,6 +1537,7 @@ class AppStore {
       'agentLastName',
       'agentName',
       'agentEmail',
+      'agentKey',
       'agentId',
       'sasUsername',
       'dataVersion',
@@ -1123,6 +1545,8 @@ class AppStore {
     for (final key in keysToClear) {
       await p.remove(key);
     }
+    await p.remove(_localAccountingKey(accountingActivationsKey));
+    await p.remove(_localAccountingKey('accountingBalanceAdditions'));
   }
 
   static Future<void> load() async {
@@ -1139,6 +1563,7 @@ class AppStore {
     agentLastName = p.getString('agentLastName') ?? '';
     agentName = p.getString('agentName') ?? '';
     agentEmail = p.getString('agentEmail') ?? '';
+    agentKey = p.getString('agentKey') ?? '';
     officeName = p.getString('officeName') ?? '';
     officePhone = p.getString('officePhone') ?? '';
     officeAddress = p.getString('officeAddress') ?? '';
@@ -1157,8 +1582,14 @@ class AppStore {
     subscriptionAutoExpire = p.getBool('subscriptionAutoExpire') ?? true;
     subscriptionLastPaymentId = p.getString('subscriptionLastPaymentId') ?? '';
     subscriptionStatus = p.getString('subscriptionStatus') ?? 'inactive';
-    subscriptionStartedAt = DateTime.tryParse(p.getString('subscriptionStartedAt') ?? '');
-    subscriptionEndsAt = DateTime.tryParse(p.getString('subscriptionEndsAt') ?? '');
+    subscriptionStartedAt = DateTime.tryParse(
+      p.getString('subscriptionStartedAt') ?? '',
+    );
+    subscriptionEndsAt = DateTime.tryParse(
+      p.getString('subscriptionEndsAt') ?? '',
+    );
+    isDarkMode = p.getBool('isDarkMode') ?? false;
+    themeModeChange.value = isDarkMode;
     final eventsRaw = p.getString(dailyTaskEventsKey);
     dailyTaskEvents.clear();
     if (eventsRaw != null && eventsRaw.isNotEmpty) {
@@ -1176,15 +1607,28 @@ class AppStore {
       } catch (_) {}
     }
     _trimDailyTaskEvents();
+    _loadAccountingLocally(p);
     try {
       await _pullFromFirebase().timeout(const Duration(seconds: 8));
     } catch (e) {
       debugPrint('Firebase sync on load failed: $e');
       packages.clear();
       final pr = p.getString('packages');
-      if (pr != null) { try { packages.addAll((jsonDecode(pr) as List).map((e)=>PackagePlan.fromJson(Map<String,dynamic>.from(e)))); } catch (_) {} }
+      if (pr != null) {
+        try {
+          packages.addAll(
+            (jsonDecode(pr) as List).map(
+              (e) => PackagePlan.fromJson(Map<String, dynamic>.from(e)),
+            ),
+          );
+        } catch (_) {}
+      }
       final mt = p.getString('messageTemplates');
-      if (mt != null) { try { messageTemplates.addAll(Map<String,String>.from(jsonDecode(mt))); } catch (_) {} }
+      if (mt != null) {
+        try {
+          messageTemplates.addAll(Map<String, String>.from(jsonDecode(mt)));
+        } catch (_) {}
+      }
       _migrateNearExpiryTemplate();
       await p.setString('messageTemplates', jsonEncode(messageTemplates));
       await _loadSubscribers(p);
@@ -1200,13 +1644,19 @@ class AppStore {
     } catch (e) {
       debugPrint('Firebase daily tasks backfill failed: $e');
     }
+    try {
+      await _syncAccountingToFirebase();
+    } catch (e) {
+      debugPrint('Firebase accounting backfill failed: $e');
+    }
   }
 
   static DateTime? _parseDateTime(dynamic value) {
     if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
     if (value is num) return DateTime.fromMillisecondsSinceEpoch(value.toInt());
     if (value is String && value.trim().isNotEmpty) {
-      return DateTime.tryParse(value.trim()) ?? DateTime.tryParse(value.trim().replaceFirst(' ', 'T'));
+      return DateTime.tryParse(value.trim()) ??
+          DateTime.tryParse(value.trim().replaceFirst(' ', 'T'));
     }
     return null;
   }
@@ -1231,27 +1681,34 @@ class AppStore {
   }
 
   static Map<String, dynamic> _subscriptionMap() => {
-        'plan': subscriptionPlan.isNotEmpty ? subscriptionPlan : 'free',
-        'status': subscriptionStatus,
-        'durationDays': subscriptionDurationDays,
-        'startDate': subscriptionStartedAt?.toIso8601String(),
-        'endDate': subscriptionEndsAt?.toIso8601String(),
-        'autoExpire': subscriptionAutoExpire,
-        'lastPaymentId': subscriptionLastPaymentId,
-      };
+    'plan': subscriptionPlan.isNotEmpty ? subscriptionPlan : 'free',
+    'status': subscriptionStatus,
+    'durationDays': subscriptionDurationDays,
+    'startDate': subscriptionStartedAt?.toIso8601String(),
+    'endDate': subscriptionEndsAt?.toIso8601String(),
+    'autoExpire': subscriptionAutoExpire,
+    'lastPaymentId': subscriptionLastPaymentId,
+  };
 
   static void _applySubscriptionMap(Map<String, dynamic> source) {
     final planValue = (source['plan'] ?? '').toString().trim();
     if (planValue.isNotEmpty) subscriptionPlan = planValue;
     final statusValue = (source['status'] ?? '').toString().trim();
     if (statusValue.isNotEmpty) subscriptionStatus = statusValue;
-    subscriptionDurationDays = int.tryParse((source['durationDays'] ?? 0).toString()) ?? subscriptionDurationDays;
-    subscriptionStartedAt = _parseDateTime(source['startDate']) ?? subscriptionStartedAt;
-    subscriptionEndsAt = _parseDateTime(source['endDate']) ?? subscriptionEndsAt;
+    subscriptionDurationDays =
+        int.tryParse((source['durationDays'] ?? 0).toString()) ??
+        subscriptionDurationDays;
+    subscriptionStartedAt =
+        _parseDateTime(source['startDate']) ?? subscriptionStartedAt;
+    subscriptionEndsAt =
+        _parseDateTime(source['endDate']) ?? subscriptionEndsAt;
     if (source['autoExpire'] != null) {
-      subscriptionAutoExpire = source['autoExpire'] == true || source['autoExpire'].toString().toLowerCase() == 'true';
+      subscriptionAutoExpire =
+          source['autoExpire'] == true ||
+          source['autoExpire'].toString().toLowerCase() == 'true';
     }
-    subscriptionLastPaymentId = (source['lastPaymentId'] ?? subscriptionLastPaymentId).toString();
+    subscriptionLastPaymentId =
+        (source['lastPaymentId'] ?? subscriptionLastPaymentId).toString();
     subscriptionPlanLabel = subscriptionPlanLabelFor(subscriptionPlan);
   }
 
@@ -1264,7 +1721,9 @@ class AppStore {
 
     if (subscriptionEndsAt == null) {
       if (subscriptionStartedAt != null) {
-        subscriptionEndsAt = subscriptionStartedAt!.add(_subscriptionDurationForPlan(subscriptionPlan));
+        subscriptionEndsAt = subscriptionStartedAt!.add(
+          _subscriptionDurationForPlan(subscriptionPlan),
+        );
       } else {
         subscriptionStatus = 'inactive';
         return;
@@ -1272,7 +1731,9 @@ class AppStore {
     }
 
     // Expire immediately when reaching the end instant (>= endDate).
-    subscriptionStatus = reference.isBefore(subscriptionEndsAt!) ? 'active' : 'expired';
+    subscriptionStatus = reference.isBefore(subscriptionEndsAt!)
+        ? 'active'
+        : 'expired';
   }
 
   static List<Map<String, dynamic>> _packagesListPayload() =>
@@ -1294,10 +1755,7 @@ class AppStore {
       final name = (map['name'] ?? '').toString().trim();
       if (name.isEmpty) return;
       parsed.add(
-        PackagePlan(
-          name: name,
-          price: (map['price'] ?? 0).toDouble(),
-        ),
+        PackagePlan(name: name, price: (map['price'] ?? 0).toDouble()),
       );
     }
 
@@ -1371,7 +1829,9 @@ class AppStore {
         'paidAmount': subscriber.paid,
         'remainingAmount': subscriber.remaining,
         'paymentDate': subscriber.paymentDate,
-        'payments': subscriber.payments.map((payment) => payment.toJson()).toList(),
+        'payments': subscriber.payments
+            .map((payment) => payment.toJson())
+            .toList(),
       };
     }
     return debts;
@@ -1431,9 +1891,114 @@ class AppStore {
     if (!_isLoggedIn) return;
     final payload = buildDailyTaskEventsPayload();
     if (payload.isEmpty) return;
-    await _agentRef.child(dailyTaskEventsKey).update(payload).timeout(
-          const Duration(seconds: 10),
+    await _agentRef
+        .child(dailyTaskEventsKey)
+        .update(payload)
+        .timeout(const Duration(seconds: 10));
+  }
+
+  static String _accountingActivationKey(AccountingActivationRecord record) {
+    final identity = <String>[
+      record.at.toUtc().toIso8601String(),
+      record.subscriberUser.trim().toLowerCase(),
+      record.packageName.trim().toLowerCase(),
+      record.saleAmount.toStringAsFixed(4),
+      record.sasDeduction.toStringAsFixed(4),
+    ].join('|');
+    return base64Url.encode(utf8.encode(identity)).replaceAll('=', '');
+  }
+
+  static Map<String, dynamic> buildAccountingActivationsPayload() => {
+    for (final record in accountingActivations)
+      _accountingActivationKey(record): record.toJson(),
+  };
+
+  static void applyAccountingActivationsPayload(dynamic payload) {
+    if (payload is! Map) return;
+    final recordsByKey = <String, AccountingActivationRecord>{
+      for (final record in accountingActivations)
+        _accountingActivationKey(record): record,
+    };
+    for (final rawRecord in payload.values) {
+      if (rawRecord is! Map) continue;
+      final record = AccountingActivationRecord.fromJson(
+        Map<String, dynamic>.from(rawRecord),
+      );
+      recordsByKey[_accountingActivationKey(record)] = record;
+    }
+    accountingActivations
+      ..clear()
+      ..addAll(recordsByKey.values)
+      ..sort((a, b) => b.at.compareTo(a.at));
+    _migrateLegacyAccountingSaleAmounts();
+  }
+
+  static void _migrateLegacyAccountingSaleAmounts() {
+    for (var index = 0; index < accountingActivations.length; index++) {
+      final record = accountingActivations[index];
+      if (!record.needsSaleAmountMigration) continue;
+      final user = record.subscriberUser.trim().toLowerCase();
+      final subscriber = subscribers.cast<Subscriber?>().firstWhere(
+        (item) => item?.user.trim().toLowerCase() == user,
+        orElse: () => null,
+      );
+      if (subscriber == null || subscriber.price <= 0) continue;
+      accountingActivations[index] = AccountingActivationRecord(
+        subscriberUser: record.subscriberUser,
+        subscriberName: record.subscriberName,
+        packageName: record.packageName,
+        saleAmount: subscriber.price,
+        sasDeduction: record.sasDeduction,
+        at: record.at,
+        sasBalanceBefore: record.sasBalanceBefore,
+        sasBalanceAfter: record.sasBalanceAfter,
+      );
+    }
+  }
+
+  static void _loadAccountingLocally(SharedPreferences preferences) {
+    accountingActivations.clear();
+    final activationsRaw = preferences.getString(
+      _localAccountingKey(accountingActivationsKey),
+    );
+    try {
+      final decoded = jsonDecode(activationsRaw ?? '[]');
+      if (decoded is List) {
+        accountingActivations.addAll(
+          decoded.whereType<Map>().map(
+            (item) => AccountingActivationRecord.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          ),
         );
+      }
+    } catch (_) {}
+    _migrateLegacyAccountingSaleAmounts();
+    accountingActivations.sort((a, b) => b.at.compareTo(a.at));
+  }
+
+  static String _localAccountingKey(String key) {
+    final uid = _uid?.trim();
+    return uid == null || uid.isEmpty ? key : '${key}_$uid';
+  }
+
+  static Future<void> _persistAccountingLocally(
+    SharedPreferences preferences,
+  ) async {
+    await preferences.setString(
+      _localAccountingKey(accountingActivationsKey),
+      jsonEncode(
+        accountingActivations.map((record) => record.toJson()).toList(),
+      ),
+    );
+  }
+
+  static Future<void> _syncAccountingToFirebase() async {
+    if (!_isLoggedIn) return;
+    final activations = buildAccountingActivationsPayload();
+    if (activations.isNotEmpty) {
+      await _agentRef.child(accountingActivationsKey).update(activations);
+    }
   }
 
   static void applyDebtsPayload(dynamic payload) {
@@ -1451,8 +2016,8 @@ class AppStore {
       if (index < 0) continue;
 
       final subscriber = subscribers[index];
-      final subscriptionAmount =
-          (debt['subscriptionAmount'] as num?)?.toDouble();
+      final subscriptionAmount = (debt['subscriptionAmount'] as num?)
+          ?.toDouble();
       final paidAmount = (debt['paidAmount'] as num?)?.toDouble();
       if (subscriptionAmount != null && paidAmount != null) {
         subscriber.setDebtAmounts(
@@ -1460,16 +2025,17 @@ class AppStore {
           paidAmount: paidAmount,
         );
       }
-      subscriber.paymentDate =
-          (debt['paymentDate'] ?? subscriber.paymentDate).toString();
+      subscriber.paymentDate = (debt['paymentDate'] ?? subscriber.paymentDate)
+          .toString();
 
       final paymentsPayload = debt['payments'];
       if (paymentsPayload is List) {
         subscriber.payments = paymentsPayload
             .whereType<Map>()
-            .map((payment) => PaymentRecord.fromJson(
-                  Map<String, dynamic>.from(payment),
-                ))
+            .map(
+              (payment) =>
+                  PaymentRecord.fromJson(Map<String, dynamic>.from(payment)),
+            )
             .toList();
         if (subscriber.payments.isNotEmpty) {
           subscriber.reconcilePaidFromPayments();
@@ -1488,13 +2054,18 @@ class AppStore {
   }
 
   static Future<void> save() async {
-    if (!_isLoggedIn) debugPrint('AppStore.save: User not logged in, saving locally only');
+    if (!_isLoggedIn) {
+      debugPrint('AppStore.save: User not logged in, saving locally only');
+    }
     final p = await SharedPreferences.getInstance();
     subscribersRevision = DateTime.now().millisecondsSinceEpoch;
     refreshSubscriptionStatus();
 
     if (agentName.trim().isEmpty) {
-      agentName = [agentFirstName, agentLastName].where((e) => e.isNotEmpty).join(' ').trim();
+      agentName = [
+        agentFirstName,
+        agentLastName,
+      ].where((e) => e.isNotEmpty).join(' ').trim();
     }
 
     await p.setString('officeName', officeName);
@@ -1507,8 +2078,13 @@ class AppStore {
     await p.setInt(subscribersRevisionKey, subscribersRevision);
     packagesRevision = DateTime.now().millisecondsSinceEpoch;
     await p.setInt(packagesRevisionKey, packagesRevision);
-    if (lastSasSync != null) await p.setString('lastSasSync', lastSasSync!.toIso8601String());
-    await p.setString('packages', jsonEncode(packages.map((e)=>e.toJson()).toList()));
+    if (lastSasSync != null) {
+      await p.setString('lastSasSync', lastSasSync!.toIso8601String());
+    }
+    await p.setString(
+      'packages',
+      jsonEncode(packages.map((e) => e.toJson()).toList()),
+    );
     await p.setString('messageTemplates', jsonEncode(messageTemplates));
     await p.setString('subscriptionPlan', subscriptionPlan);
     await p.setString('subscriptionPlanLabel', subscriptionPlanLabel);
@@ -1518,11 +2094,24 @@ class AppStore {
     await p.setBool('subscriptionAutoExpire', subscriptionAutoExpire);
     await p.setString('subscriptionLastPaymentId', subscriptionLastPaymentId);
     await p.setString('subscriptionStatus', subscriptionStatus);
-    if (subscriptionStartedAt != null) await p.setString('subscriptionStartedAt', subscriptionStartedAt!.toIso8601String());
-    if (subscriptionEndsAt != null) await p.setString('subscriptionEndsAt', subscriptionEndsAt!.toIso8601String());
+    if (subscriptionStartedAt != null) {
+      await p.setString(
+        'subscriptionStartedAt',
+        subscriptionStartedAt!.toIso8601String(),
+      );
+    }
+    if (subscriptionEndsAt != null) {
+      await p.setString(
+        'subscriptionEndsAt',
+        subscriptionEndsAt!.toIso8601String(),
+      );
+    }
+    await p.setBool('isDarkMode', isDarkMode);
     final encoded = jsonEncode(subscribers.map((e) => e.toJson()).toList());
     final previous = p.getString('subscribers');
-    if (previous != null && previous.isNotEmpty) await p.setString('subscribers_backup', previous);
+    if (previous != null && previous.isNotEmpty) {
+      await p.setString('subscribers_backup', previous);
+    }
     await p.setInt('dataVersion', dataVersion);
     await p.setString('subscribers', encoded);
     _trimDailyTaskEvents();
@@ -1530,6 +2119,7 @@ class AppStore {
       dailyTaskEventsKey,
       jsonEncode(dailyTaskEvents.map((e) => e.toJson()).toList()),
     );
+    await _persistAccountingLocally(p);
 
     if (!_isLoggedIn) return;
 
@@ -1553,6 +2143,7 @@ class AppStore {
       final packagesList = _packagesListPayload();
       final debtsPayload = buildDebtsPayload();
       final dailyTasksPayload = buildDailyTaskEventsPayload();
+      final accountingActivationsPayload = buildAccountingActivationsPayload();
 
       // Write revision and subscribers in a single update to avoid
       // intermediate snapshots where revision is new but subscribers are old.
@@ -1569,6 +2160,8 @@ class AppStore {
         'debts': debtsPayload.isEmpty ? null : debtsPayload,
         for (final entry in dailyTasksPayload.entries)
           '$dailyTaskEventsKey/${entry.key}': entry.value,
+        for (final entry in accountingActivationsPayload.entries)
+          '$accountingActivationsKey/${entry.key}': entry.value,
       };
       if (lastSasSync != null) {
         storePatch['settings/lastSasSync'] = lastSasSync!.toIso8601String();
@@ -1579,12 +2172,17 @@ class AppStore {
       await ref.child('packagesList').set(packagesList);
       await ref.child('messageTemplates').set(messageTemplates);
       debugPrint('Firebase save completed successfully');
-    } catch (e) { debugPrint('Firebase save failed: $e'); }
+    } catch (e) {
+      debugPrint('Firebase save failed: $e');
+    }
   }
 
   static void startRealtimeSync() {
     realtimeListener?.cancel();
-    if (!_isLoggedIn) { debugPrint('Realtime: not logged in'); return; }
+    if (!_isLoggedIn) {
+      debugPrint('Realtime: not logged in');
+      return;
+    }
     try {
       final ref = _agentRef;
       realtimeListener = ref.onValue.listen((event) async {
@@ -1600,23 +2198,61 @@ class AppStore {
               localRevisionBeforeEvent == 0 && subscribers.isEmpty;
           if (agentData['settings'] is Map) {
             final settings = Map<String, dynamic>.from(agentData['settings']);
-            remoteRevision = int.tryParse((settings[subscribersRevisionKey] ?? 0).toString()) ?? 0;
+            remoteRevision =
+                int.tryParse(
+                  (settings[subscribersRevisionKey] ?? 0).toString(),
+                ) ??
+                0;
             final shouldApplyRemoteSettings =
-                remoteRevision >= localRevisionBeforeEvent || allowRemoteBootstrap;
+                remoteRevision >= localRevisionBeforeEvent ||
+                allowRemoteBootstrap;
 
             if (shouldApplyRemoteSettings) {
-              if (settings['officeName'] != null) { officeName = settings['officeName'].toString(); await p.setString('officeName', officeName); }
-              if (settings['officePhone'] != null) { officePhone = settings['officePhone'].toString(); await p.setString('officePhone', officePhone); }
-              if (settings['officeAddress'] != null) { officeAddress = settings['officeAddress'].toString(); await p.setString('officeAddress', officeAddress); }
-              if (settings['officeLogoBase64'] != null) { officeLogoBase64 = settings['officeLogoBase64'].toString(); await p.setString('officeLogoBase64', officeLogoBase64); }
-              if (settings['receiptFooter'] != null) { receiptFooter = settings['receiptFooter'].toString(); await p.setString('receiptFooter', receiptFooter); }
-              if (settings['balance'] != null) { balance = (settings['balance'] as num).toDouble(); await p.setDouble('balance', balance); }
-              if (settings['nextReceiptNumber'] != null) { nextReceiptNumber = (settings['nextReceiptNumber'] as num).toInt(); await p.setInt('nextReceiptNumber', nextReceiptNumber); }
-              if (settings['lastSasSync'] != null) { lastSasSync = DateTime.tryParse(settings['lastSasSync'].toString()); if (lastSasSync != null) await p.setString('lastSasSync', lastSasSync!.toIso8601String()); }
+              if (settings['officeName'] != null) {
+                officeName = settings['officeName'].toString();
+                await p.setString('officeName', officeName);
+              }
+              if (settings['officePhone'] != null) {
+                officePhone = settings['officePhone'].toString();
+                await p.setString('officePhone', officePhone);
+              }
+              if (settings['officeAddress'] != null) {
+                officeAddress = settings['officeAddress'].toString();
+                await p.setString('officeAddress', officeAddress);
+              }
+              if (settings['officeLogoBase64'] != null) {
+                officeLogoBase64 = settings['officeLogoBase64'].toString();
+                await p.setString('officeLogoBase64', officeLogoBase64);
+              }
+              if (settings['receiptFooter'] != null) {
+                receiptFooter = settings['receiptFooter'].toString();
+                await p.setString('receiptFooter', receiptFooter);
+              }
+              if (settings['balance'] != null) {
+                balance = (settings['balance'] as num).toDouble();
+                await p.setDouble('balance', balance);
+              }
+              if (settings['nextReceiptNumber'] != null) {
+                nextReceiptNumber = (settings['nextReceiptNumber'] as num)
+                    .toInt();
+                await p.setInt('nextReceiptNumber', nextReceiptNumber);
+              }
+              if (settings['lastSasSync'] != null) {
+                lastSasSync = DateTime.tryParse(
+                  settings['lastSasSync'].toString(),
+                );
+                if (lastSasSync != null) {
+                  await p.setString(
+                    'lastSasSync',
+                    lastSasSync!.toIso8601String(),
+                  );
+                }
+              }
             } else {
-              debugPrint('Realtime: ignored stale settings snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision');
+              debugPrint(
+                'Realtime: ignored stale settings snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision',
+              );
             }
-
           }
           if (agentData['packages'] is Map) {
             applyPackagesPayload(
@@ -1625,21 +2261,39 @@ class AppStore {
               remoteRevision: remoteRevision,
               allowBootstrap: subscribersRevision == 0 && subscribers.isEmpty,
             );
-            await p.setString('packages', jsonEncode(packages.map((e)=>e.toJson()).toList()));
+            await p.setString(
+              'packages',
+              jsonEncode(packages.map((e) => e.toJson()).toList()),
+            );
           }
           if (agentData['messageTemplates'] is Map) {
-            for (final entry in (Map<String, dynamic>.from(agentData['messageTemplates'])).entries) {
-              if (entry.value != null) messageTemplates[entry.key] = entry.value.toString();
+            for (final entry in (Map<String, dynamic>.from(
+              agentData['messageTemplates'],
+            )).entries) {
+              if (entry.value != null) {
+                messageTemplates[entry.key] = entry.value.toString();
+              }
             }
             _migrateNearExpiryTemplate();
             await p.setString('messageTemplates', jsonEncode(messageTemplates));
           }
           if (agentData['profile'] is Map) {
             final profile = Map<String, dynamic>.from(agentData['profile']);
-            if (profile['sasUsername'] != null) sasUsername = profile['sasUsername'].toString();
+            if (profile['sasUsername'] != null) {
+              sasUsername = profile['sasUsername'].toString();
+            }
+            if (profile['agentKey'] != null) {
+              final newKey = profile['agentKey'].toString().trim();
+              if (newKey.isNotEmpty && newKey != agentKey) {
+                agentKey = newKey;
+                await p.setString('agentKey', agentKey);
+                if (chatListener == null) startChatSync();
+              }
+            }
           }
           if (agentData['subscribers'] != null) {
-            if (remoteRevision > localRevisionBeforeEvent || allowRemoteBootstrap) {
+            if (remoteRevision > localRevisionBeforeEvent ||
+                allowRemoteBootstrap) {
               final rawJson = jsonEncode(agentData['subscribers']);
               await p.setString('subscribers', rawJson);
               if (remoteRevision > 0) {
@@ -1655,22 +2309,58 @@ class AppStore {
                 ),
               );
             } else {
-              debugPrint('Realtime: ignored stale subscribers snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision');
+              debugPrint(
+                'Realtime: ignored stale subscribers snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision',
+              );
             }
           }
           applyDailyTaskEventsPayload(agentData[dailyTaskEventsKey]);
           await _persistDailyTaskEventsLocally(p);
+          applyAccountingActivationsPayload(
+            agentData[accountingActivationsKey],
+          );
+          await _persistAccountingLocally(p);
           debugPrint('Realtime agent data updated');
-        } catch (e) { debugPrint('Realtime update error: $e'); }
+        } catch (e) {
+          debugPrint('Realtime update error: $e');
+        }
       });
-    } catch (e) { debugPrint('Realtime start error: $e'); }
+    } catch (e) {
+      debugPrint('Realtime start error: $e');
+    }
   }
 
-  static Future<void> deleteAllSubscribers() async { subscribers.clear(); await save(); }
-  static Future<void> deleteSasSubscribersOnly() async { subscribers.removeWhere((s) => s.source == 'sas'); await save(); }
+  static Future<void> deleteAllSubscribers() async {
+    subscribers.clear();
+    await save();
+  }
+
+  static Future<void> deleteSasSubscribersOnly() async {
+    subscribers.removeWhere((s) => s.source == 'sas');
+    await save();
+  }
 
   static bool isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  static bool hasRecordedActivation(Subscriber subscriber) {
+    final marker =
+        subscriber.sasData['local_activation_date'] ??
+        subscriber.sasData['activation_date'] ??
+        subscriber.sasData['activated_at'];
+    if (marker != null && marker.toString().trim().isNotEmpty) return true;
+
+    final user = subscriber.user.trim().toLowerCase();
+    if (user.isEmpty) return false;
+    return accountingActivations.any(
+          (record) => record.subscriberUser.trim().toLowerCase() == user,
+        ) ||
+        dailyTaskEvents.any(
+          (event) =>
+              event.type == 'activation' &&
+              event.subscriberUser.trim().toLowerCase() == user,
+        );
   }
 
   static void _trimDailyTaskEvents() {
@@ -1700,6 +2390,26 @@ class AppStore {
     }
   }
 
+  static Future<void> addAccountingActivation(
+    AccountingActivationRecord record, {
+    bool persist = true,
+  }) async {
+    final key = _accountingActivationKey(record);
+    accountingActivations.removeWhere(
+      (existing) => _accountingActivationKey(existing) == key,
+    );
+    accountingActivations.insert(0, record);
+    if (!persist) return;
+    final preferences = await SharedPreferences.getInstance();
+    await _persistAccountingLocally(preferences);
+    if (_isLoggedIn) {
+      await _agentRef
+          .child('$accountingActivationsKey/$key')
+          .set(record.toJson())
+          .timeout(const Duration(seconds: 10));
+    }
+  }
+
   static Future<int> issueReceiptNumber({bool persist = true}) async {
     final number = nextReceiptNumber;
     nextReceiptNumber++;
@@ -1707,5 +2417,198 @@ class AppStore {
       await save();
     }
     return number;
+  }
+
+  static Future<void> startChatSync() async {
+    chatListener?.cancel();
+    final ref = _chatRef;
+    if (ref == null) return;
+    try {
+      final event = await ref.once();
+      final snapshot = event.snapshot;
+      if (snapshot.value is Map) {
+        final Map<String, dynamic> existing = Map<String, dynamic>.from(
+          snapshot.value as Map,
+        );
+        final loaded = <ChatMessage>[];
+        for (final entry in existing.entries) {
+          final msg = ChatMessage.fromJson(
+            entry.key,
+            Map<String, dynamic>.from(entry.value as Map),
+          );
+          loaded.add(msg);
+        }
+        loaded.sort((a, b) => b.sentAt.compareTo(a.sentAt));
+        chatMessages
+          ..clear()
+          ..addAll(loaded);
+        chatMessagesChange.value++;
+      }
+
+      chatListener = ref.onChildAdded.listen((event) {
+        final snapshot = event.snapshot;
+        if (snapshot.value is! Map) return;
+        final msg = ChatMessage.fromJson(
+          snapshot.key!,
+          Map<String, dynamic>.from(snapshot.value as Map),
+        );
+        if (!chatMessages.any((m) => m.id == msg.id)) {
+          chatMessages.insert(0, msg);
+          chatMessagesChange.value++;
+        }
+      });
+    } catch (e) {
+      debugPrint('Chat sync error: $e');
+    }
+  }
+
+  static void stopChatSync() {
+    chatListener?.cancel();
+    chatListener = null;
+  }
+
+  static Future<bool> get isAdmin async {
+    final role = await UserRoleService.resolveRole();
+    return role == UserRoleService.adminRole;
+  }
+
+  static Future<bool> sendChatMessage(String text, {String? imageUrl}) async {
+    final ref = _chatRef;
+    if (ref == null || (text.trim().isEmpty && imageUrl == null)) {
+      debugPrint(
+        'sendChatMessage: ref is null or content empty. agentKey=$agentKey, uid=$_uid',
+      );
+      return false;
+    }
+    try {
+      final msgId =
+          '${DateTime.now().millisecondsSinceEpoch}_${chatMessages.length}';
+      final msg = ChatMessage(
+        id: msgId,
+        senderName: effectiveAgentName,
+        senderEmail: agentEmail,
+        text: text.trim(),
+        sentAt: DateTime.now(),
+        imageUrl: imageUrl,
+      );
+      chatMessages.insert(0, msg);
+      chatMessagesChange.value++;
+      await ref
+          .child(msgId)
+          .set(msg.toJson())
+          .timeout(const Duration(seconds: 10));
+      return true;
+    } catch (e) {
+      debugPrint('Send chat message error: $e');
+      return false;
+    }
+  }
+
+  static Future<String?> uploadChatImage(XFile file) async {
+    try {
+      final storageRef = FirebaseStorage.instance.ref(
+        'chat/${DateTime.now().millisecondsSinceEpoch}_${file.name}',
+      );
+      final bytes = await file.readAsBytes();
+      final task = await storageRef.putData(
+        bytes,
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+      return task.ref.getDownloadURL();
+    } catch (e) {
+      debugPrint('Upload chat image error: $e');
+      return null;
+    }
+  }
+
+  static void toggleTheme() {
+    isDarkMode = !isDarkMode;
+    themeModeChange.value = isDarkMode;
+    save();
+  }
+
+  static Future<bool> editChatMessage(String msgId, String newText) async {
+    final ref = _chatRef;
+    if (ref == null || newText.trim().isEmpty) return false;
+    try {
+      final snapshot = await ref.child(msgId).get();
+      if (!snapshot.exists) return false;
+      final msg = ChatMessage.fromJson(
+        msgId,
+        Map<String, dynamic>.from(snapshot.value as Map),
+      );
+      if (msg.senderEmail != agentEmail) return false;
+      final updated = ChatMessage(
+        id: msgId,
+        senderName: msg.senderName,
+        senderEmail: msg.senderEmail,
+        text: newText.trim(),
+        sentAt: msg.sentAt,
+        editedAt: DateTime.now(),
+      );
+      await ref
+          .child(msgId)
+          .update({
+            'text': updated.text,
+            'editedAt': updated.editedAt!.toIso8601String(),
+          })
+          .timeout(const Duration(seconds: 10));
+      final index = chatMessages.indexWhere((m) => m.id == msgId);
+      if (index >= 0) {
+        chatMessages[index] = updated;
+        chatMessagesChange.value++;
+      }
+      return true;
+    } catch (e) {
+      debugPrint('Edit chat message error: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> deleteChatMessage(String msgId) async {
+    final ref = _chatRef;
+    if (ref == null) return false;
+    try {
+      final snapshot = await ref.child(msgId).get();
+      if (!snapshot.exists) return false;
+      final msg = ChatMessage.fromJson(
+        msgId,
+        Map<String, dynamic>.from(snapshot.value as Map),
+      );
+      if (msg.senderEmail != agentEmail) return false;
+      await ref
+          .child(msgId)
+          .update({'deletedAt': DateTime.now().toIso8601String()})
+          .timeout(const Duration(seconds: 10));
+      final index = chatMessages.indexWhere((m) => m.id == msgId);
+      if (index >= 0) {
+        chatMessages[index] = ChatMessage(
+          id: msgId,
+          senderName: msg.senderName,
+          senderEmail: msg.senderEmail,
+          text: '',
+          sentAt: msg.sentAt,
+          deletedAt: DateTime.now(),
+        );
+        chatMessagesChange.value++;
+      }
+      return true;
+    } catch (e) {
+      debugPrint('Delete chat message error: $e');
+      return false;
+    }
+  }
+
+  static Future<void> deleteAllChat() async {
+    if (!await isAdmin) return;
+    final ref = _chatRef;
+    if (ref == null) return;
+    try {
+      await ref.remove().timeout(const Duration(seconds: 10));
+      chatMessages.clear();
+      chatMessagesChange.value++;
+    } catch (e) {
+      debugPrint('Delete all chat error: $e');
+    }
   }
 }
