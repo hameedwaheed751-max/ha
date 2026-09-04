@@ -105,6 +105,7 @@ class DailyTaskEvent {
     required double collected,
     required double remaining,
     required String note,
+    bool addRemainingDebtEvent = true,
   }) {
     final safeCollected = collected.isFinite && collected > 0 ? collected : 0.0;
     final safeRemaining = remaining.isFinite && remaining > 0 ? remaining : 0.0;
@@ -118,7 +119,7 @@ class DailyTaskEvent {
         remainingAfter: safeRemaining,
         note: note,
       ),
-      if (safeRemaining > 0.0001)
+      if (addRemainingDebtEvent && safeRemaining > 0.0001)
         DailyTaskEvent(
           type: 'debt_added',
           subscriberUser: subscriberUser,
@@ -2361,6 +2362,30 @@ class AppStore {
               event.type == 'activation' &&
               event.subscriberUser.trim().toLowerCase() == user,
         );
+  }
+
+  static bool hasRecordedCurrentDebt(Subscriber subscriber) {
+    final user = subscriber.user.trim().toLowerCase();
+    if (user.isEmpty || subscriber.remaining <= 0.0001) return false;
+
+    DailyTaskEvent? latestFinancialEvent;
+    for (final event in dailyTaskEvents) {
+      if (event.subscriberUser.trim().toLowerCase() != user ||
+          (event.type != 'activation' &&
+              event.type != 'debt_added' &&
+              event.type != 'debt_payment')) {
+        continue;
+      }
+      if (latestFinancialEvent == null ||
+          event.at.isAfter(latestFinancialEvent.at)) {
+        latestFinancialEvent = event;
+      }
+    }
+
+    return (latestFinancialEvent?.type == 'debt_added' ||
+            latestFinancialEvent?.type == 'debt_payment') &&
+        (latestFinancialEvent!.remainingAfter - subscriber.remaining).abs() <=
+            0.0001;
   }
 
   static void _trimDailyTaskEvents() {

@@ -631,6 +631,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         ),
         persist: false,
       );
+      final debtAlreadyRecorded = AppStore.hasRecordedCurrentDebt(s);
       for (final event in DailyTaskEvent.activationSettlement(
         subscriberUser: s.user,
         subscriberName: s.name,
@@ -638,6 +639,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         collected: s.paid,
         remaining: s.remaining,
         note: 'تفعيل من قائمة المشتركين',
+        addRemainingDebtEvent: !debtAlreadyRecorded,
       )) {
         await AppStore.addDailyTaskEvent(event, persist: false);
       }
@@ -1483,6 +1485,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             ),
             persist: false,
           );
+          final debtAlreadyRecorded = AppStore.hasRecordedCurrentDebt(s);
           for (final event in DailyTaskEvent.activationSettlement(
             subscriberUser: s.user,
             subscriberName: s.name,
@@ -1490,6 +1493,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             collected: s.paid,
             remaining: s.remaining,
             note: 'تفعيل بعد تغيير الباقة',
+            addRemainingDebtEvent: !debtAlreadyRecorded,
           )) {
             await AppStore.addDailyTaskEvent(event, persist: false);
           }

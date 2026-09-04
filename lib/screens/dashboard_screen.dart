@@ -29,6 +29,7 @@ import 'subscription_requests_admin_screen.dart';
 import 'chat_screen.dart';
 import 'add_subscriber_screen.dart';
 import 'speed_test_screen.dart';
+import 'ping_screen.dart';
 import 'accounting_reports_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -801,19 +802,20 @@ class _DashboardScreenState extends State<DashboardScreen>
                     );
                   },
                 ),
-                _drawerTile(
-                  icon: Icons.notifications_active_outlined,
-                  title: 'التنبيهات ورسائل واتساب',
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const MessageTemplatesScreen(),
-                      ),
-                    );
-                  },
-                ),
+                if (!widget.isAgentMode)
+                  _drawerTile(
+                    icon: Icons.notifications_active_outlined,
+                    title: 'التنبيهات ورسائل واتساب',
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const MessageTemplatesScreen(),
+                        ),
+                      );
+                    },
+                  ),
                 if (!widget.isAgentMode)
                   _drawerTile(
                     icon: Icons.assignment_turned_in_outlined,
@@ -1657,6 +1659,12 @@ class _DashboardScreenState extends State<DashboardScreen>
         Icons.speed_rounded,
         const Color(0xFF1261A6),
         () => _pushDashboard(const SpeedTestScreen()),
+      ),
+      (
+        'Ping',
+        Icons.network_ping_rounded,
+        const Color(0xFF00897B),
+        () => _pushDashboard(const PingScreen()),
       ),
     ];
     return LayoutBuilder(

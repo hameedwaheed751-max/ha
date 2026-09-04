@@ -210,6 +210,86 @@ void main() {
     expect(summary.totalCollected, 0);
   });
 
+  test('activation does not add a debt balance already recorded', () {
+    final subscriber = Subscriber(
+      user: 'u1',
+      name: 'User 1',
+      phone: '',
+      address: '',
+      ip: '',
+      type: '',
+      price: 35000,
+      paid: 0,
+      startDate: DateTime(2026, 9, 4),
+      endDate: DateTime(2026, 10, 4),
+      notes: '',
+      paymentDate: '',
+    );
+    AppStore.dailyTaskEvents.add(
+      DailyTaskEvent(
+        type: 'debt_added',
+        subscriberUser: 'u1',
+        subscriberName: 'User 1',
+        at: DateTime(2026, 9, 4, 16, 19),
+        amount: 35000,
+        remainingAfter: 35000,
+      ),
+    );
+
+    final debtAlreadyRecorded = AppStore.hasRecordedCurrentDebt(subscriber);
+    final events = DailyTaskEvent.activationSettlement(
+      subscriberUser: subscriber.user,
+      subscriberName: subscriber.name,
+      at: DateTime(2026, 9, 4, 16, 21),
+      collected: subscriber.paid,
+      remaining: subscriber.remaining,
+      note: 'تفعيل',
+      addRemainingDebtEvent: !debtAlreadyRecorded,
+    );
+
+    expect(debtAlreadyRecorded, isTrue);
+    expect(events.where((event) => event.type == 'debt_added'), isEmpty);
+    expect(events.where((event) => event.type == 'activation'), hasLength(1));
+    expect(events.single.remainingAfter, 35000);
+  });
+
+  test('activation does not re-add debt adjusted by an earlier payment', () {
+    final subscriber = Subscriber(
+      user: 'u1',
+      name: 'User 1',
+      phone: '',
+      address: '',
+      ip: '',
+      type: '',
+      price: 35000,
+      paid: 5000,
+      startDate: DateTime(2026, 9, 4),
+      endDate: DateTime(2026, 10, 4),
+      notes: '',
+      paymentDate: '',
+    );
+    AppStore.dailyTaskEvents.addAll([
+      DailyTaskEvent(
+        type: 'debt_payment',
+        subscriberUser: 'u1',
+        subscriberName: 'User 1',
+        at: DateTime(2026, 9, 4, 16, 20),
+        amount: 5000,
+        remainingAfter: 30000,
+      ),
+      DailyTaskEvent(
+        type: 'debt_added',
+        subscriberUser: 'u1',
+        subscriberName: 'User 1',
+        at: DateTime(2026, 9, 4, 16, 19),
+        amount: 35000,
+        remainingAfter: 35000,
+      ),
+    ]);
+
+    expect(AppStore.hasRecordedCurrentDebt(subscriber), isTrue);
+  });
+
   test('partial activation and later payment are not double counted', () {
     final activationEvents = DailyTaskEvent.activationSettlement(
       subscriberUser: 'u1',

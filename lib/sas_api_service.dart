@@ -408,10 +408,6 @@ class SasApiService {
     return readRuntimeAppConfig('sasWebProxyUrl') ?? _webProxyBaseRaw;
   }
 
-  static const bool _useProxyOnWeb = bool.fromEnvironment(
-    'SAS_USE_PROXY',
-    defaultValue: true,
-  );
   static const String _proxyToken = String.fromEnvironment(
     'SAS_PROXY_TOKEN',
     defaultValue: '',
@@ -431,7 +427,7 @@ class SasApiService {
   final SasSettings settings;
   String? _token;
   // true after proxy returns a 403 from upstream — switch to direct for this session
-  bool _directFallback = false;
+  final bool _directFallback = false;
   final Map<int, dynamic> _profileCache = {};
   final Map<String, String> _cookieHeaders = {};
   static final FlutterSecureStorage _secureStorage =
@@ -600,10 +596,6 @@ class SasApiService {
       return '$_sasOrigin/admin/api/index.php/api/';
     }
     if (kIsWeb) {
-      if (useDirectConnection || _directFallback) {
-        return _sasApiBase;
-      }
-
       final webProxyBase = _webProxyBase;
       final sasPath = Uri.parse(_sasApiBase).path;
       final cleanSasPath = sasPath.endsWith('/')
@@ -618,7 +610,7 @@ class SasApiService {
 
   /// Check if direct connection should be used
   static bool get useDirectConnection {
-    return kIsWeb ? !_useProxyOnWeb : true;
+    return !kIsWeb;
   }
 
   /// Check if the web proxy is reachable
@@ -675,7 +667,7 @@ class SasApiService {
 
   void _addProxyTarget(Map<String, String> headers) {
     if (_isResellerServer) return;
-    if (kIsWeb && !useDirectConnection && !_directFallback) {
+    if (kIsWeb) {
       headers['X-SAS-Target'] = _sasOrigin.isNotEmpty
           ? _sasOrigin
           : _sasInputNormalized;
@@ -821,9 +813,6 @@ class SasApiService {
       // إذا رفض البروكسي أو SAS الطلب (403) نعيد المحاولة
       if (!_directFallback && _is403Error(e)) {
         debugPrint('403 error on login, retrying with fallback options');
-        if (kIsWeb) {
-          _directFallback = true;
-        }
         _token = null;
         try {
           data = await _post('login', {
