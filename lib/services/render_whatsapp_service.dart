@@ -151,7 +151,7 @@ class RenderWhatsAppService {
   static const String logsKey = 'render_whatsapp_send_logs';
   static const int maxLogs = 200;
   static const String _defaultSendEndpoint = String.fromEnvironment(
-    'SAS_WEB_PROXY_URL',
+    'WHATSAPP_SERVICE_URL',
     defaultValue: 'https://ha-0cs7.onrender.com',
   );
   static const String _embeddedApiKey = String.fromEnvironment(
@@ -163,7 +163,7 @@ class RenderWhatsAppService {
     defaultValue: '',
   );
   static String get _runtimeDefaultSendEndpoint {
-    return readRuntimeAppConfig('sasWebProxyUrl') ?? _defaultSendEndpoint;
+    return readRuntimeAppConfig('whatsappServiceUrl') ?? _defaultSendEndpoint;
   }
   static String get _runtimeEmbeddedApiKey {
     return readRuntimeAppConfig('sasProxyToken') ?? _embeddedApiKey;
