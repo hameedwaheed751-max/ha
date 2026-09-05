@@ -13,7 +13,8 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
   final server = TextEditingController();
   final user = TextEditingController();
   final pass = TextEditingController();
-  String _proxyUrl = 'https://ha-0cs7.onrender.com';
+  String _proxyUrl =
+      'https://netagent-sas-proxy.wakeel-net-hamwdy.workers.dev';
   bool loading = true, testing = false, hide = true;
   String? result;
 

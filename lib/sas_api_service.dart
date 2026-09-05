@@ -402,7 +402,8 @@ class SasApiService {
   // hard-coded to localhost.
   static const String _webProxyBaseRaw = String.fromEnvironment(
     'SAS_WEB_PROXY_URL',
-    defaultValue: 'https://ha-0cs7.onrender.com',
+    defaultValue:
+        'https://netagent-sas-proxy.wakeel-net-hamwdy.workers.dev',
   );
   static String get _runtimeWebProxyBaseRaw {
     return readRuntimeAppConfig('sasWebProxyUrl') ?? _webProxyBaseRaw;
@@ -426,8 +427,8 @@ class SasApiService {
   static const _passphrase = 'abcdefghijuklmno0123456789012345';
   final SasSettings settings;
   String? _token;
-  // true after proxy returns a 403 from upstream — switch to direct for this session
-  bool _directFallback = false;
+  // Browsers cannot call SAS directly because its API does not allow CORS.
+  final bool _directFallback = false;
   final Map<int, dynamic> _profileCache = {};
   final Map<String, String> _cookieHeaders = {};
   static final FlutterSecureStorage _secureStorage =
@@ -448,9 +449,12 @@ class SasApiService {
   }
 
   String get _webProxyBase {
-    var proxy = settings.webProxyUrl.trim().isNotEmpty
+    final runtimeProxy = _runtimeWebProxyBaseRaw.trim();
+    var proxy = kIsWeb && runtimeProxy.isNotEmpty
+        ? runtimeProxy
+        : settings.webProxyUrl.trim().isNotEmpty
         ? settings.webProxyUrl.trim()
-        : _runtimeWebProxyBaseRaw.trim();
+        : runtimeProxy;
     while (proxy.endsWith('/')) {
       proxy = proxy.substring(0, proxy.length - 1);
     }
@@ -817,9 +821,6 @@ class SasApiService {
       // إذا رفض البروكسي أو SAS الطلب (403) نعيد المحاولة
       if (!_directFallback && _is403Error(e)) {
         debugPrint('403 error on login, retrying with fallback options');
-        if (kIsWeb && _isProxyBlockedError(e)) {
-          _directFallback = true;
-        }
         _token = null;
         try {
           data = await _post('login', {

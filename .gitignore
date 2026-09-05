@@ -32,6 +32,7 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+web_proxy/.wrangler/
 
 # Symbolication related
 app.*.symbols
