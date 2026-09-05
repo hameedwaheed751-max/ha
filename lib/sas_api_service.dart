@@ -714,11 +714,13 @@ class SasApiService {
       final headers = <String, String>{
         'Content-Type': 'application/json',
         'Accept': 'application/json, text/plain, */*',
-        'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Origin': normalizedUrl,
-        'Referer': '$normalizedUrl/',
+        if (!kIsWeb) ...{
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Origin': normalizedUrl,
+          'Referer': '$normalizedUrl/',
+        },
       };
 
       if (kDebugMode) {
@@ -898,10 +900,12 @@ class SasApiService {
     final headers = <String, String>{
       'Content-Type': 'application/x-www-form-urlencoded',
       'Accept': 'application/json, text/plain, */*',
-      'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': '$_sasOrigin/',
+      if (!kIsWeb) ...{
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': '$_sasOrigin/',
+      },
     };
     _addProxyTarget(headers);
     final response = await http
@@ -2107,9 +2111,11 @@ class SasApiService {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
-      'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept-Language': 'en-US,en;q=0.9',
+      if (!kIsWeb) ...{
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
     };
     if (!_directFallback && !_isResellerServer) {
       headers['Allow-Cache-Y'] = 'yes';
@@ -2192,9 +2198,11 @@ class SasApiService {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
-      'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept-Language': 'en-US,en;q=0.9',
+      if (!kIsWeb) ...{
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
     };
     if (!_directFallback && !_isResellerServer) {
       headers['Allow-Cache-Y'] = 'yes';
@@ -2311,9 +2319,11 @@ class SasApiService {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
-      'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept-Language': 'en-US,en;q=0.9',
+      if (!kIsWeb) ...{
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
     };
     if (!_directFallback && !_isResellerServer) {
       headers['Allow-Cache-Y'] = 'yes';
