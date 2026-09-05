@@ -954,7 +954,7 @@ class SasApiService {
     final all = <Map<String, dynamic>>[];
     final seenUsers = <String>{};
     final seenPages = <String>{};
-    const pageSize = 25;
+    const pageSize = 100;
 
     for (var page = 1; page <= 200; page++) {
       dynamic response;
@@ -1710,19 +1710,25 @@ class SasApiService {
 
     final allRows = <Map<String, dynamic>>[];
     final seenPages = <String>{};
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    const pageSize = 100;
 
-    for (int page = 1; page <= 500; page++) {
+    for (int page = 1; page <= 100; page++) {
+      if (DateTime.now().isAfter(deadline)) {
+        debugPrint('ONLINE session lookup deadline reached, stop.');
+        break;
+      }
       debugPrint('[Reseller] fetchConnectedSessions page=$page');
       final response = await _post('index/online', {
         'page': page,
         'current': page,
         'page_no': page,
-        'start': (page - 1) * 10,
-        'offset': (page - 1) * 10,
-        'limit': 10,
-        'length': 10,
-        'per_page': 10,
-        'page_size': 10,
+        'start': (page - 1) * pageSize,
+        'offset': (page - 1) * pageSize,
+        'limit': pageSize,
+        'length': pageSize,
+        'per_page': pageSize,
+        'page_size': pageSize,
       });
 
       final rows = _extractRows(response);
