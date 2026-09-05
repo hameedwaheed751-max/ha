@@ -77,6 +77,7 @@ void main() {
         'customer_name',
         'remaining_amount',
         'agent_name',
+        'whatsapp_number',
       ],
     );
   });

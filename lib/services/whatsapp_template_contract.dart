@@ -50,6 +50,7 @@ const Map<String, List<String>> metaTemplateParameterNames =
     'customer_name',
     'remaining_amount',
     'agent_name',
+    'whatsapp_number',
   ],
 };
 
