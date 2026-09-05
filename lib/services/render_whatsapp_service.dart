@@ -761,6 +761,9 @@ class RenderWhatsAppService {
     if (errors is List && errors.isNotEmpty && errors.first is Map) {
       final error = errors.first as Map;
       final code = (error['code'] ?? '').toString().trim();
+      if (code == '131042') {
+        return 'تعذر تسليم الرسالة لأن حساب WhatsApp Business لديه دفعات غير مسددة. يرجى تسوية المستحقات من مركز الفوترة في Meta ثم إعادة المحاولة.';
+      }
       final details = (error['details'] ?? '').toString().trim();
       final message = (error['message'] ?? error['title'] ?? '').toString().trim();
       return <String>[
@@ -901,20 +904,6 @@ class RenderWhatsAppService {
         final successByStatus = response.statusCode >= 200 && response.statusCode < 300;
         final success = successByStatus && (data['success'] != false);
 
-        await _appendAttemptLog(
-          eventType: eventType,
-          to: normalizedPhone,
-          attempt: attempt,
-          ok: success,
-          note: success
-              ? (note.isEmpty ? 'Accepted by Meta' : 'Accepted by Meta • $note')
-              : 'HTTP ${response.statusCode}',
-          endpoint: endpoint,
-          requestBody: currentPayload,
-          responseBody: data.isNotEmpty ? data : {'raw': response.body},
-          statusCode: response.statusCode,
-        );
-
         if (success) {
           final messageId = (data['messageId'] ?? '').toString();
           final delivery = await _waitForDeliveryStatus(
@@ -929,7 +918,25 @@ class RenderWhatsAppService {
             'deliveryStatus': deliveryStatus,
             'delivery': ?delivery,
           };
-          if (deliveryStatus == 'failed') {
+          final deliveryFailed = deliveryStatus == 'failed';
+          await _appendAttemptLog(
+            eventType: eventType,
+            to: normalizedPhone,
+            attempt: attempt,
+            ok: !deliveryFailed,
+            note: deliveryFailed
+                ? _deliveryFailureMessage(delivery!)
+                : deliveryStatus == 'delivered' || deliveryStatus == 'read'
+                    ? 'Delivered by Meta'
+                    : (note.isEmpty
+                        ? 'Accepted by Meta; delivery pending'
+                        : 'Accepted by Meta; delivery pending • $note'),
+            endpoint: endpoint,
+            requestBody: currentPayload,
+            responseBody: details,
+            statusCode: response.statusCode,
+          );
+          if (deliveryFailed) {
             return RenderSingleWhatsAppResult(
               success: false,
               messageId: messageId,
@@ -957,6 +964,17 @@ class RenderWhatsAppService {
           success: false,
           error: errorMessage,
           details: data.isNotEmpty ? data : {'raw': response.body},
+          statusCode: response.statusCode,
+        );
+        await _appendAttemptLog(
+          eventType: eventType,
+          to: normalizedPhone,
+          attempt: attempt,
+          ok: false,
+          note: errorMessage,
+          endpoint: endpoint,
+          requestBody: currentPayload,
+          responseBody: data.isNotEmpty ? data : {'raw': response.body},
           statusCode: response.statusCode,
         );
 
