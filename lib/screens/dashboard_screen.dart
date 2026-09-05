@@ -2768,8 +2768,16 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       return;
     }
 
+    final deliveryStatus =
+        (result.details?['deliveryStatus'] ?? 'accepted').toString();
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تم إرسال تذكير الدين عبر واتساب')),
+      SnackBar(
+        content: Text(
+          deliveryStatus == 'delivered' || deliveryStatus == 'read'
+              ? 'تم تسليم تذكير الدين إلى واتساب المشترك'
+              : 'قبلت Meta التذكير وهو قيد التسليم للمشترك',
+        ),
+      ),
     );
   }
 

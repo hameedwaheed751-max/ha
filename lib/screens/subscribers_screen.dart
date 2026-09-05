@@ -376,8 +376,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
     if (!mounted) return;
     if (result.success) {
+      final deliveryStatus =
+          (result.details?['deliveryStatus'] ?? 'accepted').toString();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم إرسال الرسالة عبر واتساب بنجاح')),
+        SnackBar(
+          content: Text(
+            deliveryStatus == 'delivered' || deliveryStatus == 'read'
+                ? 'تم تسليم الرسالة إلى واتساب المشترك'
+                : 'قبلت Meta الرسالة وهي قيد التسليم للمشترك',
+          ),
+        ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(

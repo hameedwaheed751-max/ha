@@ -720,6 +720,58 @@ class RenderWhatsAppService {
     return message.isNotEmpty ? message : 'HTTP $statusCode';
   }
 
+  static Future<Map<String, dynamic>?> _waitForDeliveryStatus({
+    required String endpoint,
+    required Map<String, String> headers,
+    required String messageId,
+  }) async {
+    if (!endpoint.endsWith('/send-message') || messageId.isEmpty) return null;
+
+    final sendUri = Uri.parse(endpoint);
+    final statusUri = sendUri.replace(
+      path: sendUri.path.replaceFirst(
+        RegExp(r'/send-message$'),
+        '/whatsapp/message-status',
+      ),
+      queryParameters: {'id': messageId},
+    );
+    Map<String, dynamic>? latest;
+
+    for (var attempt = 0; attempt < 5; attempt++) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      try {
+        final response = await http
+            .get(statusUri, headers: headers)
+            .timeout(const Duration(seconds: 5));
+        if (response.statusCode < 200 || response.statusCode >= 300) continue;
+        final decoded = jsonDecode(response.body);
+        if (decoded is! Map || decoded['delivery'] is! Map) continue;
+        latest = Map<String, dynamic>.from(decoded['delivery'] as Map);
+        final status = (latest['status'] ?? '').toString().toLowerCase();
+        if (status == 'delivered' || status == 'read' || status == 'failed') {
+          return latest;
+        }
+      } catch (_) {}
+    }
+    return latest;
+  }
+
+  static String _deliveryFailureMessage(Map<String, dynamic> delivery) {
+    final errors = delivery['errors'];
+    if (errors is List && errors.isNotEmpty && errors.first is Map) {
+      final error = errors.first as Map;
+      final code = (error['code'] ?? '').toString().trim();
+      final details = (error['details'] ?? '').toString().trim();
+      final message = (error['message'] ?? error['title'] ?? '').toString().trim();
+      return <String>[
+        if (code.isNotEmpty) 'Meta $code',
+        if (message.isNotEmpty) message,
+        if (details.isNotEmpty && details != message) details,
+      ].join(': ');
+    }
+    return 'Meta accepted the request but failed to deliver the message';
+  }
+
   static Future<RenderSingleWhatsAppResult> _sendCore({
     required String to,
     required String message,
@@ -864,10 +916,32 @@ class RenderWhatsAppService {
         );
 
         if (success) {
+          final messageId = (data['messageId'] ?? '').toString();
+          final delivery = await _waitForDeliveryStatus(
+            endpoint: endpoint,
+            headers: headers,
+            messageId: messageId,
+          );
+          final deliveryStatus =
+              (delivery?['status'] ?? 'accepted').toString().toLowerCase();
+          final details = <String, dynamic>{
+            ...data,
+            'deliveryStatus': deliveryStatus,
+            'delivery': ?delivery,
+          };
+          if (deliveryStatus == 'failed') {
+            return RenderSingleWhatsAppResult(
+              success: false,
+              messageId: messageId,
+              error: _deliveryFailureMessage(delivery!),
+              details: details,
+              statusCode: response.statusCode,
+            );
+          }
           return RenderSingleWhatsAppResult(
             success: true,
-            messageId: (data['messageId'] ?? '').toString(),
-            details: data,
+            messageId: messageId,
+            details: details,
             statusCode: response.statusCode,
           );
         }

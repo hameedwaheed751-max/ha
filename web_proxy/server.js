@@ -540,6 +540,53 @@ async function sendWhatsAppText(to, message) {
 
 const templateContractCache = new Map();
 const TEMPLATE_CONTRACT_TTL_MS = 5 * 60 * 1000;
+const whatsappMessageStatuses = new Map();
+const MAX_WHATSAPP_MESSAGE_STATUSES = 500;
+
+function rememberWhatsAppMessageStatus(messageId, status) {
+  const id = String(messageId || '').trim();
+  if (!id) return;
+
+  const statusRank = {accepted: 0, sent: 1, delivered: 2, read: 3, failed: 4};
+  const previous = whatsappMessageStatuses.get(id);
+  const previousRank = statusRank[String(previous?.status || '')] ?? -1;
+  const nextRank = statusRank[String(status?.status || '')] ?? -1;
+  if (previous && nextRank < previousRank) return;
+
+  whatsappMessageStatuses.delete(id);
+  whatsappMessageStatuses.set(id, {
+    messageId: id,
+    updatedAt: new Date().toISOString(),
+    ...status,
+  });
+  while (whatsappMessageStatuses.size > MAX_WHATSAPP_MESSAGE_STATUSES) {
+    whatsappMessageStatuses.delete(whatsappMessageStatuses.keys().next().value);
+  }
+}
+
+function captureWhatsAppWebhookStatuses(payload) {
+  for (const entry of Array.isArray(payload?.entry) ? payload.entry : []) {
+    for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+      const statuses = Array.isArray(change?.value?.statuses)
+        ? change.value.statuses
+        : [];
+      for (const item of statuses) {
+        const errors = Array.isArray(item?.errors) ? item.errors : [];
+        rememberWhatsAppMessageStatus(item?.id, {
+          status: String(item?.status || 'unknown'),
+          recipientId: String(item?.recipient_id || ''),
+          timestamp: String(item?.timestamp || ''),
+          errors: errors.map((error) => ({
+            code: error?.code ?? null,
+            title: String(error?.title || ''),
+            message: String(error?.message || ''),
+            details: String(error?.error_data?.details || ''),
+          })),
+        });
+      }
+    }
+  }
+}
 
 async function fetchMetaJson(path, accessToken) {
   const endpoint = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${path}`;
@@ -881,6 +928,7 @@ function handleRequest(req, res) {
             if (webhookAccountId) {
               discoveredWhatsAppBusinessAccountId = webhookAccountId;
             }
+            captureWhatsAppWebhookStatuses(parsed);
             console.log('[webhook] WhatsApp event body JSON:', JSON.stringify(parsed));
           } catch (_) {
             console.log('[webhook] WhatsApp event body RAW:', rawBody);
@@ -894,6 +942,29 @@ function handleRequest(req, res) {
     }
 
     sendJson(req, res, 405, {error: 'Method Not Allowed'});
+    return;
+  }
+
+  if (parsedHealthUrl.pathname === '/whatsapp/message-status') {
+    if (req.method !== 'GET') {
+      sendJson(req, res, 405, {error: 'Method Not Allowed'});
+      return;
+    }
+    if (!hasValidProxyToken(req)) {
+      sendJson(req, res, 401, {error: 'Unauthorized'});
+      return;
+    }
+
+    const messageId = String(parsedHealthUrl.searchParams.get('id') || '').trim();
+    if (!messageId) {
+      sendJson(req, res, 400, {error: 'Message id is required'});
+      return;
+    }
+    const delivery = whatsappMessageStatuses.get(messageId);
+    sendJson(req, res, 200, {
+      found: Boolean(delivery),
+      delivery: delivery || null,
+    });
     return;
   }
 
@@ -1010,6 +1081,12 @@ function handleRequest(req, res) {
           ? await sendWhatsAppTemplate(to, templateName, language, parameters, templateVariables)
           : await sendWhatsAppText(to, message);
         const messageId = apiResult?.messages?.[0]?.id || apiResult?.message_id || '';
+        rememberWhatsAppMessageStatus(messageId, {
+          status: 'accepted',
+          recipientId: to,
+          timestamp: '',
+          errors: [],
+        });
 
         sendJson(req, res, 200, {
           success: true,
