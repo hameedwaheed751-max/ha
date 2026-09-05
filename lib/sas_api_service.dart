@@ -427,7 +427,7 @@ class SasApiService {
   final SasSettings settings;
   String? _token;
   // true after proxy returns a 403 from upstream — switch to direct for this session
-  final bool _directFallback = false;
+  bool _directFallback = false;
   final Map<int, dynamic> _profileCache = {};
   final Map<String, String> _cookieHeaders = {};
   static final FlutterSecureStorage _secureStorage =
@@ -596,6 +596,10 @@ class SasApiService {
       return '$_sasOrigin/admin/api/index.php/api/';
     }
     if (kIsWeb) {
+      if (_directFallback) {
+        return _sasApiBase;
+      }
+
       final webProxyBase = _webProxyBase;
       final sasPath = Uri.parse(_sasApiBase).path;
       final cleanSasPath = sasPath.endsWith('/')
@@ -667,7 +671,7 @@ class SasApiService {
 
   void _addProxyTarget(Map<String, String> headers) {
     if (_isResellerServer) return;
-    if (kIsWeb) {
+    if (kIsWeb && !_directFallback) {
       headers['X-SAS-Target'] = _sasOrigin.isNotEmpty
           ? _sasOrigin
           : _sasInputNormalized;
@@ -813,6 +817,9 @@ class SasApiService {
       // إذا رفض البروكسي أو SAS الطلب (403) نعيد المحاولة
       if (!_directFallback && _is403Error(e)) {
         debugPrint('403 error on login, retrying with fallback options');
+        if (kIsWeb && _isProxyBlockedError(e)) {
+          _directFallback = true;
+        }
         _token = null;
         try {
           data = await _post('login', {

@@ -1140,18 +1140,21 @@ class _DashboardScreenState extends State<DashboardScreen>
           title: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'وكيل نت',
-                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 2),
               Text(
-                AppStore.officeName.trim().isEmpty
-                    ? 'اسم المكتب'
-                    : AppStore.officeName.trim(),
+                AppStore.effectiveAgentName.isEmpty
+                    ? 'اسم الوكيل'
+                    : AppStore.effectiveAgentName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 2),
+              const Text(
+                'وكيل نت',
+                style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
                 ),

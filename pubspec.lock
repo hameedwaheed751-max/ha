@@ -178,7 +178,7 @@ packages:
     source: hosted
     version: "1.0.9"
   dart_ping:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: dart_ping
       sha256: "2f5418d0a5c64e53486caaac78677b25725b1e13c33c5be834ce874ea18bd24f"
@@ -186,7 +186,7 @@ packages:
     source: hosted
     version: "9.0.1"
   dart_ping_ios:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: dart_ping_ios
       sha256: "17df1b369331ec6c30a91a51db64ac8feed47fad71e444208de06edf2a22415f"

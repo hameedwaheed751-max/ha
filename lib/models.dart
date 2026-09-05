@@ -1356,19 +1356,17 @@ class AppStore {
         refreshSubscriptionStatus();
       }
 
-      if (agentData['subscribers'] != null) {
-        if (remoteRevision > localRevisionBeforePull || allowRemoteBootstrap) {
-          final rawJson = jsonEncode(agentData['subscribers']);
-          await p.setString('subscribers', rawJson);
-          if (remoteRevision > 0) {
-            subscribersRevision = remoteRevision;
-            await p.setInt(subscribersRevisionKey, subscribersRevision);
-          }
-        } else {
-          debugPrint(
-            'Skip stale Firebase subscribers snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision',
-          );
+      if (remoteRevision > localRevisionBeforePull || allowRemoteBootstrap) {
+        final rawJson = jsonEncode(agentData['subscribers'] ?? <dynamic>[]);
+        await p.setString('subscribers', rawJson);
+        if (remoteRevision > 0) {
+          subscribersRevision = remoteRevision;
+          await p.setInt(subscribersRevisionKey, subscribersRevision);
         }
+      } else if (agentData['subscribers'] != null) {
+        debugPrint(
+          'Skip stale Firebase subscribers snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision',
+        );
       }
       await _loadSubscribers(p);
       if (remoteRevision > localRevisionBeforePull || allowRemoteBootstrap) {
@@ -2292,28 +2290,28 @@ class AppStore {
               }
             }
           }
-          if (agentData['subscribers'] != null) {
-            if (remoteRevision > localRevisionBeforeEvent ||
-                allowRemoteBootstrap) {
-              final rawJson = jsonEncode(agentData['subscribers']);
-              await p.setString('subscribers', rawJson);
-              if (remoteRevision > 0) {
-                subscribersRevision = remoteRevision;
-                await p.setInt(subscribersRevisionKey, subscribersRevision);
-              }
-              await _loadSubscribers(p);
-              applyDebtsPayload(agentData['debts']);
-              await p.setString(
-                'subscribers',
-                jsonEncode(
-                  subscribers.map((subscriber) => subscriber.toJson()).toList(),
-                ),
-              );
-            } else {
-              debugPrint(
-                'Realtime: ignored stale subscribers snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision',
-              );
+          if (remoteRevision > localRevisionBeforeEvent ||
+              allowRemoteBootstrap) {
+            final rawJson = jsonEncode(
+              agentData['subscribers'] ?? <dynamic>[],
+            );
+            await p.setString('subscribers', rawJson);
+            if (remoteRevision > 0) {
+              subscribersRevision = remoteRevision;
+              await p.setInt(subscribersRevisionKey, subscribersRevision);
             }
+            await _loadSubscribers(p);
+            applyDebtsPayload(agentData['debts']);
+            await p.setString(
+              'subscribers',
+              jsonEncode(
+                subscribers.map((subscriber) => subscriber.toJson()).toList(),
+              ),
+            );
+          } else if (agentData['subscribers'] != null) {
+            debugPrint(
+              'Realtime: ignored stale subscribers snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision',
+            );
           }
           applyDailyTaskEventsPayload(agentData[dailyTaskEventsKey]);
           await _persistDailyTaskEventsLocally(p);
@@ -2332,13 +2330,43 @@ class AppStore {
   }
 
   static Future<void> deleteAllSubscribers() async {
-    subscribers.clear();
-    await save();
+    await _deleteSubscribersWhere((_) => true);
   }
 
   static Future<void> deleteSasSubscribersOnly() async {
-    subscribers.removeWhere((s) => s.source == 'sas');
-    await save();
+    await _deleteSubscribersWhere((subscriber) => subscriber.source == 'sas');
+  }
+
+  static Future<void> deleteSubscriber(Subscriber subscriber) async {
+    await _deleteSubscribersWhere((item) => identical(item, subscriber));
+  }
+
+  static Future<void> _deleteSubscribersWhere(
+    bool Function(Subscriber subscriber) shouldDelete,
+  ) async {
+    final previousSubscribers = List<Subscriber>.from(subscribers);
+    subscribers.removeWhere(shouldDelete);
+    if (subscribers.length == previousSubscribers.length) return;
+
+    final previousRevision = subscribersRevision;
+    subscribersRevision = DateTime.now().millisecondsSinceEpoch;
+    try {
+      if (_isLoggedIn) {
+        final debtsPayload = buildDebtsPayload();
+        await _agentRef.update({
+          'settings/$subscribersRevisionKey': subscribersRevision,
+          'subscribers': subscribers.map((item) => item.toJson()).toList(),
+          'debts': debtsPayload.isEmpty ? null : debtsPayload,
+        }).timeout(const Duration(seconds: 10));
+      }
+      await save();
+    } catch (error) {
+      subscribers
+        ..clear()
+        ..addAll(previousSubscribers);
+      subscribersRevision = previousRevision;
+      rethrow;
+    }
   }
 
   static bool isSameDay(DateTime a, DateTime b) {

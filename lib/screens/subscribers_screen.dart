@@ -1814,11 +1814,19 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             ),
             FilledButton(
               onPressed: () async {
-                AppStore.subscribers.remove(s);
-                selected = null;
-                await AppStore.save();
-                if (ctx.mounted) Navigator.pop(ctx);
-                if (mounted) setState(() {});
+                try {
+                  await AppStore.deleteSubscriber(s);
+                  selected = null;
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) setState(() {});
+                } catch (error) {
+                  if (!ctx.mounted) return;
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(
+                      content: Text('تعذر حذف المشترك من Firebase: $error'),
+                    ),
+                  );
+                }
               },
               child: const Text('حذف'),
             ),

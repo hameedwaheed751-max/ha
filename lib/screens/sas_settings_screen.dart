@@ -120,16 +120,23 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
       ),
     );
     if (ok != true) return;
-    if (all) {
-      await AppStore.deleteAllSubscribers();
-    } else {
-      await AppStore.deleteSasSubscribersOnly();
-    }
-    if (mounted) {
+    try {
+      if (all) {
+        await AppStore.deleteAllSubscribers();
+      } else {
+        await AppStore.deleteSasSubscribersOnly();
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(all ? 'تم حذف جميع المشتركين' : 'تم حذف مشتركي SAS'),
+          ),
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(all ? 'تم حذف جميع المشتركين' : 'تم حذف مشتركي SAS'),
-        ),
+        SnackBar(content: Text('تعذر حذف المشتركين من Firebase: $error')),
       );
     }
   }
