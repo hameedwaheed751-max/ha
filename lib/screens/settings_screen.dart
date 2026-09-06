@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models.dart';
+import '../services/render_whatsapp_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -11,6 +12,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController name, phone, address, footer;
+  WhatsAppSendProvider _whatsAppProvider = WhatsAppSendProvider.meta;
+  bool _testingWhatsApp = false;
 
   @override
   void initState() {
@@ -19,6 +22,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
     phone = TextEditingController(text: AppStore.officePhone);
     address = TextEditingController(text: AppStore.officeAddress);
     footer = TextEditingController(text: AppStore.receiptFooter);
+    _loadWhatsAppProvider();
+  }
+
+  Future<void> _loadWhatsAppProvider() async {
+    final provider = await RenderWhatsAppService.loadProvider();
+    if (!mounted) return;
+    setState(() => _whatsAppProvider = provider);
+  }
+
+  Future<void> _testWhatsAppService() async {
+    if (_testingWhatsApp) return;
+    setState(() => _testingWhatsApp = true);
+    final result = await RenderWhatsAppService.testLocalService(phone.text);
+    if (!mounted) return;
+    setState(() => _testingWhatsApp = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          result.success
+              ? 'تم إرسال رسالة الاختبار عبر WhatsApp Service'
+              : 'فشل اختبار WhatsApp Service: ${result.error ?? 'خطأ غير معروف'}',
+        ),
+      ),
+    );
   }
 
   @override
@@ -87,6 +114,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 12),
               TextField(controller: footer, maxLines: 2, decoration: dec('ملاحظة أسفل الوصل')),
               const SizedBox(height: 16),
+              const Text(
+                'طريقة إرسال واتساب',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              SegmentedButton<WhatsAppSendProvider>(
+                segments: const [
+                  ButtonSegment(
+                    value: WhatsAppSendProvider.meta,
+                    label: Text('Meta WhatsApp'),
+                    icon: Icon(Icons.cloud_outlined),
+                  ),
+                  ButtonSegment(
+                    value: WhatsAppSendProvider.whatsappService,
+                    label: Text('WhatsApp Service'),
+                    icon: Icon(Icons.computer_outlined),
+                  ),
+                ],
+                selected: {_whatsAppProvider},
+                onSelectionChanged: (selection) {
+                  setState(() => _whatsAppProvider = selection.first);
+                },
+              ),
+              if (_whatsAppProvider == WhatsAppSendProvider.whatsappService) ...[
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: _testingWhatsApp ? null : _testWhatsAppService,
+                  icon: _testingWhatsApp
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send_outlined),
+                  label: const Text('إرسال رسالة اختبار'),
+                ),
+              ],
+              const SizedBox(height: 16),
               Card(
                 child: SwitchListTile(
                   value: AppStore.isDarkMode,
@@ -110,6 +174,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     AppStore.officePhone = phone.text.trim();
                     AppStore.officeAddress = address.text.trim();
                     AppStore.receiptFooter = footer.text.trim();
+                    await RenderWhatsAppService.saveProvider(_whatsAppProvider);
                     await AppStore.save();
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ إعدادات المكتب')));

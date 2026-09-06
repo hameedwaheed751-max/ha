@@ -20,6 +20,8 @@ enum WhatsAppNotificationType {
   broadcast,
 }
 
+enum WhatsAppSendProvider { meta, whatsappService }
+
 extension WhatsAppNotificationTypeX on WhatsAppNotificationType {
   String get eventType {
     switch (this) {
@@ -149,7 +151,14 @@ class RenderWhatsAppService {
   static const String sendMessageEndpointKey = 'render_send_message_endpoint';
   static const String apiKeyKey = 'render_whatsapp_api_key';
   static const String logsKey = 'render_whatsapp_send_logs';
+  static const String providerKey = 'whatsapp_send_provider';
   static const int maxLogs = 200;
+  static const String _localServiceEndpoint =
+      'http://localhost:3000/api/send';
+  static const String _localServiceApiKey = String.fromEnvironment(
+    'WHATSAPP_LOCAL_API_KEY',
+    defaultValue: 'NETAGENT_TEST_KEY_2026',
+  );
   static const String _defaultSendEndpoint = String.fromEnvironment(
     'WHATSAPP_SERVICE_URL',
     defaultValue: 'https://ha-0cs7.onrender.com',
@@ -189,6 +198,67 @@ class RenderWhatsAppService {
     defaultValue: '',
   );
   static const int _maxAttempts = 3;
+
+  static Future<WhatsAppSendProvider> loadProvider() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(providerKey) == 'whatsappService'
+        ? WhatsAppSendProvider.whatsappService
+        : WhatsAppSendProvider.meta;
+  }
+
+  static Future<void> saveProvider(WhatsAppSendProvider provider) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(providerKey, provider.name);
+  }
+
+  static Future<RenderSingleWhatsAppResult> testLocalService(String phone) async {
+    final normalizedPhone = normalizePhone(phone);
+    if (normalizedPhone.isEmpty) {
+      return const RenderSingleWhatsAppResult(
+        success: false,
+        error: 'أدخل رقم هاتف صالحًا لإرسال رسالة الاختبار',
+      );
+    }
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse(_localServiceEndpoint),
+            headers: <String, String>{
+              'Content-Type': 'application/json',
+              'x-api-key': _localServiceApiKey,
+            },
+            body: jsonEncode(<String, String>{
+              'number': normalizedPhone,
+              'message': 'رسالة اختبار من NetAgent',
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
+      Map<String, dynamic> data = <String, dynamic>{};
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map) data = Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+
+      final success = response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          data['success'] != false;
+      return RenderSingleWhatsAppResult(
+        success: success,
+        messageId: (data['messageId'] ?? '').toString(),
+        error: success
+            ? null
+            : (data['error'] ?? 'HTTP ${response.statusCode}').toString(),
+        details: data,
+        statusCode: response.statusCode,
+      );
+    } catch (error) {
+      return RenderSingleWhatsAppResult(
+        success: false,
+        error: error.toString(),
+      );
+    }
+  }
 
   static String _coalesce(String value, String fallback) {
     final normalized = value.trim();
@@ -785,6 +855,7 @@ class RenderWhatsAppService {
     Map<String, dynamic>? payloadOverride,
     Map<String, String>? templateVariables,
     bool forcePlainText = false,
+    bool forceLocalService = false,
   }) async {
     final normalizedPhone = normalizePhone(to);
     final cleanMessage = _withAgentPhoneFooter(message.trim());
@@ -795,22 +866,29 @@ class RenderWhatsAppService {
       );
     }
 
-    final endpoint = forcePlainText
-      ? _buildProxySendMessageEndpoint()
-      : await loadSendMessageEndpoint();
+    final provider = await loadProvider();
+    final usesLocalService = forceLocalService ||
+        provider == WhatsAppSendProvider.whatsappService;
+    final endpoint = usesLocalService
+        ? _localServiceEndpoint
+        : forcePlainText
+            ? _buildProxySendMessageEndpoint()
+            : await loadSendMessageEndpoint();
     final config = await loadConfig();
-    final apiKey = config.$2;
+    final apiKey = usesLocalService ? _localServiceApiKey : config.$2;
     final headers = <String, String>{
       'Content-Type': 'application/json',
     };
-    final usesMetaTemplate = !forcePlainText &&
+    final usesMetaTemplate = !usesLocalService && !forcePlainText &&
       endpoint.contains('graph.facebook.com') &&
         _resolvePhoneNumberId().isNotEmpty &&
         apiKey.isNotEmpty;
 
     final resolvedApiKey = _coalesce(apiKey, '').trim();
     final proxyToken = _coalesce(_runtimeEmbeddedApiKey, _legacyEmbeddedApiKey).trim();
-    if (resolvedApiKey.isNotEmpty) {
+    if (usesLocalService) {
+      headers['x-api-key'] = resolvedApiKey;
+    } else if (resolvedApiKey.isNotEmpty) {
       headers['Authorization'] = 'Bearer $resolvedApiKey';
       if (!usesMetaTemplate) {
         headers['x-api-key'] = proxyToken.isNotEmpty ? proxyToken : resolvedApiKey;
@@ -829,14 +907,19 @@ class RenderWhatsAppService {
         error: 'Missing Meta WhatsApp configuration. Set META_WHATSAPP_PHONE_NUMBER_ID and META_WHATSAPP_ACCESS_TOKEN.',
       );
     }
-    if (!forcePlainText && payloadOverride == null) {
+    if (!usesLocalService && !forcePlainText && payloadOverride == null) {
       return const RenderSingleWhatsAppResult(
         success: false,
         error: 'A canonical named-parameter payload is required for Meta templates',
       );
     }
 
-    final payload = (forcePlainText)
+    final payload = usesLocalService
+      ? <String, dynamic>{
+          'number': normalizedPhone,
+          'message': cleanMessage,
+        }
+      : (forcePlainText)
       ? <String, dynamic>{
         'to': normalizedPhone,
         'message': cleanMessage,
@@ -906,15 +989,22 @@ class RenderWhatsAppService {
 
         if (success) {
           final messageId = (data['messageId'] ?? '').toString();
-          final delivery = await _waitForDeliveryStatus(
-            endpoint: endpoint,
-            headers: headers,
-            messageId: messageId,
-          );
+          final delivery = usesLocalService
+              ? null
+              : await _waitForDeliveryStatus(
+                  endpoint: endpoint,
+                  headers: headers,
+                  messageId: messageId,
+                );
           final deliveryStatus =
-              (delivery?['status'] ?? 'accepted').toString().toLowerCase();
+              (delivery?['status'] ?? (usesLocalService ? 'sent' : 'accepted'))
+                  .toString()
+                  .toLowerCase();
           final details = <String, dynamic>{
             ...data,
+            'provider': usesLocalService
+                ? WhatsAppSendProvider.whatsappService.name
+                : provider.name,
             'deliveryStatus': deliveryStatus,
             'delivery': ?delivery,
           };
@@ -926,6 +1016,8 @@ class RenderWhatsAppService {
             ok: !deliveryFailed,
             note: deliveryFailed
                 ? _deliveryFailureMessage(delivery!)
+              : usesLocalService
+                ? 'Sent by WhatsApp Service'
                 : deliveryStatus == 'delivered' || deliveryStatus == 'read'
                     ? 'Delivered by Meta'
                     : (note.isEmpty
@@ -1022,6 +1114,7 @@ class RenderWhatsAppService {
     String? packageName,
     DateTime? expiryDate,
     String? agentName,
+    bool forceLocalService = false,
   }) async {
     final phone = normalizePhone(subscriber.phone);
     if (phone.isEmpty) {
@@ -1067,6 +1160,7 @@ class RenderWhatsAppService {
       templateName: templateName,
       payloadOverride: payload,
       templateVariables: _canonicalTemplateVariables(vars),
+      forceLocalService: forceLocalService,
     );
   }
 
@@ -1119,6 +1213,7 @@ class RenderWhatsAppService {
     required double amountAdded,
     required double remainingBalance,
     String? template,
+    bool forceLocalService = false,
   }) {
     return _notifyByType(
       type: WhatsAppNotificationType.debtAdded,
@@ -1126,6 +1221,7 @@ class RenderWhatsAppService {
       template: template,
       amount: amountAdded > 0 ? amountAdded : remainingBalance,
       balance: remainingBalance,
+      forceLocalService: forceLocalService,
     );
   }
 

@@ -2756,6 +2756,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       s,
       amountAdded: 0,
       remainingBalance: s.remaining,
+      forceLocalService: true,
     );
 
     if (!mounted) return;
@@ -2775,7 +2776,9 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
         content: Text(
           deliveryStatus == 'delivered' || deliveryStatus == 'read'
               ? 'تم تسليم تذكير الدين إلى واتساب المشترك'
-              : 'قبلت Meta التذكير وهو قيد التسليم للمشترك',
+              : deliveryStatus == 'sent'
+                  ? 'تم إرسال تذكير الدين عبر WhatsApp Service'
+                  : 'قبلت Meta التذكير وهو قيد التسليم للمشترك',
         ),
       ),
     );
