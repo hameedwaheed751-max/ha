@@ -902,9 +902,12 @@ class RenderWhatsAppService {
     }
 
     if (endpoint.isEmpty) {
-      return const RenderSingleWhatsAppResult(
+      final errMsg = usesLocalService
+          ? 'WhatsApp Service is not configured. Ensure WHATSAPP_LOCAL_API_KEY is set and the local service is running.'
+          : 'Missing Meta WhatsApp configuration. Set META_WHATSAPP_PHONE_NUMBER_ID and META_WHATSAPP_ACCESS_TOKEN.';
+      return RenderSingleWhatsAppResult(
         success: false,
-        error: 'Missing Meta WhatsApp configuration. Set META_WHATSAPP_PHONE_NUMBER_ID and META_WHATSAPP_ACCESS_TOKEN.',
+        error: errMsg,
       );
     }
     if (!usesLocalService && !forcePlainText && payloadOverride == null) {
@@ -1178,22 +1181,26 @@ class RenderWhatsAppService {
   static Future<RenderSingleWhatsAppResult> notifySubscriptionActivated(
     Subscriber subscriber, {
     String? template,
+    bool forceLocalService = true,
   }) {
     return _notifyByType(
       type: WhatsAppNotificationType.subscriptionActivated,
       subscriber: subscriber,
       template: template,
+      forceLocalService: forceLocalService,
     );
   }
 
   static Future<RenderSingleWhatsAppResult> notifySubscriptionExpiresIn3Days(
     Subscriber subscriber, {
     String? template,
+    bool forceLocalService = true,
   }) {
     return _notifyByType(
       type: WhatsAppNotificationType.subscriptionExpiresIn3Days,
       subscriber: subscriber,
       template: template,
+      forceLocalService: forceLocalService,
     );
   }
 
@@ -1213,7 +1220,7 @@ class RenderWhatsAppService {
     required double amountAdded,
     required double remainingBalance,
     String? template,
-    bool forceLocalService = false,
+    bool forceLocalService = true,
   }) {
     return _notifyByType(
       type: WhatsAppNotificationType.debtAdded,
@@ -1264,6 +1271,7 @@ class RenderWhatsAppService {
       eventType: WhatsAppNotificationType.generalMessage.eventType,
       note: WhatsAppNotificationType.generalMessage.eventType,
       forcePlainText: true,
+      forceLocalService: true,
     );
   }
 
@@ -1315,6 +1323,7 @@ class RenderWhatsAppService {
         eventType: WhatsAppNotificationType.broadcast.eventType,
         note: WhatsAppNotificationType.broadcast.eventType,
         forcePlainText: true,
+        forceLocalService: true,
       );
       if (result.success) {
         sent += 1;

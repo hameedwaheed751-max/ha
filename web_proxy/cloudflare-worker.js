@@ -34,7 +34,7 @@ function json(data, status = 200) {
   });
 }
 
-async function proxyRequest(request) {
+async function proxyRequest(request, env) {
   const url = new URL(request.url);
 
   if (request.method === 'OPTIONS') {
@@ -43,6 +43,10 @@ async function proxyRequest(request) {
 
   if (url.pathname === '/' || url.pathname === '/health' || url.pathname === '/healthz') {
     return json({ ok: true, service: 'NetAgent SAS Proxy', runtime: 'cloudflare-workers' });
+  }
+
+  if (url.pathname.startsWith('/whatsapp/')) {
+    return whatsappHandler(request, env);
   }
 
   if (!url.pathname.startsWith('/sas/')) {
@@ -109,8 +113,31 @@ async function proxyRequest(request) {
   }
 }
 
+async function whatsappHandler(request, env) {
+  const whatsappPath = request.url.substring(request.url.indexOf('/whatsapp'));
+  const upstreamUrl = `http://localhost${whatsappPath.replace('/whatsapp', '')}`;
+
+  try {
+    const upstreamResponse = await env.WHATSAPP_SERVICE.fetch(upstreamUrl, {
+      method: request.method,
+      headers: request.headers,
+      body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
+    });
+    return withCors(upstreamResponse);
+  } catch (error) {
+    return json(
+      {
+        success: false,
+        error: 'WhatsApp Service unavailable',
+        detail: error instanceof Error ? error.message : String(error),
+      },
+      502,
+    );
+  }
+}
+
 export default {
-  fetch(request) {
-    return proxyRequest(request);
+  fetch(request, env) {
+    return proxyRequest(request, env);
   },
 };

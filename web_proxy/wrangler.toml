@@ -2,4 +2,9 @@ name = "netagent-sas-proxy"
 main = "cloudflare-worker.js"
 compatibility_date = "2026-07-21"
 
+[[vpc_services]]
+binding = "WHATSAPP_SERVICE"
+service_id = "01a07b42-baeb-7dd3-b403-b67548a413bb"
+remote = true
+
 # Set your route or custom domain in Cloudflare dashboard after deployment.
