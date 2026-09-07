@@ -154,7 +154,7 @@ class RenderWhatsAppService {
   static const String providerKey = 'whatsapp_send_provider';
   static const int maxLogs = 200;
   static const String _localServiceEndpoint =
-      'http://localhost:3000/api/send';
+      'https://netagent-sas-proxy.wakeel-net-hamwdy.workers.dev/whatsapp/api/send';
   static const String _localServiceApiKey = String.fromEnvironment(
     'WHATSAPP_LOCAL_API_KEY',
     defaultValue: 'NETAGENT_TEST_KEY_2026',
