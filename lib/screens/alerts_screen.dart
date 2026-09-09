@@ -134,11 +134,19 @@ class _AlertsScreenState extends State<AlertsScreen> {
           final rendered = _applyTemplate(template, s);
           late final RenderSingleWhatsAppResult single;
           if (type == 'threeDays') {
+            // معطل: إرسال "ينتهي الاشتراك خلال 3 أيام" - تم التعطيل مؤقتاً
+            // لإعادة التفعيل، أزل هذا التعليق واستخدم الكود أدناه:
+            /*
             single =
                 await RenderWhatsAppService.notifySubscriptionExpiresIn3Days(
                   s,
                   template: rendered,
                 );
+            */
+            single = const RenderSingleWhatsAppResult(
+              success: false,
+              error: 'إرسال "ينتهي الاشتراك خلال 3 أيام" معطل مؤقتاً',
+            );
           } else if (type == 'debt') {
             single = await RenderWhatsAppService.notifyDebtAdded(
               s,

@@ -1154,10 +1154,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               const SizedBox(height: 2),
               const Text(
                 'وكيل نت',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                ),
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
               ),
             ],
           ),
@@ -2756,7 +2753,6 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       s,
       amountAdded: 0,
       remainingBalance: s.remaining,
-      forceLocalService: true,
     );
 
     if (!mounted) return;
@@ -2769,16 +2765,16 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       return;
     }
 
-    final deliveryStatus =
-        (result.details?['deliveryStatus'] ?? 'accepted').toString();
+    final deliveryStatus = (result.details?['deliveryStatus'] ?? 'accepted')
+        .toString();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           deliveryStatus == 'delivered' || deliveryStatus == 'read'
               ? 'تم تسليم تذكير الدين إلى واتساب المشترك'
               : deliveryStatus == 'sent'
-                  ? 'تم إرسال تذكير الدين عبر WhatsApp Service'
-                  : 'قبلت Meta التذكير وهو قيد التسليم للمشترك',
+              ? 'تم إرسال تذكير الدين عبر WhatsApp Service'
+              : 'قبلت Meta التذكير وهو قيد التسليم للمشترك',
         ),
       ),
     );
