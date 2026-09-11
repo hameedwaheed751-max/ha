@@ -179,6 +179,27 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     s.markActivationDate(at: at ?? DateTime.now());
   }
 
+  DateTime? _extractEndDateFromSas(Map<String, dynamic> sasData) {
+    final source = (sasData['data'] is Map)
+        ? Map<String, dynamic>.from(sasData['data'] as Map)
+        : sasData;
+
+    final endRaw =
+        source['expiration'] ??
+        source['expiration_date'] ??
+        source['expires_at'] ??
+        source['end_date'] ??
+        source['endDate'] ??
+        source['expiry_date'];
+
+    if (endRaw == null) return null;
+    if (endRaw is num) {
+      final n = endRaw.toInt();
+      return DateTime.fromMillisecondsSinceEpoch(n > 9999999999 ? n : n * 1000);
+    }
+    return DateTime.tryParse(endRaw.toString());
+  }
+
   String _parentText(Subscriber s) => _sasText(s, const [
     'parent_name',
     'parent',
@@ -376,8 +397,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
     if (!mounted) return;
     if (result.success) {
-      final deliveryStatus =
-          (result.details?['deliveryStatus'] ?? 'accepted').toString();
+      final deliveryStatus = (result.details?['deliveryStatus'] ?? 'accepted')
+          .toString();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -607,14 +628,13 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           );
 
       // جلب بيانات المشترك المحدثة من SAS
-      dynamic userOverview;
+      dynamic userData;
       try {
-        userOverview = await api
-            .fetchUserOverview(userId)
+        userData = await api
+            .fetchUser(userId)
             .timeout(const Duration(seconds: 15));
-        debugPrint('User Overview: $userOverview');
       } catch (e) {
-        debugPrint('Could not fetch user overview: $e');
+        debugPrint('Could not fetch user data: $e');
       }
 
       // تحديث بيانات المشترك محلياً
@@ -624,10 +644,21 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
       final activationAmount = _activationReceivedAmount(activationResponse);
       final activatedAt =
-          SasSyncService.activationDateFromSas(userOverview) ??
+          SasSyncService.activationDateFromSas(userData) ??
           SasSyncService.activationDateFromSas(activationResponse) ??
           DateTime.now();
       _setStartDateAsActivationDay(s, at: activatedAt);
+
+      // استخراج تاريخ الانتهاء من userData إذا توفر
+      if (userData is Map) {
+        final extractedEndDate = _extractEndDateFromSas(
+          Map<String, dynamic>.from(userData),
+        );
+        if (extractedEndDate != null) {
+          s.endDate = extractedEndDate;
+        }
+      }
+
       await AppStore.addAccountingActivation(
         AccountingActivationRecord(
           subscriberUser: s.user,
@@ -653,14 +684,13 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       }
 
       // تحديث بيانات SAS إذا تم جلبها
-      if (userOverview is Map) {
-        s.sasData.addAll(Map<String, dynamic>.from(userOverview));
+      if (userData is Map) {
+        s.sasData.addAll(Map<String, dynamic>.from(userData));
 
         // تحديث الحالة
-        final isActive =
-            userOverview['is_active'] ?? userOverview['active'] ?? true;
+        final isActive = userData['is_active'] ?? userData['active'] ?? true;
         final isDisabled =
-            userOverview['disabled'] ?? userOverview['is_disabled'] ?? false;
+            userData['disabled'] ?? userData['is_disabled'] ?? false;
 
         s.active = isActive == true || isActive == 1;
         s.disabled = isDisabled == true || isDisabled == 1;
@@ -1479,6 +1509,27 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               SasSyncService.activationDateFromSas(activationResponse) ??
               DateTime.now();
           _setStartDateAsActivationDay(s, at: activatedAt);
+
+          // جلب بيانات المشترك المحدثة من SAS
+          dynamic userData;
+          try {
+            userData = await api
+                .fetchUser(userId)
+                .timeout(const Duration(seconds: 15));
+          } catch (e) {
+            debugPrint('Could not fetch user data: $e');
+          }
+
+          // استخراج تاريخ الانتهاء من userData إذا توفر
+          if (userData is Map) {
+            final extractedEndDate = _extractEndDateFromSas(
+              Map<String, dynamic>.from(userData),
+            );
+            if (extractedEndDate != null) {
+              s.endDate = extractedEndDate;
+            }
+          }
+
           final activationAmount = _activationReceivedAmount(
             activationResponse,
           );
