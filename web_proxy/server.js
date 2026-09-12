@@ -19,7 +19,7 @@ const WHATSAPP_BUSINESS_ACCOUNT_ID = String(
 ).trim();
 const RENDER_GIT_COMMIT = String(process.env.RENDER_GIT_COMMIT || '').trim();
 let discoveredWhatsAppBusinessAccountId = WHATSAPP_BUSINESS_ACCOUNT_ID;
-const DEFAULT_TARGET_URL = String(process.env.SAS_TARGET_URL || '').trim();
+const DEFAULT_TARGET_URL = '';
 const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 5 * 1024 * 1024);
 const DISABLE_PROXY_AUTH = process.env.DISABLE_PROXY_AUTH === '1' || process.env.ALLOW_UNAUTHENTICATED_PROXY === '1';
 const CONFIGURED_PROXY_TOKENS = Array.from(
@@ -215,7 +215,6 @@ function resolveTargetOrigin(req, parsedRequestUrl) {
   const queryTarget = String(parsedRequestUrl.searchParams.get('target') || '').trim();
   if (queryTarget) return normalizeTargetValue(queryTarget);
 
-  if (DEFAULT_TARGET_URL) return normalizeTargetValue(DEFAULT_TARGET_URL);
   return '';
 }
 
@@ -871,26 +870,25 @@ function handleRequest(req, res) {
     parsedHealthUrl = new URL('/', 'https://netagent.local');
   }
 
-  if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' || parsedHealthUrl.pathname === '/healthz') {
-    sendJson(req, res, 200, {
-      ok: true,
-      service: 'NetAgent SAS Proxy',
-      env: NODE_ENV,
-      port: PORT,
-      hasDefaultTarget: Boolean(DEFAULT_TARGET_URL),
-      allowHttpTargets: ALLOW_HTTP_TARGETS,
-      allowInsecureTls: ALLOW_INSECURE_TLS,
-      allowPrivateTargets: ALLOW_PRIVATE_TARGETS,
-      hasTokenAuth: CONFIGURED_PROXY_TOKENS.length > 0,
-      proxyAuthBypassed: DISABLE_PROXY_AUTH,
-      hasAllowlist: TARGET_ALLOWLIST.length > 0,
-      routes: ['/health', '/healthz', '/ping-target', '/whatsapp/send', '/sas/*', '/login', '/admin/api/*', '/api/*', '/index.php/*'],
-      commit: RENDER_GIT_COMMIT || null,
-      hasWhatsAppBusinessAccountId: Boolean(WHATSAPP_BUSINESS_ACCOUNT_ID),
-      hasDiscoveredWhatsAppBusinessAccountId: Boolean(discoveredWhatsAppBusinessAccountId),
-    });
-    return;
-  }
+if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' || parsedHealthUrl.pathname === '/healthz') {
+     sendJson(req, res, 200, {
+       ok: true,
+       service: 'NetAgent SAS Proxy',
+       env: NODE_ENV,
+       port: PORT,
+       allowHttpTargets: ALLOW_HTTP_TARGETS,
+       allowInsecureTls: ALLOW_INSECURE_TLS,
+       allowPrivateTargets: ALLOW_PRIVATE_TARGETS,
+       hasTokenAuth: CONFIGURED_PROXY_TOKENS.length > 0,
+       proxyAuthBypassed: DISABLE_PROXY_AUTH,
+       hasAllowlist: TARGET_ALLOWLIST.length > 0,
+       routes: ['/health', '/healthz', '/ping-target', '/whatsapp/send', '/sas/*', '/login', '/admin/api/*', '/api/*', '/index.php/*'],
+       commit: RENDER_GIT_COMMIT || null,
+       hasWhatsAppBusinessAccountId: Boolean(WHATSAPP_BUSINESS_ACCOUNT_ID),
+       hasDiscoveredWhatsAppBusinessAccountId: Boolean(discoveredWhatsAppBusinessAccountId),
+     });
+     return;
+   }
 
   if (parsedHealthUrl.pathname === '/webhook') {
     if (req.method === 'GET') {
@@ -973,7 +971,6 @@ function handleRequest(req, res) {
     const pingTarget = String(
       parsedHealthUrl.searchParams.get('target') ||
       req.headers['x-sas-target'] ||
-      DEFAULT_TARGET_URL ||
       ''
     ).trim();
 
@@ -1280,7 +1277,7 @@ function handleRequest(req, res) {
   if (!targetOriginRaw) {
     sendJson(req, res, 400, {
       error: 'Missing SAS target',
-      hint: 'Provide X-SAS-Target header, ?target=https://sas-host, or SAS_TARGET_URL env var',
+      hint: 'Provide X-SAS-Target header or ?target=https://sas-host',
     });
     return;
   }

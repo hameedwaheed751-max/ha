@@ -12,19 +12,23 @@ services:
       # السماح بشهادات TLS غير الموثوقة (SAS servers غالباً تستخدم self-signed certs)
       - key: ALLOW_INSECURE_TLS
         value: "1"
-      # السماح بأي هوست SAS (غيّر هذا إلى نطاق SAS الخاص بك لمزيد من الأمان)
+      # السماح بأي هوست SAS (غيّر هذا إلى نطاقات SAS المسموحة لمزيد من الأمان، مثال: sas.speednet-iq.com,sas.earthlinktele.com,*.nbtel.iq)
       - key: SAS_TARGET_ALLOWLIST
         value: ""
       - key: WHATSAPP_BUSINESS_ACCOUNT_ID
         value: "2247793002705802"
-      # اختياري: حدد رابط SAS الافتراضي حتى لا تحتاج لإرساله من التطبيق
-      # - key: SAS_TARGET_URL
-      #   value: https://sas.speednet-iq.com
-      # اختياري: رمز أمان للبروكسي
-      # - key: PROXY_TOKEN
-      #   value: your-secret-token-here
-      # - key: SAS_PROXY_TOKEN
-      #   value: your-secret-token-here
-      # لإتاحة أكثر من توكن (comma-separated) عند الحاجة:
-      # - key: SAS_PROXY_TOKENS
-      #   value: token1,token2
+      # مطلوب للمصادقة على البروكسي (يمكن استخدام PROXY_TOKEN أو SAS_PROXY_TOKEN أو SAS_PROXY_TOKENS)
+      - key: PROXY_TOKEN
+        value: ""
+      - key: SAS_PROXY_TOKEN
+        value: ""
+      # لإتاحة أكثر من توكن (comma-separated) عند الحاجة لعدة شركات:
+      - key: SAS_PROXY_TOKENS
+        value: ""
+      # مطلوب لتفعيل WhatsApp عبر البروكسي:
+      # - key: WHATSAPP_VERIFY_TOKEN
+      #   value: your-verify-token
+      # - key: WHATSAPP_ACCESS_TOKEN
+      #   value: your-access-token
+      # - key: WHATSAPP_PHONE_NUMBER_ID
+      #   value: your-phone-number-id
