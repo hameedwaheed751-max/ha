@@ -58,3 +58,12 @@ whatsapp-service/
 !.dev.vars.example
 .env*
 !.env.example
+# Generated / local files
+node_modules/
+android/build/
+*.zip
+*.backup
+*.pem
+analyze_*.txt
+build_log.txt
+test_output.txt
