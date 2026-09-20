@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+// Import dart:io conditionally to avoid web build issues
+import 'dart:io' if (dart.library.io) 'dart:io';
 import 'dart:math';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:crypto/crypto.dart';
@@ -433,6 +435,7 @@ class SasApiService {
   final Map<String, String> _cookieHeaders = {};
   static final FlutterSecureStorage _secureStorage =
       const FlutterSecureStorage();
+  
 
   SasApiService(this.settings) {
     if (kDebugMode) {
@@ -442,7 +445,14 @@ class SasApiService {
         'platform=${kIsWeb ? "web" : "native"}',
       );
     }
+    
   }
+  
+  /// Initialize a custom HTTP client specifically for SAS connections
+  /// This allows handling self-signed certificates only for SAS without
+  /// affecting other HTTP connections in the app
+    /// Dispose of the custom HTTP client to prevent memory leaks
+  void dispose() {}
 
   void _debugLog(String message) {
     if (kDebugMode) debugPrintSynchronously(message);
@@ -2117,51 +2127,24 @@ class SasApiService {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
-      if (!kIsWeb) ...{
-        'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-      },
     };
-    if (!_directFallback && !_isResellerServer) {
-      headers['Allow-Cache-Y'] = 'yes';
-    }
-    if (kIsWeb && !_directFallback && !_isResellerServer) {
-      headers['X-SAS-DIAG'] = '1';
-    }
+    if (!_directFallback) headers['Allow-Cache-Y'] = 'yes';
+    if (kIsWeb && !_directFallback) headers['X-SAS-DIAG'] = '1';
     _addProxyTarget(headers);
     if (_token != null) headers['authorization'] = 'Bearer $_token';
 
     http.Response res;
     try {
-      debugPrint('[_get] URL: $uri route=$route');
-      res = await http
-          .get(uri, headers: headers)
-          .timeout(const Duration(seconds: 45));
-      debugPrint('[_get] STATUS: ${res.statusCode} route=$route');
-
+      debugPrint('GET URL: $uri');
+      res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 45));
+      debugPrint('GET STATUS: ${res.statusCode}');
+      
       if (res.statusCode == 401) {
         // try to refresh token once
         try {
           await login();
           if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http
-              .get(uri, headers: headers)
-              .timeout(const Duration(seconds: 45));
-        } catch (_) {
-          // fallthrough to error handling below
-        }
-      }
-
-      // معالجة 403 من SAS: نعيد المصادقة ونعيد المحاولة مرة واحدة
-      if (res.statusCode == 403) {
-        try {
-          debugPrint('SAS returned 403 on GET, re-authenticating and retrying');
-          await login();
-          if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http
-              .get(uri, headers: headers)
-              .timeout(const Duration(seconds: 45));
+          res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 45));
         } catch (_) {
           // fallthrough to error handling below
         }
@@ -2171,11 +2154,7 @@ class SasApiService {
       throw SasApiException('تعذر جلب بيانات SAS: $e');
     }
 
-    if (res.statusCode == 401 &&
-        kIsWeb &&
-        !useDirectConnection &&
-        !_directFallback &&
-        !_isResellerServer) {
+    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
       final body = res.body.trim();
       throw SasApiException(
         'رفض التوثيق من البروكسي (401) أثناء GET. '
@@ -2204,72 +2183,40 @@ class SasApiService {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
-      if (!kIsWeb) ...{
-        'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-      },
     };
-    if (!_directFallback && !_isResellerServer) {
-      headers['Allow-Cache-Y'] = 'yes';
-    }
+    if (!_directFallback) headers['Allow-Cache-Y'] = 'yes';
     _addProxyTarget(headers);
     if (_token != null) headers['authorization'] = 'Bearer $_token';
 
     http.Response res;
     try {
-      debugPrint('[_put] URL: $uri route=$route');
-      res = await http
-          .put(
+      res = await http.put(
+        uri,
+        headers: headers,
+        body: jsonEncode({
+          'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
+        }),
+      ).timeout(const Duration(seconds: 45));
+      
+      if (res.statusCode == 502) {
+        final connectionMode = useDirectConnection ? 'الاتصال المباشر' : 'البروكسي';
+        throw SasApiException(
+          'خطأ 502 من SAS عبر $connectionMode.\n'
+          'تأكد من صحة رابط SAS وأن السيرفر متاح من هذا الجهاز/المتصفح.'
+        );
+      }
+      
+      if (res.statusCode == 401) {
+        try {
+          await login();
+          if (_token != null) headers['authorization'] = 'Bearer $_token';
+          res = await http.put(
             uri,
             headers: headers,
             body: jsonEncode({
               'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
             }),
-          )
-          .timeout(const Duration(seconds: 45));
-      debugPrint('[_put] STATUS: ${res.statusCode} route=$route');
-
-      if (res.statusCode == 502) {
-        final connectionMode = useDirectConnection
-            ? 'الاتصال المباشر'
-            : 'البروكسي';
-        throw SasApiException(
-          'خطأ 502 من SAS عبر $connectionMode.\n'
-          'تأكد من صحة رابط SAS وأن السيرفر متاح من هذا الجهاز/المتصفح.',
-        );
-      }
-
-      if (res.statusCode == 401) {
-        try {
-          await login();
-          if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http
-              .put(
-                uri,
-                headers: headers,
-                body: jsonEncode({
-                  'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
-                }),
-              )
-              .timeout(const Duration(seconds: 45));
-        } catch (_) {}
-      }
-
-      if (res.statusCode == 403) {
-        try {
-          debugPrint('SAS returned 403 on PUT, re-authenticating and retrying');
-          await login();
-          if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http
-              .put(
-                uri,
-                headers: headers,
-                body: jsonEncode({
-                  'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
-                }),
-              )
-              .timeout(const Duration(seconds: 45));
+          ).timeout(const Duration(seconds: 45));
         } catch (_) {}
       }
     } catch (e) {
@@ -2277,11 +2224,7 @@ class SasApiService {
       throw SasApiException('تعذر تعديل المشترك في SAS: $e');
     }
 
-    if (res.statusCode == 401 &&
-        kIsWeb &&
-        !useDirectConnection &&
-        !_directFallback &&
-        !_isResellerServer) {
+    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
       final body = res.body.trim();
       throw SasApiException(
         'رفض التوثيق من البروكسي (401) أثناء PUT. '
@@ -2315,6 +2258,7 @@ class SasApiService {
     }
   }
 
+
   Future<dynamic> _post(
     String route,
     Map<String, dynamic> payload, {
@@ -2325,91 +2269,31 @@ class SasApiService {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/plain, */*',
-      if (!kIsWeb) ...{
-        'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-      },
     };
-    if (!_directFallback && !_isResellerServer) {
-      headers['Allow-Cache-Y'] = 'yes';
-    }
-    if (kIsWeb && !_directFallback && !_isResellerServer) {
-      headers['X-SAS-DIAG'] = '1';
-    }
+    if (!_directFallback) headers['Allow-Cache-Y'] = 'yes';
+    if (kIsWeb && !_directFallback) headers['X-SAS-DIAG'] = '1';
     _addProxyTarget(headers);
     if (extraHeaders != null && extraHeaders.isNotEmpty) {
       headers.addAll(extraHeaders);
     }
-    if (authenticated && _token != null) {
-      headers['authorization'] = 'Bearer $_token';
-    }
+    if (authenticated && _token != null) headers['authorization'] = 'Bearer $_token';
     http.Response res;
     try {
-      debugPrint('[_post] URL: $uri');
-      res = await http
-          .post(
-            uri,
-            headers: headers,
-            body: jsonEncode({
-              'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
-            }),
-          )
-          .timeout(const Duration(seconds: 45));
-      debugPrint('[_post] STATUS: ${res.statusCode} route=$route');
-
+      res = await http.post(uri, headers: headers, body: jsonEncode({'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase)})).timeout(const Duration(seconds: 45));
+      
       if (authenticated && res.statusCode == 401) {
         // attempt to refresh token once then retry
         try {
           await login();
           if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http
-              .post(
-                uri,
-                headers: headers,
-                body: jsonEncode({
-                  'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
-                }),
-              )
-              .timeout(const Duration(seconds: 45));
-        } catch (_) {}
-      }
-
-      // معالجة 403 من SAS: قد يعني رمزاً منتهياً أو ممنوعاً، نعيد تسجيل الدخول ونعيد المحاولة مرة واحدة
-      if (res.statusCode == 403 && authenticated && _token != null) {
-        try {
-          debugPrint(
-            'SAS returned 403 on POST, re-authenticating and retrying',
-          );
-          await login();
-          if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http
-              .post(
-                uri,
-                headers: headers,
-                body: jsonEncode({
-                  'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
-                }),
-              )
-              .timeout(const Duration(seconds: 45));
+          res = await http.post(uri, headers: headers, body: jsonEncode({'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase)})).timeout(const Duration(seconds: 45));
         } catch (_) {}
       }
     } catch (e) {
       if (e is SasApiException) rethrow;
       throw SasApiException('تعذر الاتصال بخادم SAS: $e');
     }
-    if (kDebugMode && route == 'user/activate') {
-      _debugLog(
-        '[SAS DEBUG][ACTIVATION] endpoint=$uri method=POST '
-        'final_status_code=${res.statusCode}',
-      );
-    }
-    if (res.statusCode == 401 &&
-        kIsWeb &&
-        !useDirectConnection &&
-        !_directFallback &&
-        !_isResellerServer &&
-        authenticated) {
+    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
       final body = res.body.trim();
       throw SasApiException(
         'رفض التوثيق من البروكسي (401) أثناء POST. '
@@ -2426,21 +2310,9 @@ class SasApiService {
       throw SasApiException('SAS رجع خطأ HTTP ${res.statusCode}$detail');
     }
     try {
-      final decoded = jsonDecode(res.body);
-      if (kDebugMode && route == 'user/activate') {
-        _debugResponseShape(
-          'ACTIVATION RESPONSE',
-          decoded,
-          statusCode: res.statusCode,
-          endpoint: uri,
-          method: 'POST',
-        );
-      }
-      return decoded;
+      return jsonDecode(res.body);
     } catch (_) {
-      throw SasApiException(
-        'رد SAS غير مفهوم: ${res.body.length > 120 ? res.body.substring(0, 120) : res.body}',
-      );
+      throw SasApiException('رد SAS غير مفهوم: ${res.body.length > 120 ? res.body.substring(0, 120) : res.body}');
     }
   }
 

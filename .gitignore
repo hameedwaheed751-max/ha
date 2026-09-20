@@ -47,3 +47,14 @@ app.*.map.json
 .vscode/settings.json
 
 whatsapp-service/node_modules/
+whatsapp-service/auth_test/
+whatsapp-service/auth_test/
+analyze.txt
+whatsapp-service/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example

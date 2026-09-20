@@ -2349,12 +2349,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             ),
           ],
         ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: add,
-          backgroundColor: green,
-          foregroundColor: Colors.white,
-          child: const Icon(Icons.person_add),
-        ),
         body: Scrollbar(
           controller: _verticalScrollController,
           thumbVisibility: true,

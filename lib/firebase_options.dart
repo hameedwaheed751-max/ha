@@ -30,10 +30,7 @@ class DefaultFirebaseOptions {
           'you can reconfigure this by running the FlutterFire CLI again.',
         );
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows;
       case TargetPlatform.linux:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for linux - '
@@ -48,7 +45,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyCIvFNaOjKqYATyEteyVXLoH5aqi8qXNlY',
-    appId: '1:297741444994:android:1b5c604c227f0081c0919b',
+    appId: '1:297741444994:android:ec2cdee4234d92ebc0919b',
     messagingSenderId: '297741444994',
     projectId: 'wakeiq-4b97b',
     databaseURL: 'https://wakeiq-4b97b-default-rtdb.europe-west1.firebasedatabase.app',
@@ -73,5 +70,16 @@ class DefaultFirebaseOptions {
     databaseURL: 'https://wakeiq-4b97b-default-rtdb.europe-west1.firebasedatabase.app',
     storageBucket: 'wakeiq-4b97b.firebasestorage.app',
     iosBundleId: 'com.example.untitled',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyBMcV1XkILsjalRqZtJl7xAuUu3yJd2u30',
+    appId: '1:297741444994:web:9eb05eb4d1239940c0919b',
+    messagingSenderId: '297741444994',
+    projectId: 'wakeiq-4b97b',
+    authDomain: 'wakeiq-4b97b.firebaseapp.com',
+    databaseURL: 'https://wakeiq-4b97b-default-rtdb.europe-west1.firebasedatabase.app',
+    storageBucket: 'wakeiq-4b97b.firebasestorage.app',
+    measurementId: 'G-8SSJLC3V81',
   );
 }

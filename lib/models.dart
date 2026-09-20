@@ -995,6 +995,9 @@ class AppStore {
   };
   static StreamSubscription<DatabaseEvent>? realtimeListener;
 
+  static bool get _isWindowsDesktop =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
   static DatabaseReference? get _chatRef {
     final officeKey = _officeChatKey();
     if (officeKey != null && officeKey.isNotEmpty) {
@@ -1389,8 +1392,10 @@ class AppStore {
     }
   }
 
-  static Future<void> _loadSubscribers(SharedPreferences p) async {
-    final raw = p.getString('subscribers') ?? p.getString('subscribers_backup');
+  static Future<void> _loadSubscribers(SharedPreferences p, {List<dynamic>? preDecoded}) async {
+    final raw = preDecoded != null
+        ? jsonEncode(preDecoded)
+        : (p.getString('subscribers') ?? p.getString('subscribers_backup'));
     subscribers.clear();
     if (raw != null && raw.isNotEmpty) {
       try {
@@ -1814,26 +1819,35 @@ class AppStore {
     for (final subscriber in subscribers) {
       if (subscriber.remaining <= 0.0001) continue;
 
-      final identity = subscriber.sasId.trim().isNotEmpty
-          ? 'sas:${subscriber.sasId.trim()}'
-          : 'user:${subscriber.user.trim()}';
-      final key = base64Url.encode(utf8.encode(identity)).replaceAll('=', '');
-      debts[key] = <String, dynamic>{
-        'user': subscriber.user,
-        'sasId': subscriber.sasId,
-        'name': subscriber.name,
-        'phone': subscriber.phone,
-        'package': subscriber.packageDisplay,
-        'subscriptionAmount': subscriber.price,
-        'paidAmount': subscriber.paid,
-        'remainingAmount': subscriber.remaining,
-        'paymentDate': subscriber.paymentDate,
-        'payments': subscriber.payments
-            .map((payment) => payment.toJson())
-            .toList(),
-      };
+      debts[_debtKeyForSubscriber(subscriber)] = _debtPayloadForSubscriber(
+        subscriber,
+      );
     }
     return debts;
+  }
+
+  static String _debtKeyForSubscriber(Subscriber subscriber) {
+    final identity = subscriber.sasId.trim().isNotEmpty
+        ? 'sas:${subscriber.sasId.trim()}'
+        : 'user:${subscriber.user.trim()}';
+    return base64Url.encode(utf8.encode(identity)).replaceAll('=', '');
+  }
+
+  static Map<String, dynamic> _debtPayloadForSubscriber(Subscriber subscriber) {
+    return <String, dynamic>{
+      'user': subscriber.user,
+      'sasId': subscriber.sasId,
+      'name': subscriber.name,
+      'phone': subscriber.phone,
+      'package': subscriber.packageDisplay,
+      'subscriptionAmount': subscriber.price,
+      'paidAmount': subscriber.paid,
+      'remainingAmount': subscriber.remaining,
+      'paymentDate': subscriber.paymentDate,
+      'payments': subscriber.payments
+          .map((payment) => payment.toJson())
+          .toList(),
+    };
   }
 
   static String _dailyTaskEventKey(DailyTaskEvent event) {
@@ -2029,13 +2043,16 @@ class AppStore {
 
       final paymentsPayload = debt['payments'];
       if (paymentsPayload is List) {
-        subscriber.payments = paymentsPayload
+        final incomingPayments = paymentsPayload
             .whereType<Map>()
             .map(
               (payment) =>
                   PaymentRecord.fromJson(Map<String, dynamic>.from(payment)),
             )
             .toList();
+        subscriber.payments = _isWindowsDesktop
+            ? _mergePaymentRecords(subscriber.payments, incomingPayments)
+            : incomingPayments;
         if (subscriber.payments.isNotEmpty) {
           subscriber.reconcilePaidFromPayments();
         }
@@ -2043,16 +2060,47 @@ class AppStore {
     }
   }
 
+  static List<PaymentRecord> _mergePaymentRecords(
+    List<PaymentRecord> current,
+    List<PaymentRecord> incoming,
+  ) {
+    final merged = <String, PaymentRecord>{};
+    String keyOf(PaymentRecord payment) => [
+      payment.at.toUtc().toIso8601String(),
+      payment.amount.toStringAsFixed(4),
+      payment.note.trim(),
+    ].join('|');
+
+    for (final payment in current) {
+      merged[keyOf(payment)] = payment;
+    }
+    for (final payment in incoming) {
+      merged[keyOf(payment)] = payment;
+    }
+
+    final records = merged.values.toList()
+      ..sort((a, b) => a.at.compareTo(b.at));
+    return records;
+  }
+
   static Future<void> _syncDebtsNodeToFirebase() async {
     if (!_isLoggedIn) return;
     final debtsPayload = buildDebtsPayload();
+    if (_isWindowsDesktop) {
+      if (debtsPayload.isEmpty) return;
+      await _agentRef
+          .child('debts')
+          .set(debtsPayload)
+          .timeout(const Duration(seconds: 10));
+      return;
+    }
     await _agentRef
         .child('debts')
         .set(debtsPayload.isEmpty ? null : debtsPayload)
         .timeout(const Duration(seconds: 10));
   }
 
-  static Future<void> save() async {
+  static Future<void> save({Subscriber? changedDebtSubscriber}) async {
     if (!_isLoggedIn) {
       debugPrint('AppStore.save: User not logged in, saving locally only');
     }
@@ -2143,6 +2191,8 @@ class AppStore {
       final debtsPayload = buildDebtsPayload();
       final dailyTasksPayload = buildDailyTaskEventsPayload();
       final accountingActivationsPayload = buildAccountingActivationsPayload();
+      final shouldPatchSingleWindowsDebt =
+          _isWindowsDesktop && changedDebtSubscriber != null;
 
       // Write revision and subscribers in a single update to avoid
       // intermediate snapshots where revision is new but subscribers are old.
@@ -2156,7 +2206,8 @@ class AppStore {
         'settings/nextReceiptNumber': nextReceiptNumber,
         'settings/$subscribersRevisionKey': subscribersRevision,
         'subscribers': subscribers.map((e) => e.toJson()).toList(),
-        'debts': debtsPayload.isEmpty ? null : debtsPayload,
+        if (!shouldPatchSingleWindowsDebt)
+          'debts': debtsPayload.isEmpty ? null : debtsPayload,
         for (final entry in dailyTasksPayload.entries)
           '$dailyTaskEventsKey/${entry.key}': entry.value,
         for (final entry in accountingActivationsPayload.entries)
@@ -2167,6 +2218,10 @@ class AppStore {
       }
       await ref.update(storePatch);
 
+      if (shouldPatchSingleWindowsDebt) {
+        await _syncDebtSubscriberToFirebase(changedDebtSubscriber);
+      }
+
       await ref.child('packages').set(packagesMap);
       await ref.child('packagesList').set(packagesList);
       await ref.child('messageTemplates').set(messageTemplates);
@@ -2174,6 +2229,21 @@ class AppStore {
     } catch (e) {
       debugPrint('Firebase save failed: $e');
     }
+  }
+
+  static Future<void> _syncDebtSubscriberToFirebase(
+    Subscriber subscriber,
+  ) async {
+    if (!_isLoggedIn) return;
+    final key = _debtKeyForSubscriber(subscriber);
+    final debtRef = _agentRef.child('debts/$key');
+    if (subscriber.remaining <= 0.0001) {
+      await debtRef.remove().timeout(const Duration(seconds: 10));
+      return;
+    }
+    await debtRef
+        .set(_debtPayloadForSubscriber(subscriber))
+        .timeout(const Duration(seconds: 10));
   }
 
   static void startRealtimeSync() {
@@ -2292,15 +2362,14 @@ class AppStore {
           }
           if (remoteRevision > localRevisionBeforeEvent ||
               allowRemoteBootstrap) {
-            final rawJson = jsonEncode(
-              agentData['subscribers'] ?? <dynamic>[],
-            );
+            final subscribersData = agentData['subscribers'] ?? <dynamic>[];
+            final rawJson = jsonEncode(subscribersData);
             await p.setString('subscribers', rawJson);
             if (remoteRevision > 0) {
               subscribersRevision = remoteRevision;
               await p.setInt(subscribersRevisionKey, subscribersRevision);
             }
-            await _loadSubscribers(p);
+            await _loadSubscribers(p, preDecoded: subscribersData);
             applyDebtsPayload(agentData['debts']);
             await p.setString(
               'subscribers',

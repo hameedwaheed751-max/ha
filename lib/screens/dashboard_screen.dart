@@ -972,7 +972,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     showAboutDialog(
                       context: context,
                       applicationName: 'وكيل نت',
-                      applicationVersion: '2.0',
+                      applicationVersion: '3.0.0',
                       applicationLegalese: 'إدارة مشتركي الإنترنت',
                     );
                   },
@@ -1332,7 +1332,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                         const SizedBox(height: 10),
                         _quickActionsGrid(),
                         const SizedBox(height: 22),
-                        _sasInformationSection(active: active),
+                        _sasInformationSection(
+                          active: active,
+                          totalSubscribers: AppStore.subscribers.length,
+                          expired: expired,
+                        ),
                         const SizedBox(height: 22),
                         _latestSubscribersSection(
                           latestSubscribers.take(4).toList(),
@@ -1531,7 +1535,13 @@ class _DashboardScreenState extends State<DashboardScreen>
             for (final item in items)
               SizedBox(
                 width: width,
-                child: _metricCard(item.$1, item.$2, item.$3, item.$4),
+                child: _metricCard(
+                  title: item.$1,
+                  subtitle: '',
+                  value: item.$2,
+                  icon: item.$3,
+                  color: item.$4,
+                ),
               ),
           ],
         );
@@ -1539,14 +1549,20 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _metricCard(String title, String value, IconData icon, Color color) {
+  Widget _metricCard({
+    required String title,
+    required String subtitle,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
     final colors = Theme.of(context).colorScheme;
     return Container(
-      constraints: const BoxConstraints(minHeight: 112),
-      padding: const EdgeInsets.all(12),
+      constraints: const BoxConstraints(minHeight: 120),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: colors.surface,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colors.outlineVariant),
         boxShadow: const [
           BoxShadow(
@@ -1559,37 +1575,53 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.11),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: color, size: 22),
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.11),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 30,
+                    fontWeight: FontWeight.w900,
+                    color: color,
+                    height: 1.1,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           Text(
             title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: colors.onSurface,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: colors.onSurfaceVariant,
               fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 3),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Text(
-              value,
-              style: TextStyle(
-                color: colors.onSurface,
-                fontSize: 17,
-                fontWeight: FontWeight.w900,
-              ),
+              color: colors.onSurfaceVariant,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -1719,7 +1751,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _sasInformationSection({required int active}) {
+  Widget _sasInformationSection({required int active, required int totalSubscribers, required int expired}) {
     final items = <(String, String, IconData, Color, VoidCallback)>[
       (
         'الرصيد',
@@ -1740,11 +1772,25 @@ class _DashboardScreenState extends State<DashboardScreen>
         _loadSasWallet,
       ),
       (
+        'عدد المشتركين',
+        totalSubscribers.toString(),
+        Icons.people_rounded,
+        const Color(0xFF0877F9),
+        () => _pushDashboard(const SubscribersScreen()),
+      ),
+      (
         'المشتركين الفعالين',
         '$active',
         Icons.check_circle_rounded,
         const Color(0xFF22A447),
         () => _pushDashboard(const SubscribersScreen(filter: 'active')),
+      ),
+      (
+        'المنتهية اشتراكاتهم',
+        '$expired',
+        Icons.cancel_rounded,
+        const Color(0xFFE53935),
+        () => _pushDashboard(const SubscribersScreen(filter: 'expired')),
       ),
       (
         'الانتهاء خلال 3 أيام',
@@ -1791,7 +1837,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                     child: InkWell(
                       onTap: item.$5,
                       borderRadius: BorderRadius.circular(8),
-                      child: _metricCard(item.$1, item.$2, item.$3, item.$4),
+                      child: _metricCard(
+                        title: item.$1,
+                        subtitle: '',
+                        value: item.$2,
+                        icon: item.$3,
+                        color: item.$4,
+                      ),
                     ),
                   ),
               ],

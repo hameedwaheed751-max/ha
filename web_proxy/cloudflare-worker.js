@@ -1,22 +1,18 @@
-const SAS_ORIGIN = 'https://sas.jt.iq';
-const PROXY_TOKEN = '104199';
-
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers':
-      'Content-Type, Authorization, Allow-Cache-Y, X-SAS-Target, X-Proxy-Token, X-SAS-Proxy-Token, X-API-Key, X-SAS-DIAG',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, Allow-Cache-Y, X-SAS-Target',
   };
 }
 
 function withCors(response) {
   const headers = new Headers(response.headers);
-  headers.delete('access-control-allow-origin');
-  headers.delete('access-control-allow-credentials');
   for (const [key, value] of Object.entries(corsHeaders())) {
     headers.set(key, value);
   }
+  headers.delete('access-control-allow-origin');
+  headers.delete('access-control-allow-credentials');
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -34,7 +30,7 @@ function json(data, status = 200) {
   });
 }
 
-async function proxyRequest(request, env) {
+async function proxyRequest(request) {
   const url = new URL(request.url);
 
   if (request.method === 'OPTIONS') {
@@ -43,10 +39,6 @@ async function proxyRequest(request, env) {
 
   if (url.pathname === '/' || url.pathname === '/health' || url.pathname === '/healthz') {
     return json({ ok: true, service: 'NetAgent SAS Proxy', runtime: 'cloudflare-workers' });
-  }
-
-  if (url.pathname.startsWith('/whatsapp/')) {
-    return whatsappHandler(request, env);
   }
 
   if (!url.pathname.startsWith('/sas/')) {
@@ -59,22 +51,15 @@ async function proxyRequest(request, env) {
     });
   }
 
-  const suppliedToken =
-    request.headers.get('X-Proxy-Token') ||
-    request.headers.get('X-SAS-Proxy-Token') ||
-    request.headers.get('X-API-Key');
-  if (suppliedToken !== PROXY_TOKEN) {
-    return json({ error: 'Unauthorized' }, 401);
+  const targetOrigin = request.headers.get('X-SAS-Target');
+  if (!targetOrigin || !/^https?:\/\//i.test(targetOrigin)) {
+    return json({ error: 'Missing X-SAS-Target' }, 400);
   }
 
-  const requestedOrigin = (request.headers.get('X-SAS-Target') || '').replace(/\/+$/, '');
-  if (requestedOrigin && requestedOrigin !== SAS_ORIGIN) {
-    return json({ error: 'SAS target is not allowed' }, 403);
-  }
-
+  const cleanOrigin = targetOrigin.replace(/\/+$/, '');
   let targetUrl;
   try {
-    targetUrl = new URL(SAS_ORIGIN + url.pathname.substring(4) + url.search);
+    targetUrl = new URL(cleanOrigin + url.pathname.substring(4) + url.search);
   } catch (error) {
     return json({ error: 'Invalid SAS target' }, 400);
   }
@@ -84,10 +69,6 @@ async function proxyRequest(request, env) {
   headers.delete('Origin');
   headers.delete('Referer');
   headers.delete('X-SAS-Target');
-  headers.delete('X-Proxy-Token');
-  headers.delete('X-SAS-Proxy-Token');
-  headers.delete('X-API-Key');
-  headers.delete('X-SAS-DIAG');
 
   const init = {
     method: request.method,
@@ -113,31 +94,8 @@ async function proxyRequest(request, env) {
   }
 }
 
-async function whatsappHandler(request, env) {
-  const whatsappPath = request.url.substring(request.url.indexOf('/whatsapp'));
-  const upstreamUrl = `http://localhost${whatsappPath.replace('/whatsapp', '')}`;
-
-  try {
-    const upstreamResponse = await env.WHATSAPP_SERVICE.fetch(upstreamUrl, {
-      method: request.method,
-      headers: request.headers,
-      body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
-    });
-    return withCors(upstreamResponse);
-  } catch (error) {
-    return json(
-      {
-        success: false,
-        error: 'WhatsApp Service unavailable',
-        detail: error instanceof Error ? error.message : String(error),
-      },
-      502,
-    );
-  }
-}
-
 export default {
-  fetch(request, env) {
-    return proxyRequest(request, env);
+  fetch(request) {
+    return proxyRequest(request);
   },
 };

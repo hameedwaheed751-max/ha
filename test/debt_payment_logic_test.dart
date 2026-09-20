@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/foundation.dart';
 import 'package:untitled/models.dart';
 
 Subscriber _subscriber({double price = 100, double paid = 0}) {
@@ -374,5 +375,44 @@ void main() {
       ),
       0,
     );
+  });
+
+  test('Windows debts payload keeps existing payment rows when remote is partial', () {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    try {
+      final existingPayment = PaymentRecord(
+        amount: 20,
+        at: DateTime(2026, 8, 1, 10),
+        note: 'old payment',
+      );
+      final subscriber = _subscriber(price: 100, paid: 20)
+        ..payments = [existingPayment];
+      AppStore.subscribers
+        ..clear()
+        ..add(subscriber);
+
+      AppStore.applyDebtsPayload({
+        'u1': {
+          'user': 'u1',
+          'subscriptionAmount': 100,
+          'paidAmount': 50,
+          'remainingAmount': 50,
+          'payments': [
+            {
+              'amount': 30,
+              'at': DateTime(2026, 8, 2, 10).toIso8601String(),
+              'note': 'new payment',
+            },
+          ],
+        },
+      });
+
+      expect(subscriber.payments.length, 2);
+      expect(subscriber.payments.map((payment) => payment.amount), [20, 30]);
+      expect(subscriber.paid, 50);
+      expect(subscriber.remaining, 50);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 }
