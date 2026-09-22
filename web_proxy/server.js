@@ -49,8 +49,21 @@ const SAS_INSECURE_HOSTS = String(process.env.SAS_INSECURE_HOSTS || '')
   .map((item) => item.trim().toLowerCase())
   .filter(Boolean);
 
+const DEFAULT_SAS_INSECURE_HOSTS = [
+  'sas.speednet-iq.com',
+  'reseller.nbtel.iq',
+  'reseller.nbtle.iq',
+  'reseller.nbtele.iq',
+];
+
+const effectiveInsecureHosts = SAS_INSECURE_HOSTS.length > 0
+  ? SAS_INSECURE_HOSTS
+  : DEFAULT_SAS_INSECURE_HOSTS;
+
 if (SAS_INSECURE_HOSTS.length > 0) {
   console.warn(`[TLS] Host-specific TLS bypass enabled for: ${SAS_INSECURE_HOSTS.join(', ')}`);
+} else {
+  console.warn(`[TLS] Using default insecure hosts: ${effectiveInsecureHosts.join(', ')}`);
 }
 
 if (NODE_ENV === 'production' && !DISABLE_PROXY_AUTH && CONFIGURED_PROXY_TOKENS.length === 0) {
@@ -878,7 +891,7 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
        allowHttpTargets: ALLOW_HTTP_TARGETS,
        allowInsecureTls: ALLOW_INSECURE_TLS,
        allowPrivateTargets: ALLOW_PRIVATE_TARGETS,
-       sasInsecureHosts: SAS_INSECURE_HOSTS,
+       sasInsecureHosts: effectiveInsecureHosts,
        hasTokenAuth: CONFIGURED_PROXY_TOKENS.length > 0,
        proxyAuthBypassed: DISABLE_PROXY_AUTH,
        hasAllowlist: TARGET_ALLOWLIST.length > 0,
@@ -1356,7 +1369,7 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
         headers,
         timeout: 30000,
       };
-      if (targetBaseUrl.protocol === 'https:' && SAS_INSECURE_HOSTS.includes(targetBaseUrl.hostname.toLowerCase())) {
+      if (targetBaseUrl.protocol === 'https:' && effectiveInsecureHosts.includes(targetBaseUrl.hostname.toLowerCase())) {
         requestOptions.rejectUnauthorized = false;
       }
 
