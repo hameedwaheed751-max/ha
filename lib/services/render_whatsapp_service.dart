@@ -589,6 +589,14 @@ class RenderWhatsAppService {
       };
 
   static Future<(String endpoint, String apiKey)> loadConfig() async {
+    final runtimeWhatsAppEndpoint = readRuntimeAppConfig('whatsappServiceUrl');
+    if (runtimeWhatsAppEndpoint != null && runtimeWhatsAppEndpoint.isNotEmpty) {
+      final endpoint = runtimeWhatsAppEndpoint.endsWith('/send-message')
+          ? runtimeWhatsAppEndpoint
+          : '${runtimeWhatsAppEndpoint.replaceAll(RegExp(r'/+$'), '')}/send-message';
+      return (endpoint, _runtimeEmbeddedApiKey.trim());
+    }
+
     final phoneNumberId = _resolvePhoneNumberId();
     if (phoneNumberId.isEmpty) {
       final fallbackEndpoint = _coalesce(_runtimeDefaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim().endsWith('/send-message')
