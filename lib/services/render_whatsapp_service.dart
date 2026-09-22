@@ -163,7 +163,9 @@ class RenderWhatsAppService {
     defaultValue: '',
   );
   static String get _runtimeDefaultSendEndpoint {
-    return readRuntimeAppConfig('sasWebProxyUrl') ?? _defaultSendEndpoint;
+    return readRuntimeAppConfig('whatsappServiceUrl') ??
+        readRuntimeAppConfig('sasWebProxyUrl') ??
+        _defaultSendEndpoint;
   }
   static String get _runtimeEmbeddedApiKey {
     return readRuntimeAppConfig('sasProxyToken') ?? _embeddedApiKey;
