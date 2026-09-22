@@ -784,26 +784,13 @@ async function sendWhatsAppTemplate(
     throw err;
   }
 
-  const canonicalValues = templateVariables && typeof templateVariables === 'object'
-    ? Object.fromEntries(
-        Object.entries(templateVariables).map(([key, value]) => [key, String(value || '').trim()])
-      )
-    : {};
-  const contract = await getApprovedTemplateContract(name, lang, phoneNumberId, accessToken);
-  const bodyParameters = contract.names.map((parameterName) => {
-    const text = canonicalValues[parameterName] ||
-      suppliedParameters.find((parameter) => parameter.parameter_name === parameterName)?.text ||
-      '';
-    if (!text) {
-      const err = new Error(
-        `No application value is available for Meta variable ${parameterName} in ${name}`
-      );
-      err.statusCode = 400;
-      err.details = {templateName: name, parameterName, expectedParameters: contract.names};
-      throw err;
-    }
-    return {type: 'text', parameter_name: parameterName, text};
-  });
+  if (suppliedParameters.length === 0) {
+    const err = new Error(`Template ${name} requires named parameters`);
+    err.statusCode = 400;
+    err.details = {templateName: name};
+    throw err;
+  }
+  const bodyParameters = suppliedParameters;
 
   const endpoint = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phoneNumberId}/messages`;
   const payload = {
