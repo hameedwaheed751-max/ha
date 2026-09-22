@@ -6,6 +6,7 @@ const env = {
   ...process.env,
   PORT: String(PORT),
   ALLOW_INSECURE_TLS: '1',
+  SAS_INSECURE_HOSTS: 'sas.speednet-iq.com,reseller.nbtel.iq,reseller.nbtle.iq,reseller.nbtele.iq',
   NODE_ENV: 'production',
 };
 

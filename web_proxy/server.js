@@ -44,14 +44,13 @@ const TARGET_ALLOWLIST = String(process.env.SAS_TARGET_ALLOWLIST || '')
   .map((item) => item.trim().toLowerCase())
   .filter(Boolean);
 
-if (ALLOW_INSECURE_TLS) {
-  // Use only when SAS uses self-signed or invalid certificates.
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  console.warn('WARNING: TLS certificate verification is disabled (ALLOW_INSECURE_TLS=1).');
-}
+const SAS_INSECURE_HOSTS = String(process.env.SAS_INSECURE_HOSTS || '')
+  .split(',')
+  .map((item) => item.trim().toLowerCase())
+  .filter(Boolean);
 
-if (TARGET_ALLOWLIST.length === 0) {
-  console.warn('WARNING: SAS_TARGET_ALLOWLIST is empty. Any public target host is allowed.');
+if (SAS_INSECURE_HOSTS.length > 0) {
+  console.warn(`[TLS] Host-specific TLS bypass enabled for: ${SAS_INSECURE_HOSTS.join(', ')}`);
 }
 
 if (NODE_ENV === 'production' && !DISABLE_PROXY_AUTH && CONFIGURED_PROXY_TOKENS.length === 0) {
@@ -879,6 +878,7 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
        allowHttpTargets: ALLOW_HTTP_TARGETS,
        allowInsecureTls: ALLOW_INSECURE_TLS,
        allowPrivateTargets: ALLOW_PRIVATE_TARGETS,
+       sasInsecureHosts: SAS_INSECURE_HOSTS,
        hasTokenAuth: CONFIGURED_PROXY_TOKENS.length > 0,
        proxyAuthBypassed: DISABLE_PROXY_AUTH,
        hasAllowlist: TARGET_ALLOWLIST.length > 0,
@@ -1347,16 +1347,20 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
         delete headers['content-length'];
       }
 
-      const upstream = upstreamClient.request(
-        {
-          protocol: targetBaseUrl.protocol,
-          hostname: targetBaseUrl.hostname,
-          port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
-          path: currentPath,
-          method: req.method,
-          headers,
-          timeout: 30000,
-        },
+      const requestOptions = {
+        protocol: targetBaseUrl.protocol,
+        hostname: targetBaseUrl.hostname,
+        port: targetBaseUrl.port || (targetBaseUrl.protocol === 'https:' ? 443 : 80),
+        path: currentPath,
+        method: req.method,
+        headers,
+        timeout: 30000,
+      };
+      if (targetBaseUrl.protocol === 'https:' && SAS_INSECURE_HOSTS.includes(targetBaseUrl.hostname.toLowerCase())) {
+        requestOptions.rejectUnauthorized = false;
+      }
+
+      const upstream = upstreamClient.request(requestOptions,
         (upstreamRes) => {
           const status = upstreamRes.statusCode || 0;
           const canRetry = index + 1 < pathCandidates.length;

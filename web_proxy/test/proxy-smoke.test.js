@@ -23,7 +23,7 @@ function requestOnce(port, path, headers = {}) {
 }
 
 (async () => {
-  const proxy = startProxy({ PORT: '3121', ALLOW_HTTP_TARGETS: '1', ALLOW_PRIVATE_TARGETS: '1', ALLOW_INSECURE_TLS: '1' });
+  const proxy = startProxy({ PORT: '3121', ALLOW_HTTP_TARGETS: '1', ALLOW_PRIVATE_TARGETS: '1', ALLOW_INSECURE_TLS: '1', SAS_INSECURE_HOSTS: 'sas.speednet-iq.com,reseller.nbtel.iq,reseller.nbtle.iq,reseller.nbtele.iq' });
   proxy.stdout.on('data', (d) => process.stdout.write(d));
   proxy.stderr.on('data', (d) => process.stdout.write(d));
 

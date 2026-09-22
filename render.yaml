@@ -10,8 +10,13 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Host-specific TLS bypass: only these SAS hosts will use rejectUnauthorized:false
+      # when the Worker routes traffic through this proxy. Other sites use strict TLS.
+      - key: SAS_INSECURE_HOSTS
+        value: "sas.speednet-iq.com,reseller.nbtel.iq,reseller.nbtle.iq,reseller.nbtele.iq"
+      # Global TLS verification is now handled per-host by the proxy.
       - key: ALLOW_INSECURE_TLS
-        value: "1"
+        value: "0"
       - key: SAS_TARGET_ALLOWLIST
         value: ""
       - key: WHATSAPP_BUSINESS_ACCOUNT_ID

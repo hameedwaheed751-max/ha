@@ -9,9 +9,14 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # السماح بشهادات TLS غير الموثوقة (SAS servers غالباً تستخدم self-signed certs)
+      # Host-specific TLS bypass: only these SAS hosts will use rejectUnauthorized:false
+      # when the Worker routes traffic through this proxy. Other sites use strict TLS.
+      - key: SAS_INSECURE_HOSTS
+        value: "sas.speednet-iq.com,reseller.nbtel.iq,reseller.nbtle.iq,reseller.nbtele.iq"
+      # Global TLS verification is now handled per-host by the proxy.
+      # Set ALLOW_INSECURE_TLS=0 to ensure no global bypass is active.
       - key: ALLOW_INSECURE_TLS
-        value: "1"
+        value: "0"
       # السماح بأي هوست SAS (غيّر هذا إلى نطاقات SAS المسموحة لمزيد من الأمان، مثال: sas.speednet-iq.com,sas.earthlinktele.com,*.nbtel.iq)
       - key: SAS_TARGET_ALLOWLIST
         value: ""
