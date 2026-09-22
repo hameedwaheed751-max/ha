@@ -5,7 +5,7 @@ const SAS_SSL_PROBLEM_HOSTS = new Set([
   'reseller.nbtele.iq',
 ]);
 
-const RENDER_PROXY_URL = 'https://netagent-sas-proxy.onrender.com';
+const RENDER_PROXY_URL = 'https://ha-0cs7.onrender.com';
 
 function corsHeaders() {
   return {
