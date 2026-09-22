@@ -15,8 +15,23 @@ const WHATSAPP_API_VERSION = String(process.env.WHATSAPP_API_VERSION || 'v22.0')
 const WHATSAPP_BUSINESS_ACCOUNT_ID = String(
   process.env.WHATSAPP_BUSINESS_ACCOUNT_ID ||
     process.env.WABA_ID ||
-    '2247793002705802'
+    ''
 ).trim();
+const WHATSAPP_TOKEN_SOURCE = WHATSAPP_ACCESS_TOKEN
+  ? 'WHATSAPP_ACCESS_TOKEN'
+  : WHATSAPP_TOKEN
+    ? 'WHATSAPP_TOKEN'
+    : 'none';
+const WHATSAPP_PHONE_NUMBER_ID_SOURCE = WHATSAPP_PHONE_NUMBER_ID
+  ? 'WHATSAPP_PHONE_NUMBER_ID'
+  : PHONE_NUMBER_ID
+    ? 'PHONE_NUMBER_ID'
+    : 'none';
+const WHATSAPP_WABA_SOURCE = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID
+  ? 'WHATSAPP_BUSINESS_ACCOUNT_ID'
+  : process.env.WABA_ID
+    ? 'WABA_ID'
+    : 'phone_number_lookup';
 const RENDER_GIT_COMMIT = String(process.env.RENDER_GIT_COMMIT || '').trim();
 let discoveredWhatsAppBusinessAccountId = WHATSAPP_BUSINESS_ACCOUNT_ID;
 const DEFAULT_TARGET_URL = '';
@@ -503,7 +518,7 @@ async function sendWhatsAppText(to, message) {
     throw err;
   }
 
-  const endpoint = `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`;
+  const endpoint = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phoneNumberId}/messages`;
   console.log('[whatsapp] outbound text payload:', JSON.stringify({
     to: cleanTo,
     type: 'text',
@@ -790,7 +805,7 @@ async function sendWhatsAppTemplate(
     return {type: 'text', parameter_name: parameterName, text};
   });
 
-  const endpoint = `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`;
+  const endpoint = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phoneNumberId}/messages`;
   const payload = {
     messaging_product: 'whatsapp',
     to: cleanTo,
@@ -899,6 +914,10 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
        commit: RENDER_GIT_COMMIT || null,
        hasWhatsAppBusinessAccountId: Boolean(WHATSAPP_BUSINESS_ACCOUNT_ID),
        hasDiscoveredWhatsAppBusinessAccountId: Boolean(discoveredWhatsAppBusinessAccountId),
+      whatsappApiVersion: WHATSAPP_API_VERSION,
+      whatsappTokenSource: WHATSAPP_TOKEN_SOURCE,
+      whatsappPhoneNumberIdSource: WHATSAPP_PHONE_NUMBER_ID_SOURCE,
+      whatsappWabaSource: WHATSAPP_WABA_SOURCE,
      });
      return;
    }
