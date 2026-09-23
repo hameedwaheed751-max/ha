@@ -972,7 +972,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     showAboutDialog(
                       context: context,
                       applicationName: 'وكيل نت',
-                      applicationVersion: '3.0.0',
+                      applicationVersion: '3.3.0',
                       applicationLegalese: 'إدارة مشتركي الإنترنت',
                     );
                   },
@@ -2817,18 +2817,8 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       return;
     }
 
-    final deliveryStatus = (result.details?['deliveryStatus'] ?? 'accepted')
-        .toString();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          deliveryStatus == 'delivered' || deliveryStatus == 'read'
-              ? 'تم تسليم تذكير الدين إلى واتساب المشترك'
-              : deliveryStatus == 'sent'
-              ? 'تم إرسال تذكير الدين عبر WhatsApp Service'
-              : 'قبلت Meta التذكير وهو قيد التسليم للمشترك',
-        ),
-      ),
+      const SnackBar(content: Text('تم الإرسال بنجاح')),
     );
   }
 

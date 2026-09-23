@@ -202,6 +202,12 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     return v == null ? fallback : v.toString();
   }
 
+  String _formatSasBalance(String raw) {
+    final n = double.tryParse(raw);
+    if (n == null) return raw;
+    return n.toStringAsFixed(0);
+  }
+
   String _bytes(dynamic value) {
     if (value == null) return '—';
     final n = double.tryParse(value.toString());
@@ -476,8 +482,8 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                           infoRow('الواصل', s.paid.toStringAsFixed(0), Icons.payments_outlined),
                           infoRow('المتبقي', s.remaining.toStringAsFixed(0), Icons.money_off_outlined),
                           infoRow('تاريخ التفعيل', f(s.startDate), Icons.event_outlined),
-                          infoRow('تاريخ التسديد', s.paymentDate.isEmpty ? 'غير محدد' : s.paymentDate, Icons.event_available_outlined),
-                          if (isSas) infoRow('رصيد SAS', _sas(['balance','credit','user_balance']), Icons.account_balance_wallet_outlined),
+infoRow('تاريخ التسديد', s.paymentDate.isEmpty ? 'غير محدد' : s.paymentDate, Icons.event_available_outlined),
+                          if (isSas) infoRow('balance', _formatSasBalance(_sas(['balance','credit','user_balance'])), Icons.account_balance_wallet_outlined),
                           const SizedBox(height: 8),
                           Row(
                             children: [

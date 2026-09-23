@@ -425,6 +425,7 @@ class SasApiService {
   String? _token;
   // Browsers cannot call SAS directly because its API does not allow CORS.
   final bool _directFallback = false;
+  bool _proxyFallback = false;
   final Map<int, dynamic> _profileCache = {};
   final Map<String, String> _cookieHeaders = {};
   static final FlutterSecureStorage _secureStorage =
@@ -557,7 +558,14 @@ class SasApiService {
   }
 
   bool get _usesWebProxy {
-    return !_directFallback && (kIsWeb || _isResellerServer);
+    return !_directFallback && _proxyFallback;
+  }
+
+  void _switchToProxyFallback() {
+    if (_proxyFallback) return;
+    _proxyFallback = true;
+    _debugLog('SAS Direct: failed');
+    _debugLog('SAS Proxy: fallback');
   }
 
   String? _resellerApiServer;
@@ -601,30 +609,21 @@ class SasApiService {
   }
 
   String get _base {
+    if (_usesWebProxy) {
+      final apiBase = _isResellerServer && _resellerApiServer != null
+          ? _resellerApiServer!
+          : _sasApiBase;
+      final sasPath = Uri.parse(apiBase).path;
+      final cleanSasPath = sasPath.endsWith('/')
+          ? sasPath.substring(0, sasPath.length - 1)
+          : sasPath;
+      return '${_webProxyBase}/sas$cleanSasPath';
+    }
     if (_isResellerServer) {
-      if (_usesWebProxy) {
-        final apiBase = _resellerApiServer ?? _sasApiBase;
-        final apiPath = Uri.parse(apiBase).path.replaceAll(RegExp(r'/+$'), '');
-        return '$_webProxyBase/sas$apiPath';
-      }
       if (_resellerApiServer != null) {
         return _resellerApiServer!;
       }
       return '$_sasOrigin/admin/api/index.php/api/';
-    }
-    if (kIsWeb) {
-      if (_directFallback) {
-        return _sasApiBase;
-      }
-
-      final webProxyBase = _webProxyBase;
-      final sasPath = Uri.parse(_sasApiBase).path;
-      final cleanSasPath = sasPath.endsWith('/')
-          ? sasPath.substring(0, sasPath.length - 1)
-          : sasPath;
-      final proxyUrl = '$webProxyBase/sas$cleanSasPath';
-      debugPrint('Proxy base URL: $proxyUrl');
-      return proxyUrl;
     }
     return _sasApiBase;
   }
@@ -719,31 +718,40 @@ class SasApiService {
     final normalizedUrl = SasSettings._normalizeServerUrl(settings.serverUrl);
     if (normalizedUrl.contains('reseller.nbtel.iq') ||
         normalizedUrl.contains('reseller.nbtle.iq')) {
-      final uri = Uri.parse('$normalizedUrl/api.php?action=login');
       final payload = jsonEncode({
         'username': settings.username.trim(),
         'password': settings.password,
       });
       final encrypted = _cryptoJsEncrypt(payload, _passphrase);
-      final headers = <String, String>{
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/plain, */*',
-        if (!kIsWeb) ...{
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Origin': normalizedUrl,
-          'Referer': '$normalizedUrl/',
-        },
-      };
-
-      if (kDebugMode) {
+      Future<http.Response> sendLogin() {
+        final uri = _uriFor('login');
+        final headers = <String, String>{
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, text/plain, */*',
+          if (!kIsWeb) ...{
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Origin': normalizedUrl,
+            'Referer': '$normalizedUrl/',
+          },
+        };
+        _addProxyTarget(headers);
         _debugLog('[SAS DEBUG][LOGIN] endpoint=$uri method=POST');
+        return http
+            .post(uri, headers: headers, body: jsonEncode({'payload': encrypted}))
+            .timeout(const Duration(seconds: 45));
       }
 
-      final response = await http
-          .post(uri, headers: headers, body: jsonEncode({'payload': encrypted}))
-          .timeout(const Duration(seconds: 45));
+      _debugLog('SAS Direct: attempting connection');
+      http.Response response;
+      try {
+        response = await sendLogin();
+        _debugLog('SAS Direct: connected');
+      } catch (_) {
+        _switchToProxyFallback();
+        response = await sendLogin();
+      }
 
       debugPrint('====== [Reseller] LOGIN RESPONSE DEBUG START ======');
       debugPrint('[Reseller] Login STATUS: ${response.statusCode}');
@@ -2139,8 +2147,10 @@ class SasApiService {
 
     http.Response res;
     try {
+      if (!_proxyFallback) _debugLog('SAS Direct: attempting connection');
       debugPrint('GET URL: $uri');
       res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 45));
+      if (!_proxyFallback) _debugLog('SAS Direct: connected');
       debugPrint('GET STATUS: ${res.statusCode}');
       
       if (res.statusCode == 401) {
@@ -2155,6 +2165,10 @@ class SasApiService {
       }
     } catch (e) {
       if (e is SasApiException) rethrow;
+      if (!_proxyFallback) {
+        _switchToProxyFallback();
+        return _get(route);
+      }
       throw SasApiException('تعذر جلب بيانات SAS: $e');
     }
 
@@ -2194,6 +2208,7 @@ class SasApiService {
 
     http.Response res;
     try {
+      if (!_proxyFallback) _debugLog('SAS Direct: attempting connection');
       res = await http.put(
         uri,
         headers: headers,
@@ -2201,6 +2216,7 @@ class SasApiService {
           'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
         }),
       ).timeout(const Duration(seconds: 45));
+      if (!_proxyFallback) _debugLog('SAS Direct: connected');
       
       if (res.statusCode == 502) {
         final connectionMode = useDirectConnection ? 'الاتصال المباشر' : 'البروكسي';
@@ -2225,6 +2241,10 @@ class SasApiService {
       }
     } catch (e) {
       if (e is SasApiException) rethrow;
+      if (!_proxyFallback) {
+        _switchToProxyFallback();
+        return _put(route, payload);
+      }
       throw SasApiException('تعذر تعديل المشترك في SAS: $e');
     }
 
@@ -2283,7 +2303,9 @@ class SasApiService {
     if (authenticated && _token != null) headers['authorization'] = 'Bearer $_token';
     http.Response res;
     try {
+      if (!_proxyFallback) _debugLog('SAS Direct: attempting connection');
       res = await http.post(uri, headers: headers, body: jsonEncode({'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase)})).timeout(const Duration(seconds: 45));
+      if (!_proxyFallback) _debugLog('SAS Direct: connected');
       
       if (authenticated && res.statusCode == 401) {
         // attempt to refresh token once then retry
@@ -2295,6 +2317,15 @@ class SasApiService {
       }
     } catch (e) {
       if (e is SasApiException) rethrow;
+      if (!_proxyFallback) {
+        _switchToProxyFallback();
+        return _post(
+          route,
+          payload,
+          authenticated: authenticated,
+          extraHeaders: extraHeaders,
+        );
+      }
       throw SasApiException('تعذر الاتصال بخادم SAS: $e');
     }
     if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {

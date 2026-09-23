@@ -194,7 +194,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
         SnackBar(
           content: Text(
             ok
-                ? 'قبلت Meta طلبات الإرسال: $sent / $total. التسليم النهائي يظهر عبر Webhook.'
+                ? 'تم الإرسال بنجاح'
                 : 'اكتمل الإرسال مع أخطاء: قبلت Meta عدد $sent، وفشل $failed من $total',
           ),
           duration: const Duration(seconds: 5),
