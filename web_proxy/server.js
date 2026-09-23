@@ -72,7 +72,6 @@ const DEFAULT_SAS_INSECURE_HOSTS = [
   'reseller.nbtele.iq',
   's3.nbtel.iq',
 ];
-const LEGACY_HTTP_SAS_HOSTS = new Set(['reseller.dishtele.com']);
 
 const effectiveInsecureHosts = Array.from(
   new Set([...DEFAULT_SAS_INSECURE_HOSTS, ...SAS_INSECURE_HOSTS])
@@ -166,14 +165,10 @@ function validateTarget(targetBaseUrl) {
     return 'Only http/https targets are allowed';
   }
 
-  const isLegacyHttpHost =
-    targetBaseUrl.protocol === 'http:' &&
-    LEGACY_HTTP_SAS_HOSTS.has(targetBaseUrl.hostname.toLowerCase());
   if (
     targetBaseUrl.protocol !== 'https:' &&
     NODE_ENV === 'production' &&
-    !ALLOW_HTTP_TARGETS &&
-    !isLegacyHttpHost
+    !ALLOW_HTTP_TARGETS
   ) {
     return 'Only https SAS targets are allowed in production';
   }
@@ -272,10 +267,6 @@ function normalizeTargetValue(rawValue) {
     parsed = new URL(candidate);
   } catch (_) {
     return '';
-  }
-
-  if (parsed.hostname.toLowerCase() === 'reseller.dishtele.com') {
-    parsed.protocol = 'http:';
   }
 
   const origin = `${parsed.protocol}//${parsed.host}`;
@@ -1328,10 +1319,6 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
     return;
   }
 
-  if (targetBaseUrl.hostname.toLowerCase() === 'reseller.dishtele.com') {
-    targetBaseUrl.protocol = 'http:';
-  }
-
   const targetError = validateTarget(targetBaseUrl);
   if (targetError) {
     sendJson(req, res, 403, {error: targetError});
@@ -1394,7 +1381,10 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
         headers,
         timeout: 30000,
       };
-      if (targetBaseUrl.protocol === 'https:' && effectiveInsecureHosts.includes(targetBaseUrl.hostname.toLowerCase())) {
+      if (
+        targetBaseUrl.protocol === 'https:' &&
+        (ALLOW_INSECURE_TLS || effectiveInsecureHosts.includes(targetBaseUrl.hostname.toLowerCase()))
+      ) {
         requestOptions.rejectUnauthorized = false;
       }
 

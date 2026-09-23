@@ -16,7 +16,10 @@ services:
         value: "sas.speednet-iq.com,reseller.dishtele.com,reseller.nbtel.iq,reseller.nbtle.iq,reseller.nbtele.iq,s3.nbtel.iq"
       # Global TLS verification is now handled per-host by the proxy.
       - key: ALLOW_INSECURE_TLS
-        value: "0"
+        value: "1"
+      # Permit legacy SAS installations that expose HTTP instead of HTTPS.
+      - key: ALLOW_HTTP_TARGETS
+        value: "1"
       - key: SAS_TARGET_ALLOWLIST
         value: ""
       - key: WHATSAPP_BUSINESS_ACCOUNT_ID

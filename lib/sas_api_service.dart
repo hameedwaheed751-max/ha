@@ -55,13 +55,6 @@ class SasSettings {
         host.endsWith('.localhost')) {
       return '';
     }
-    final allowsLegacyHttp = uri.host.toLowerCase() == 'reseller.dishtele.com';
-    if (s.startsWith('http://') && !allowsLegacyHttp) {
-      // Production SAS traffic must be HTTPS. If a user enters a bare host or
-      // an http:// URL, normalize it to HTTPS instead of silently sending
-      // credentials over an insecure channel.
-      s = 'https://${s.substring('http://'.length)}';
-    }
     while (s.endsWith('/')) {
       s = s.substring(0, s.length - 1);
     }
