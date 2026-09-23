@@ -66,14 +66,17 @@ const SAS_INSECURE_HOSTS = String(process.env.SAS_INSECURE_HOSTS || '')
 
 const DEFAULT_SAS_INSECURE_HOSTS = [
   'sas.speednet-iq.com',
+  'reseller.dishtele.com',
   'reseller.nbtel.iq',
   'reseller.nbtle.iq',
   'reseller.nbtele.iq',
+  's3.nbtel.iq',
 ];
+const LEGACY_HTTP_SAS_HOSTS = new Set(['reseller.dishtele.com']);
 
-const effectiveInsecureHosts = SAS_INSECURE_HOSTS.length > 0
-  ? SAS_INSECURE_HOSTS
-  : DEFAULT_SAS_INSECURE_HOSTS;
+const effectiveInsecureHosts = Array.from(
+  new Set([...DEFAULT_SAS_INSECURE_HOSTS, ...SAS_INSECURE_HOSTS])
+);
 
 if (SAS_INSECURE_HOSTS.length > 0) {
   console.warn(`[TLS] Host-specific TLS bypass enabled for: ${SAS_INSECURE_HOSTS.join(', ')}`);
@@ -163,7 +166,15 @@ function validateTarget(targetBaseUrl) {
     return 'Only http/https targets are allowed';
   }
 
-  if (targetBaseUrl.protocol !== 'https:' && NODE_ENV === 'production' && !ALLOW_HTTP_TARGETS) {
+  const isLegacyHttpHost =
+    targetBaseUrl.protocol === 'http:' &&
+    LEGACY_HTTP_SAS_HOSTS.has(targetBaseUrl.hostname.toLowerCase());
+  if (
+    targetBaseUrl.protocol !== 'https:' &&
+    NODE_ENV === 'production' &&
+    !ALLOW_HTTP_TARGETS &&
+    !isLegacyHttpHost
+  ) {
     return 'Only https SAS targets are allowed in production';
   }
 
@@ -261,6 +272,10 @@ function normalizeTargetValue(rawValue) {
     parsed = new URL(candidate);
   } catch (_) {
     return '';
+  }
+
+  if (parsed.hostname.toLowerCase() === 'reseller.dishtele.com') {
+    parsed.protocol = 'http:';
   }
 
   const origin = `${parsed.protocol}//${parsed.host}`;
@@ -1311,6 +1326,10 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
       hint: 'Use a full URL like https://sas.example.com or https://sas.example.com/admin/api/index.php/api',
     });
     return;
+  }
+
+  if (targetBaseUrl.hostname.toLowerCase() === 'reseller.dishtele.com') {
+    targetBaseUrl.protocol = 'http:';
   }
 
   const targetError = validateTarget(targetBaseUrl);

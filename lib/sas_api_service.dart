@@ -55,7 +55,8 @@ class SasSettings {
         host.endsWith('.localhost')) {
       return '';
     }
-    if (s.startsWith('http://')) {
+    final allowsLegacyHttp = uri.host.toLowerCase() == 'reseller.dishtele.com';
+    if (s.startsWith('http://') && !allowsLegacyHttp) {
       // Production SAS traffic must be HTTPS. If a user enters a bare host or
       // an http:// URL, normalize it to HTTPS instead of silently sending
       // credentials over an insecure channel.
@@ -562,6 +563,10 @@ class SasApiService {
         normalizedUrl.contains('reseller.nbtle.iq');
   }
 
+  bool get _usesWebProxy {
+    return !_directFallback && (kIsWeb || _isResellerServer);
+  }
+
   String? _resellerApiServer;
 
   String? _normalizeResellerApiBase(dynamic value) {
@@ -604,6 +609,11 @@ class SasApiService {
 
   String get _base {
     if (_isResellerServer) {
+      if (_usesWebProxy) {
+        final apiBase = _resellerApiServer ?? _sasApiBase;
+        final apiPath = Uri.parse(apiBase).path.replaceAll(RegExp(r'/+$'), '');
+        return '$_webProxyBase/sas$apiPath';
+      }
       if (_resellerApiServer != null) {
         return _resellerApiServer!;
       }
@@ -665,7 +675,7 @@ class SasApiService {
   }
 
   Uri _uriFor(String route) {
-    if (_isResellerServer) {
+    if (_isResellerServer && !_usesWebProxy) {
       final cleanBase = _base.endsWith('/')
           ? _base.substring(0, _base.length - 1)
           : _base;
@@ -684,10 +694,11 @@ class SasApiService {
   }
 
   void _addProxyTarget(Map<String, String> headers) {
-    if (_isResellerServer) return;
-    if (kIsWeb && !_directFallback) {
+    if (_usesWebProxy) {
       headers['X-SAS-Target'] = _sasOrigin.isNotEmpty
-          ? _sasOrigin
+          ? (_resellerApiServer != null
+                ? Uri.parse(_resellerApiServer!).origin
+                : _sasOrigin)
           : _sasInputNormalized;
       final effectiveProxyToken = _runtimeProxyToken.trim().isNotEmpty
           ? _runtimeProxyToken.trim()

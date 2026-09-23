@@ -1,8 +1,10 @@
 const SAS_SSL_PROBLEM_HOSTS = new Set([
   'sas.speednet-iq.com',
+  'reseller.dishtele.com',
   'reseller.nbtel.iq',
   'reseller.nbtle.iq',
   'reseller.nbtele.iq',
+  's3.nbtel.iq',
 ]);
 
 const RENDER_PROXY_URL = 'https://ha-0cs7.onrender.com';
@@ -170,6 +172,10 @@ async function proxyRequest(request) {
     targetUrl = new URL(cleanOrigin + url.pathname.substring(4) + url.search);
   } catch (error) {
     return json({ error: 'Invalid SAS target' }, 400);
+  }
+
+  if (targetUrl.hostname.toLowerCase() === 'reseller.dishtele.com') {
+    targetUrl.protocol = 'http:';
   }
 
   const hostname = targetUrl.hostname;

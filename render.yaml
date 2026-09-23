@@ -13,7 +13,7 @@ services:
       # Host-specific TLS bypass: only these SAS hosts will use rejectUnauthorized:false
       # when the Worker routes traffic through this proxy. Other sites use strict TLS.
       - key: SAS_INSECURE_HOSTS
-        value: "sas.speednet-iq.com,reseller.nbtel.iq,reseller.nbtle.iq,reseller.nbtele.iq"
+        value: "sas.speednet-iq.com,reseller.dishtele.com,reseller.nbtel.iq,reseller.nbtle.iq,reseller.nbtele.iq,s3.nbtel.iq"
       # Global TLS verification is now handled per-host by the proxy.
       - key: ALLOW_INSECURE_TLS
         value: "0"
