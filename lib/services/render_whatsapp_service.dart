@@ -163,9 +163,28 @@ class RenderWhatsAppService {
     defaultValue: '',
   );
   static String get _runtimeDefaultSendEndpoint {
-    return readRuntimeAppConfig('whatsappServiceUrl') ??
-        readRuntimeAppConfig('sasWebProxyUrl') ??
-        _defaultSendEndpoint;
+    return _resolveRuntimeDefaultSendEndpoint(
+      readRuntimeAppConfig('whatsappServiceUrl'),
+      readRuntimeAppConfig('sasWebProxyUrl'),
+    );
+  }
+
+  static String _resolveRuntimeDefaultSendEndpoint(
+    String? whatsappServiceUrl,
+    String? sasWebProxyUrl,
+  ) {
+    final explicitRuntimeEndpoint = (whatsappServiceUrl ?? '').trim();
+    if (explicitRuntimeEndpoint.isNotEmpty) {
+      return explicitRuntimeEndpoint;
+    }
+
+    final workerFallback = (sasWebProxyUrl ?? '').trim();
+    if (workerFallback.isNotEmpty &&
+        !workerFallback.contains('netagent-sas-proxy.wakeel-net-hamwdy.workers.dev')) {
+      return workerFallback;
+    }
+
+    return _defaultSendEndpoint;
   }
   static String get _runtimeEmbeddedApiKey {
     return readRuntimeAppConfig('sasProxyToken') ?? _embeddedApiKey;
