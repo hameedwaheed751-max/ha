@@ -1,15 +1,10 @@
 import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
-void configureSasHttpOverrides({required bool allowBadCertificates}) {
-  if (!allowBadCertificates) return;
-  HttpOverrides.global = _SasHttpOverrides();
-}
-
-class _SasHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context)
-      ..badCertificateCallback =
-          (X509Certificate cert, String host, int port) => true;
-  }
+http.Client createSasHttpClient() {
+  final client = HttpClient()
+    ..badCertificateCallback =
+        (X509Certificate cert, String host, int port) => true;
+  return IOClient(client);
 }

@@ -1,4 +1,3 @@
-void configureSasHttpOverrides({required bool allowBadCertificates}) {
-  // No-op for Flutter Web and any platform without dart:io.
-  // Browser networking uses the configured HTTPS Render proxy by default.
-}
+import 'package:http/http.dart' as http;
+
+http.Client createSasHttpClient() => http.Client();

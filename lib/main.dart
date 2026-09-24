@@ -1,9 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'models.dart';
 import 'screens/login_screen.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
+import 'services/app_startup.dart';
 
 class _ImmediatePageTransitionsBuilder extends PageTransitionsBuilder {
   const _ImmediatePageTransitionsBuilder();
@@ -28,13 +29,9 @@ const _immediatePageTransitions = PageTransitionsTheme(
   },
 );
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  try {
-    await AppStore.load().timeout(const Duration(seconds: 5));
-  } catch (_) {}
+  unawaited(AppStartup.initialize());
 
   if (kDebugMode) {
     debugPrintSynchronously(

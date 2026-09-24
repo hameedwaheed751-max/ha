@@ -917,7 +917,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                   ),
                                   ListTile(
                                     title: const Text('الرصيد'),
-                                    trailing: Text(val('balance')),
+                                    trailing: Text(_formatSasBalanceText(val('balance'))),
                                   ),
                                   ListTile(
                                     title: const Text('النقاط'),
@@ -972,7 +972,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     showAboutDialog(
                       context: context,
                       applicationName: 'وكيل نت',
-                      applicationVersion: '3.3.0',
+                      applicationVersion: '3.5.0',
                       applicationLegalese: 'إدارة مشتركي الإنترنت',
                     );
                   },
@@ -1358,6 +1358,21 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   String _money(double amount) => '${amount.toStringAsFixed(0)} د.ع';
 
+  String _formatSasBalanceText(String raw) {
+    final n = double.tryParse(raw.replaceAll(RegExp(r'[^0-9.]'), ''));
+    if (n == null || !n.isFinite) return raw;
+    final formatted = n.toStringAsFixed(0);
+    final buffer = StringBuffer();
+    for (int i = 0; i < formatted.length; i++) {
+      final idx = formatted.length - i;
+      if (i > 0 && idx % 3 == 0) {
+        buffer.write(',');
+      }
+      buffer.write(formatted[i]);
+    }
+    return '$buffer د.ع';
+  }
+
   Future<void> _pickDashboardDate() async {
     final picked = await showDatePicker(
       context: context,
@@ -1588,15 +1603,18 @@ class _DashboardScreenState extends State<DashboardScreen>
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w900,
-                    color: color,
-                    height: 1.1,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    value,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w900,
+                      color: color,
+                      height: 1.1,
+                    ),
                   ),
                 ),
               ),
@@ -1757,7 +1775,9 @@ class _DashboardScreenState extends State<DashboardScreen>
         'الرصيد',
         sasWalletLoading && sasBalanceText == null
             ? '...'
-            : (sasBalanceText ?? '--'),
+            : (sasBalanceText != null && sasBalanceText!.trim().isNotEmpty
+                ? _formatSasBalanceText(sasBalanceText!)
+                : '--'),
         Icons.account_balance_wallet_rounded,
         const Color(0xFF00897B),
         _loadSasWallet,

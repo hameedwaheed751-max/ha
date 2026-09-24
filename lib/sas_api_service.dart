@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 // Import dart:io conditionally to avoid web build issues
-import 'dart:io' if (dart.library.io) 'dart:io';
 import 'dart:math';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:crypto/crypto.dart';
@@ -430,24 +429,21 @@ class SasApiService {
   final Map<String, String> _cookieHeaders = {};
   static final FlutterSecureStorage _secureStorage =
       const FlutterSecureStorage();
+  final http.Client _httpClient = createSasHttpClient();
   
 
   SasApiService(this.settings) {
-    if (kDebugMode) {
-      configureSasHttpOverrides(allowBadCertificates: true);
-      _debugLog(
-        '[SAS DEBUG][LOGGER READY] synchronous=true '
-        'platform=${kIsWeb ? "web" : "native"}',
-      );
-    }
-    
+    _debugLog(
+      '[SAS DEBUG][LOGGER READY] synchronous=true '
+      'platform=${kIsWeb ? "web" : "native"}',
+    );
   }
   
   /// Initialize a custom HTTP client specifically for SAS connections
   /// This allows handling self-signed certificates only for SAS without
   /// affecting other HTTP connections in the app
-    /// Dispose of the custom HTTP client to prevent memory leaks
-  void dispose() {}
+  /// Dispose of the custom HTTP client to prevent memory leaks
+  void dispose() => _httpClient.close();
 
   void _debugLog(String message) {
     if (kDebugMode) debugPrintSynchronously(message);
@@ -647,7 +643,7 @@ class SasApiService {
 
     try {
       debugPrint('Checking proxy health: $proxyBase/health');
-      final response = await http
+      final response = await _httpClient
           .get(Uri.parse('$proxyBase/health'))
           .timeout(const Duration(seconds: 10));
 
@@ -724,7 +720,9 @@ class SasApiService {
       });
       final encrypted = _cryptoJsEncrypt(payload, _passphrase);
       Future<http.Response> sendLogin() {
-        final uri = _uriFor('login');
+        final uri = _usesWebProxy
+            ? Uri.parse('${_webProxyBase}/sas/api.php?action=login')
+            : Uri.parse('$normalizedUrl/api.php?action=login');
         final headers = <String, String>{
           'Content-Type': 'application/json',
           'Accept': 'application/json, text/plain, */*',
@@ -738,7 +736,7 @@ class SasApiService {
         };
         _addProxyTarget(headers);
         _debugLog('[SAS DEBUG][LOGIN] endpoint=$uri method=POST');
-        return http
+        return _httpClient
             .post(uri, headers: headers, body: jsonEncode({'payload': encrypted}))
             .timeout(const Duration(seconds: 45));
       }
@@ -2149,7 +2147,7 @@ class SasApiService {
     try {
       if (!_proxyFallback) _debugLog('SAS Direct: attempting connection');
       debugPrint('GET URL: $uri');
-      res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 45));
+      res = await _httpClient.get(uri, headers: headers).timeout(const Duration(seconds: 45));
       if (!_proxyFallback) _debugLog('SAS Direct: connected');
       debugPrint('GET STATUS: ${res.statusCode}');
       
@@ -2158,7 +2156,7 @@ class SasApiService {
         try {
           await login();
           if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 45));
+          res = await _httpClient.get(uri, headers: headers).timeout(const Duration(seconds: 45));
         } catch (_) {
           // fallthrough to error handling below
         }
@@ -2209,7 +2207,7 @@ class SasApiService {
     http.Response res;
     try {
       if (!_proxyFallback) _debugLog('SAS Direct: attempting connection');
-      res = await http.put(
+      res = await _httpClient.put(
         uri,
         headers: headers,
         body: jsonEncode({
@@ -2230,7 +2228,7 @@ class SasApiService {
         try {
           await login();
           if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http.put(
+          res = await _httpClient.put(
             uri,
             headers: headers,
             body: jsonEncode({
@@ -2304,7 +2302,7 @@ class SasApiService {
     http.Response res;
     try {
       if (!_proxyFallback) _debugLog('SAS Direct: attempting connection');
-      res = await http.post(uri, headers: headers, body: jsonEncode({'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase)})).timeout(const Duration(seconds: 45));
+      res = await _httpClient.post(uri, headers: headers, body: jsonEncode({'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase)})).timeout(const Duration(seconds: 45));
       if (!_proxyFallback) _debugLog('SAS Direct: connected');
       
       if (authenticated && res.statusCode == 401) {
@@ -2312,7 +2310,7 @@ class SasApiService {
         try {
           await login();
           if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await http.post(uri, headers: headers, body: jsonEncode({'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase)})).timeout(const Duration(seconds: 45));
+          res = await _httpClient.post(uri, headers: headers, body: jsonEncode({'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase)})).timeout(const Duration(seconds: 45));
         } catch (_) {}
       }
     } catch (e) {
