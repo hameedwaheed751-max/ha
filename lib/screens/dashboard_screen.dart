@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'dart:math';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:excel/excel.dart' as xls;
@@ -19,6 +20,7 @@ import 'subscriber_details_screen.dart';
 import 'packages_screen.dart';
 import 'message_templates_screen.dart';
 import 'sas_settings_screen.dart';
+import 'sas_project_national_screen.dart';
 import 'receipt_screen.dart';
 import 'quick_reports_screen.dart';
 import 'today_tasks_screen.dart';
@@ -802,6 +804,19 @@ class _DashboardScreenState extends State<DashboardScreen>
                     );
                   },
                 ),
+                _drawerTile(
+                  icon: Icons.account_tree_outlined,
+                  title: 'ساس المشروع الوطني',
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const SasProjectNationalScreen(),
+                      ),
+                    );
+                  },
+                ),
                 if (!widget.isAgentMode)
                   _drawerTile(
                     icon: Icons.notifications_active_outlined,
@@ -1106,6 +1121,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final active = AppStore.subscribers.where((s) => s.isActive).length;
     final expired = AppStore.subscribers.where((s) => s.expired).length;
@@ -1124,18 +1140,25 @@ class _DashboardScreenState extends State<DashboardScreen>
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         drawer: _mainDrawer(),
         appBar: AppBar(
-          backgroundColor: Colors.transparent,
+          backgroundColor: Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
-          elevation: 0,
-          toolbarHeight: 72,
-          flexibleSpace: Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF4CAF60), Color(0xFF2E7D32)],
-                begin: Alignment.topRight,
-                end: Alignment.bottomLeft,
+          elevation: 3,
+          shadowColor: const Color(0x260F5D2A),
+          toolbarHeight: 88,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
+          ),
+          flexibleSpace: Stack(
+            fit: StackFit.expand,
+            children: [
+              ColoredBox(color: Theme.of(context).colorScheme.primary),
+              Image.asset(
+                _referenceAssetPath(
+                  'assets/reference/NetAgent_Glossy_Green_3D.png',
+                ),
+                fit: BoxFit.cover,
               ),
-            ),
+            ],
           ),
           title: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1146,15 +1169,24 @@ class _DashboardScreenState extends State<DashboardScreen>
                     : AppStore.effectiveAgentName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 21,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: screenWidth < 400
+                      ? 15
+                      : screenWidth < 600
+                      ? 18
+                      : 21,
                   fontWeight: FontWeight.w900,
                 ),
               ),
               const SizedBox(height: 2),
-              const Text(
+              Text(
                 'وكيل نت',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ],
           ),
@@ -1309,7 +1341,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: EdgeInsets.fromLTRB(
                   horizontalPadding,
-                  14,
+                  constraints.maxWidth < 600 ? 6 : 14,
                   horizontalPadding,
                   28,
                 ),
@@ -1420,90 +1452,137 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _todayReportCard(DailyTaskSummary summary) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF66BB6A), Color(0xFF43A047)],
-          begin: Alignment.topRight,
-          end: Alignment.bottomLeft,
-        ),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x2843A047),
-            blurRadius: 14,
-            offset: Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'تقرير اليوم',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _dashboardDateText(_dashboardDate),
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.82),
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 440;
+        final colors = Theme.of(context).colorScheme;
+        final heading = Column(
+          crossAxisAlignment: isCompact
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'تقرير اليوم',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w900,
               ),
-              OutlinedButton.icon(
-                onPressed: _pickDashboardDate,
-                icon: const Icon(Icons.calendar_month_outlined, size: 16),
-                label: const Text('تغيير التاريخ'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.55)),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Text(
-            'إجمالي النقد الواصل خلال اليوم',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.78),
-              fontSize: 12,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _dashboardDateText(_dashboardDate),
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ],
+        );
+        final changeDateButton = OutlinedButton.icon(
+          onPressed: _pickDashboardDate,
+          icon: const Icon(Icons.calendar_month_outlined, size: 16),
+          label: const Text('تغيير التاريخ'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white,
+            backgroundColor: colors.primary.withValues(alpha: 0.78),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.8)),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            textStyle: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            _money(summary.totalCollected),
-            style: const TextStyle(
+        );
+
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            constraints: BoxConstraints(minHeight: isCompact ? 188 : 164),
+            decoration: BoxDecoration(
               color: Colors.white,
-              fontSize: 28,
-              fontWeight: FontWeight.w900,
+              border: Border.all(color: colors.outlineVariant),
+              boxShadow: [
+                BoxShadow(
+                  color: colors.shadow.withValues(alpha: 0.08),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Transform.scale(
+                    scale: 1.25,
+                    child: Image.asset(
+                      _referenceAssetPath(
+                        'assets/reference/daily_report_banner.png',
+                      ),
+                      fit: BoxFit.cover,
+                      alignment: Alignment.center,
+                    ),
+                  ),
+                ),
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          const Color(0xB31B5E20),
+                          const Color(0x6B1B5E20),
+                          const Color(0x291B5E20),
+                        ],
+                        begin: Alignment.centerRight,
+                        end: Alignment.centerLeft,
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: EdgeInsets.all(isCompact ? 12 : 18),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: isCompact
+                        ? CrossAxisAlignment.center
+                        : CrossAxisAlignment.stretch,
+                    children: [
+                      if (isCompact) ...[
+                        heading,
+                        const SizedBox(height: 4),
+                        changeDateButton,
+                      ] else
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: heading),
+                            changeDateButton,
+                          ],
+                        ),
+                      SizedBox(height: isCompact ? 7 : 14),
+                      Text(
+                        'إجمالي النقد الواصل خلال اليوم',
+                        textAlign: isCompact ? TextAlign.center : null,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _money(summary.totalCollected),
+                        textAlign: isCompact ? TextAlign.center : null,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: isCompact ? 23 : 28,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1513,29 +1592,29 @@ class _DashboardScreenState extends State<DashboardScreen>
     required int debts,
     required DailyTaskSummary summary,
   }) {
-    final items = <(String, String, IconData, Color)>[
+    final items = <(String, String, String, Color)>[
       (
         'حالات التفعيل',
         '${summary.activationCases}',
-        Icons.check_circle_rounded,
+        'assets/reference/activation_status.png',
         const Color(0xFF22A447),
       ),
       (
         'حالات تسديد الديون',
         '${summary.debtPaymentCases}',
-        Icons.wifi_rounded,
+        'assets/reference/debt_payment.png',
         const Color(0xFF0877F9),
       ),
       (
         'الواصل من التفعيل',
         _money(summary.activationCollected),
-        Icons.payments_rounded,
+        'assets/reference/activation_contact.png',
         const Color(0xFF219653),
       ),
       (
         'الواصل من التسديد',
         _money(summary.debtPaymentsCollected),
-        Icons.account_balance_wallet_rounded,
+        'assets/reference/payment_contact.png',
         const Color(0xFFF57C00),
       ),
     ];
@@ -1554,7 +1633,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   title: item.$1,
                   subtitle: '',
                   value: item.$2,
-                  icon: item.$3,
+                  assetName: item.$3,
                   color: item.$4,
                 ),
               ),
@@ -1568,7 +1647,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     required String title,
     required String subtitle,
     required String value,
-    required IconData icon,
+    required String assetName,
     required Color color,
   }) {
     final colors = Theme.of(context).colorScheme;
@@ -1591,15 +1670,21 @@ class _DashboardScreenState extends State<DashboardScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            textDirection: TextDirection.ltr,
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 72,
+                height: 72,
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.11),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, color: color, size: 24),
+                child: Image.asset(
+                  _referenceAssetPath(assetName),
+                  width: 64,
+                  height: 64,
+                  fit: BoxFit.contain,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -1647,6 +1732,9 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  String _referenceAssetPath(String path) =>
+      kIsWeb ? Uri.encodeFull(path) : path;
+
   Widget _sectionTitle(String title, IconData icon) {
     final colors = Theme.of(context).colorScheme;
     return Row(
@@ -1667,52 +1755,52 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _quickActionsGrid() {
     final colors = Theme.of(context).colorScheme;
-    final actions = <(String, IconData, Color, VoidCallback)>[
+    final actions = <(String, String, Color, VoidCallback)>[
       (
         'مشترك جديد',
-        Icons.person_add_alt_1_rounded,
+        'assets/reference/new_subscriber.png',
         const Color(0xFF22A447),
         () => _pushDashboard(const AddSubscriberScreen()),
       ),
       (
         'المهام اليومية',
-        Icons.task_alt_rounded,
+        'assets/reference/daily_tasks.png',
         const Color(0xFF0877F9),
         () => _pushDashboard(const TodayTasksScreen()),
       ),
       (
         'الدردشة',
-        Icons.chat_bubble_outline_rounded,
+        'assets/reference/chat.png',
         const Color(0xFFF57C00),
         () => _pushDashboard(const ChatScreen()),
       ),
       (
         'المشتركين',
-        Icons.groups_rounded,
+        'assets/reference/subscribers.png',
         const Color(0xFF7446D7),
         () => _pushDashboard(const SubscribersScreen()),
       ),
       (
         'التقارير الحسابية',
-        Icons.calculate_outlined,
+        'assets/reference/reports.png',
         const Color(0xFF1B7F5C),
         () => _pushDashboard(const AccountingReportsScreen()),
       ),
       (
         'الديون',
-        Icons.money_off_rounded,
+        'assets/reference/debts.png',
         const Color(0xFFE53935),
         _openDebtsTable,
       ),
       (
         'اختبار السرعة',
-        Icons.speed_rounded,
+        'assets/reference/speed_test.png',
         const Color(0xFF1261A6),
         () => _pushDashboard(const SpeedTestScreen()),
       ),
       (
-        'Ping',
-        Icons.network_ping_rounded,
+        'فحص الاتصال',
+        'assets/reference/ping.png',
         const Color(0xFF00897B),
         () => _pushDashboard(const PingScreen()),
       ),
@@ -1745,7 +1833,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(action.$2, color: action.$3, size: 27),
+                        Image.asset(
+                          _referenceAssetPath(action.$2),
+                          width: 38,
+                          height: 38,
+                          fit: BoxFit.contain,
+                        ),
                         const SizedBox(height: 9),
                         Text(
                           action.$1,
@@ -1770,7 +1863,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _sasInformationSection({required int active, required int totalSubscribers, required int expired}) {
-    final items = <(String, String, IconData, Color, VoidCallback)>[
+    final items = <(String, String, String, Color, VoidCallback)>[
       (
         'الرصيد',
         sasWalletLoading && sasBalanceText == null
@@ -1778,7 +1871,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             : (sasBalanceText != null && sasBalanceText!.trim().isNotEmpty
                 ? _formatSasBalanceText(sasBalanceText!)
                 : '--'),
-        Icons.account_balance_wallet_rounded,
+        'assets/reference/balance.png',
         const Color(0xFF00897B),
         _loadSasWallet,
       ),
@@ -1787,35 +1880,35 @@ class _DashboardScreenState extends State<DashboardScreen>
         sasWalletLoading && sasRewardPointsText == null
             ? '...'
             : (sasRewardPointsText ?? '--'),
-        Icons.card_giftcard_rounded,
+        'assets/reference/points.png',
         const Color(0xFF7446D7),
         _loadSasWallet,
       ),
       (
         'عدد المشتركين',
         totalSubscribers.toString(),
-        Icons.people_rounded,
+        'assets/reference/subscribers_count.png',
         const Color(0xFF0877F9),
         () => _pushDashboard(const SubscribersScreen()),
       ),
       (
         'المشتركين الفعالين',
         '$active',
-        Icons.check_circle_rounded,
+        'assets/reference/active_subscribers.png',
         const Color(0xFF22A447),
         () => _pushDashboard(const SubscribersScreen(filter: 'active')),
       ),
       (
         'المنتهية اشتراكاتهم',
         '$expired',
-        Icons.cancel_rounded,
+        'assets/reference/expired_subscriptions.png',
         const Color(0xFFE53935),
         () => _pushDashboard(const SubscribersScreen(filter: 'expired')),
       ),
       (
         'الانتهاء خلال 3 أيام',
         '$_expiring3Days',
-        Icons.hourglass_top_rounded,
+        'assets/reference/expiring_3_days.png',
         const Color(0xFFF57C00),
         () => _pushDashboard(const SubscribersScreen(filter: 'expiring3Days')),
       ),
@@ -1861,7 +1954,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                         title: item.$1,
                         subtitle: '',
                         value: item.$2,
-                        icon: item.$3,
+                        assetName: item.$3,
                         color: item.$4,
                       ),
                     ),
