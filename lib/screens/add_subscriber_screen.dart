@@ -195,8 +195,9 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
       'title',
     ]) {
       final v = m[key];
-      if (v != null && v.toString().trim().isNotEmpty)
+      if (v != null && v.toString().trim().isNotEmpty) {
         return v.toString().trim();
+      }
     }
     return 'ID ${_idOf(m) ?? '-'}';
   }
@@ -260,25 +261,38 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
 
   InputDecoration dec(String s, IconData icon) {
     final colors = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return InputDecoration(
       labelText: s,
-      labelStyle: TextStyle(color: colors.onSurfaceVariant),
+      labelStyle: TextStyle(
+        color: isDark ? const Color(0xFFE2E8F0) : colors.onSurfaceVariant,
+      ),
       floatingLabelStyle: TextStyle(color: colors.primary),
-      prefixIcon: Icon(icon, color: colors.onSurfaceVariant),
+      prefixIcon: Icon(
+        icon,
+        color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF2E7D32),
+      ),
       filled: true,
-      fillColor: colors.surfaceContainerHighest,
+      fillColor: isDark ? const Color(0xFF1E293B) : colors.surfaceContainerHighest,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: Colors.grey.shade300),
+        borderSide: BorderSide(
+          color: isDark ? const Color(0xFF475569) : Colors.green.shade200,
+        ),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: Colors.grey.shade300, width: 1.2),
+        borderSide: BorderSide(
+          color: isDark ? const Color(0xFF475569) : Colors.green.shade200,
+          width: 1.2,
+        ),
       ),
       focusedBorder: const OutlineInputBorder(
         borderRadius: BorderRadius.all(Radius.circular(14)),
         borderSide: BorderSide(color: Color(0xFF2E7D32), width: 2),
       ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     );
   }
 
@@ -289,6 +303,19 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
       appBar: AppBar(
         title: Text(widget.subscriber == null ? 'إضافة مشترك' : 'تعديل مشترك'),
         centerTitle: true,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        flexibleSpace: Stack(
+          fit: StackFit.expand,
+          children: [
+            const ColoredBox(color: Color(0xFF2E7D32)),
+            Image.asset(
+              'assets/reference/NetAgent_Glossy_Green_3D.png',
+              fit: BoxFit.cover,
+              alignment: Alignment.center,
+            ),
+          ],
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -343,9 +370,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                     dropdownColor: Theme.of(
                       context,
                     ).colorScheme.surfaceContainer,
-                    iconEnabledColor: Theme.of(
-                      context,
-                    ).colorScheme.onSurfaceVariant,
+                    iconEnabledColor: Theme.of(context).colorScheme.primary,
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.onSurface,
                       fontWeight: FontWeight.w600,
@@ -429,9 +454,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                   initialValue: selectedProfileId,
                   decoration: dec('اختر باقة SAS', Icons.inventory_2_outlined),
                   dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
-                  iconEnabledColor: Theme.of(
-                    context,
-                  ).colorScheme.onSurfaceVariant,
+                  iconEnabledColor: Theme.of(context).colorScheme.primary,
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w600,
@@ -451,9 +474,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                   initialValue: selectedParentId,
                   decoration: dec('اختر Parent', Icons.account_tree_outlined),
                   dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
-                  iconEnabledColor: Theme.of(
-                    context,
-                  ).colorScheme.onSurfaceVariant,
+                  iconEnabledColor: Theme.of(context).colorScheme.primary,
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w600,
@@ -710,7 +731,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                       increaseNote: 'تعديل رصيد الواصل من شاشة المشترك',
                       decreaseNote: 'تصحيح رصيد الواصل من شاشة المشترك',
                     );
-                    if (delta.abs() > 0.0001) {
+                    if (delta > 0.0001) {
                       final receiptNumber = await AppStore.issueReceiptNumber(
                         persist: false,
                       );
@@ -718,12 +739,11 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                         receiptNumber: receiptNumber,
                         amount: delta,
                         at: now,
-                        note: delta >= 0
-                            ? 'فاتورة تعديل من شاشة المشترك'
-                            : 'فاتورة تصحيح من شاشة المشترك',
+                        note: 'فاتورة تعديل من شاشة المشترك',
                       );
                       s.paymentDate = fmt(now);
                     }
+                    if (s.paid <= 0) s.paymentDate = '';
                     s.startDate = startDate!;
                     s.endDate = endDate!;
                     s.notes = notes.text.trim();
@@ -743,13 +763,27 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                       s.sasData['lastname'] = parts.length > 1
                           ? parts.sublist(1).join(' ')
                           : '-';
-                      if (s.phone.isNotEmpty) s.sasData['phone'] = s.phone;
-                      if (s.address.isNotEmpty)
+                      if (s.phone.isNotEmpty) {
+                        s.sasData['phone'] = s.phone;
+                      }
+                      if (s.address.isNotEmpty) {
                         s.sasData['address'] = s.address;
-                      if (s.ip.isNotEmpty) s.sasData['ip'] = s.ip;
+                      }
+                      if (s.ip.isNotEmpty) {
+                        s.sasData['ip'] = s.ip;
+                      }
                     }
                   }
                   await AppStore.save();
+                  if (context.mounted && AppStore.lastSaveSyncError != null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'تم حفظ التغييرات محلياً، لكن تعذرت المزامنة',
+                        ),
+                      ),
+                    );
+                  }
                   if (context.mounted) Navigator.pop(context, true);
                 },
               ),

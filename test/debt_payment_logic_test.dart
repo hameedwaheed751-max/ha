@@ -62,8 +62,9 @@ void main() {
   test('registerInvoiceFromPayment stores invoice with month key', () {
     final s = _subscriber(price: 100, paid: 0);
     final at = DateTime(2026, 7, 30);
+    s.paid = 40;
 
-    s.registerInvoiceFromPayment(
+    final invoice = s.registerInvoiceFromPayment(
       receiptNumber: 120,
       amount: 40,
       at: at,
@@ -71,9 +72,35 @@ void main() {
     );
 
     expect(s.invoices.length, 1);
-    expect(s.invoices.first.receiptNumber, 120);
-    expect(s.invoices.first.monthKey, '2026-07');
-    expect(s.invoices.first.amount, 40);
+    expect(invoice!.receiptNumber, 120);
+    expect(invoice.monthKey, '2026-07');
+    expect(invoice.amount, 40);
+    expect(invoice.subscriptionAmountSnapshot, 100);
+    expect(invoice.paidAmountSnapshot, 40);
+    expect(invoice.remainingAmountSnapshot, 60);
+    expect(invoice.packageSnapshot, 'basic');
+
+    s
+      ..price = 150
+      ..paid = 90;
+    final restored = InvoiceRecord.fromJson(invoice.toJson());
+    expect(restored.subscriptionAmountSnapshot, 100);
+    expect(restored.paidAmountSnapshot, 40);
+    expect(restored.remainingAmountSnapshot, 60);
+  });
+
+  test('negative payment corrections do not create receipt invoices', () {
+    final s = _subscriber(price: 100, paid: 0);
+
+    final invoice = s.registerInvoiceFromPayment(
+      receiptNumber: 121,
+      amount: -20,
+      at: DateTime(2026, 7, 30),
+      note: 'تصحيح تخفيض الواصل',
+    );
+
+    expect(invoice, isNull);
+    expect(s.invoices, isEmpty);
   });
 
   test('monthly totals are grouped by month', () {
@@ -118,6 +145,59 @@ void main() {
     expect(applied, 30);
   });
 
+  test('partial subscription collection adds remaining debt to daily tasks', () {
+    final s = _subscriber(price: 0, paid: 0);
+    final at = DateTime(2026, 9, 29, 10);
+
+    final adjustment = s.adjustDebtAmounts(
+      subscriptionAmount: 35000,
+      paidAmount: 15000,
+      at: at,
+    );
+    final events = [
+      if (adjustment.paymentDelta > 0)
+        DailyTaskEvent(
+          type: DailyTaskEvent.debtEntryCollectionType,
+          subscriberUser: s.user,
+          subscriberName: s.name,
+          at: at,
+          amount: adjustment.paymentDelta,
+          remainingAfter: s.remaining,
+        ),
+      if (adjustment.addedDebt > 0)
+        DailyTaskEvent(
+          type: 'debt_added',
+          subscriberUser: s.user,
+          subscriberName: s.name,
+          at: at,
+          amount: adjustment.addedDebt,
+          remainingAfter: s.remaining,
+        ),
+      DailyTaskEvent(
+        type: 'debt_payment',
+        subscriberUser: s.user,
+        subscriberName: s.name,
+        at: at.add(const Duration(hours: 1)),
+        amount: 5000,
+        remainingAfter: 15000,
+      ),
+    ];
+
+    final debtToday = DailyTaskSummary.fromEvents(events.take(2));
+    final afterRepayment = DailyTaskSummary.fromEvents(events);
+    expect(adjustment.paymentDelta, 15000);
+    expect(adjustment.addedDebt, 20000);
+    expect(s.paid, 15000);
+    expect(s.remaining, 20000);
+    expect(debtToday.debtPaymentsCollected, 15000);
+    expect(debtToday.debtAddedTotal, 20000);
+    expect(debtToday.netDebtMovement, 20000);
+    expect(afterRepayment.debtPaymentsCollected, 20000);
+    expect(afterRepayment.debtAddedTotal, 20000);
+    expect(afterRepayment.debtRepaymentsTotal, 5000);
+    expect(afterRepayment.netDebtMovement, 15000);
+  });
+
   test('daily summary separates added debt from collected cash', () {
     final events = <DailyTaskEvent>[
       DailyTaskEvent(
@@ -155,6 +235,63 @@ void main() {
     expect(summary.debtAddedTotal, 7000);
   });
 
+  test('monthly net debt movement offsets repayments without erasing prior debt', () {
+    final events = <DailyTaskEvent>[
+      DailyTaskEvent(
+        type: 'debt_added',
+        subscriberUser: 'u1',
+        subscriberName: 'User 1',
+        at: DateTime(2026, 8, 31, 18),
+        amount: 30000,
+        remainingAfter: 30000,
+      ),
+      DailyTaskEvent(
+        type: 'debt_added',
+        subscriberUser: 'u1',
+        subscriberName: 'User 1',
+        at: DateTime(2026, 9, 2, 9),
+        amount: 5000,
+        remainingAfter: 35000,
+      ),
+      DailyTaskEvent(
+        type: 'debt_payment',
+        subscriberUser: 'u1',
+        subscriberName: 'User 1',
+        at: DateTime(2026, 9, 3, 10),
+        amount: 10000,
+        remainingAfter: 25000,
+      ),
+    ];
+
+    final september = DailyTaskSummary.fromEvents(
+      events.where((event) => event.at.year == 2026 && event.at.month == 9),
+    );
+
+    expect(september.debtAddedTotal, 5000);
+    expect(september.debtPaymentsCollected, 10000);
+    expect(september.netDebtMovement, -5000);
+    expect(events.first.remainingAfter, 30000);
+  });
+
+  test('daily task history retains events from the previous month', () {
+    final previousMonthEvent = DailyTaskEvent(
+      type: 'debt_added',
+      subscriberUser: 'u1',
+      subscriberName: 'User 1',
+      at: DateTime.now().subtract(const Duration(days: 35)),
+      amount: 30000,
+      remainingAfter: 30000,
+    );
+    AppStore.dailyTaskEvents.add(previousMonthEvent);
+
+    final payload = AppStore.buildDailyTaskEventsPayload();
+
+    expect(
+      payload.values.map((event) => event['type']),
+      contains('debt_added'),
+    );
+  });
+
   test('daily summary can recover a legacy zero activation amount', () {
     final event = DailyTaskEvent(
       type: 'activation',
@@ -189,6 +326,42 @@ void main() {
     expect(summary.debtPaymentsCollected, 0);
     expect(summary.debtAddedTotal, 0);
     expect(summary.totalCollected, 35000);
+  });
+
+  test('reactivation does not count the previous paid balance as new cash', () {
+    final events = DailyTaskEvent.activationSettlement(
+      subscriberUser: 'u1',
+      subscriberName: 'User 1',
+      at: DateTime(2026, 9, 4),
+      collected: 35000,
+      remaining: 0,
+      note: 'إعادة تفعيل',
+      isReactivation: true,
+    );
+
+    final summary = DailyTaskSummary.fromEvents(events);
+
+    expect(summary.activationCases, 1);
+    expect(summary.activationCollected, 0);
+    expect(summary.totalCollected, 0);
+  });
+
+  test('reactivation does not count the previous paid balance as new cash', () {
+    final events = DailyTaskEvent.activationSettlement(
+      subscriberUser: 'u1',
+      subscriberName: 'User 1',
+      at: DateTime(2026, 9, 4),
+      collected: 35000,
+      remaining: 0,
+      note: 'إعادة تفعيل',
+      isReactivation: true,
+    );
+
+    final summary = DailyTaskSummary.fromEvents(events);
+
+    expect(summary.activationCases, 1);
+    expect(summary.activationCollected, 0);
+    expect(summary.totalCollected, 0);
   });
 
   test('unpaid activation adds only the actual remaining debt', () {

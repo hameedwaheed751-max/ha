@@ -225,6 +225,36 @@ class SubscriptionRequestService {
 
   static DateTime startDateForPlan({DateTime? now}) => now ?? DateTime.now();
 
+  static DateTime _addCalendarMonths(DateTime date, int months) {
+    final monthIndex = date.year * 12 + date.month - 1 + months;
+    final year = monthIndex ~/ 12;
+    final month = monthIndex % 12 + 1;
+    final lastDay = DateTime(year, month + 1, 0).day;
+    final day = date.day > lastDay ? lastDay : date.day;
+    if (date.isUtc) {
+      return DateTime.utc(
+        year,
+        month,
+        day,
+        date.hour,
+        date.minute,
+        date.second,
+        date.millisecond,
+        date.microsecond,
+      );
+    }
+    return DateTime(
+      year,
+      month,
+      day,
+      date.hour,
+      date.minute,
+      date.second,
+      date.millisecond,
+      date.microsecond,
+    );
+  }
+
   static DateTime endDateForPlan(String plan, {DateTime? from}) {
     final start = from ?? DateTime.now();
     switch (plan.trim()) {
@@ -233,13 +263,13 @@ class SubscriptionRequestService {
         return start.add(const Duration(days: 15));
       case '3m':
       case 'three_months':
-        return start.add(const Duration(days: 90));
+        return _addCalendarMonths(start, 3);
       case '6m':
       case 'six_months':
-        return start.add(const Duration(days: 183));
+        return _addCalendarMonths(start, 6);
       case '1y':
       case 'one_year':
-        return start.add(const Duration(days: 365));
+        return _addCalendarMonths(start, 12);
       default:
         return start.add(const Duration(days: 15));
     }

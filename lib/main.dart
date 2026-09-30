@@ -59,13 +59,90 @@ class MyApp extends StatelessWidget {
             colorSchemeSeed: const Color(0xFF2E7D32),
             pageTransitionsTheme: _immediatePageTransitions,
             scaffoldBackgroundColor: const Color(0xfff5f7fb),
-            cardTheme: const CardThemeData(elevation: 1),
+            cardTheme: const CardThemeData(
+              elevation: 1,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(16)),
+              ),
+            ),
             appBarTheme: const AppBarTheme(
               backgroundColor: Color(0xFF2E7D32),
               foregroundColor: Colors.white,
               surfaceTintColor: Colors.transparent,
               elevation: 0,
               centerTitle: true,
+            ),
+            elevatedButtonTheme: ElevatedButtonThemeData(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            filledButtonTheme: FilledButtonThemeData(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            outlinedButtonTheme: OutlinedButtonThemeData(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF2E7D32),
+                side: const BorderSide(color: Color(0xFF2E7D32), width: 1.3),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF2E7D32),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
+            ),
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: const Color(0xFFF8FAFC),
+              labelStyle: const TextStyle(color: Color(0xFF1E293B)),
+              hintStyle: const TextStyle(color: Color(0xFF64748B)),
+              prefixIconColor: const Color(0xFF2E7D32),
+              suffixIconColor: const Color(0xFF2E7D32),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.green.shade200, width: 1.2),
+              ),
+              focusedBorder: const OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(12)),
+                borderSide: BorderSide(color: Color(0xFF2E7D32), width: 1.8),
+              ),
+              errorBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.red, width: 1.2),
+              ),
+              focusedErrorBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.red, width: 1.8),
+              ),
+            ),
+            dropdownMenuTheme: DropdownMenuThemeData(
+              menuStyle: MenuStyle(
+                backgroundColor: WidgetStatePropertyAll(
+                  const Color(0xFFFFFFFF),
+                ),
+                surfaceTintColor: WidgetStatePropertyAll(
+                  Colors.transparent,
+                ),
+              ),
             ),
           ),
           darkTheme: ThemeData(
@@ -80,13 +157,53 @@ class MyApp extends StatelessWidget {
               elevation: 1,
               color: Color(0xFF1E293B),
               surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(16)),
+              ),
             ),
             appBarTheme: const AppBarTheme(
-              backgroundColor: Color(0xFF1B5E20),
+              backgroundColor: Color(0xFF2E7D32),
               foregroundColor: Colors.white,
               surfaceTintColor: Colors.transparent,
               elevation: 0,
               centerTitle: true,
+            ),
+            elevatedButtonTheme: ElevatedButtonThemeData(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            filledButtonTheme: FilledButtonThemeData(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            outlinedButtonTheme: OutlinedButtonThemeData(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF86EFAC),
+                side: const BorderSide(color: Color(0xFF66BB6A), width: 1.3),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF86EFAC),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
             ),
             dialogTheme: const DialogThemeData(
               backgroundColor: Color(0xFF1E293B),
@@ -102,8 +219,8 @@ class MyApp extends StatelessWidget {
               fillColor: const Color(0xFF1E293B),
               labelStyle: const TextStyle(color: Color(0xFFCBD5E1)),
               hintStyle: const TextStyle(color: Color(0xFF94A3B8)),
-              prefixIconColor: const Color(0xFF94A3B8),
-              suffixIconColor: const Color(0xFF94A3B8),
+              prefixIconColor: const Color(0xFF86EFAC),
+              suffixIconColor: const Color(0xFF86EFAC),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: Color(0xFF475569)),
@@ -112,7 +229,25 @@ class MyApp extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(
                   color: Color(0xFF66BB6A),
-                  width: 1.6,
+                  width: 1.8,
+                ),
+              ),
+              errorBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.red, width: 1.2),
+              ),
+              focusedErrorBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.red, width: 1.8),
+              ),
+            ),
+            dropdownMenuTheme: DropdownMenuThemeData(
+              menuStyle: MenuStyle(
+                backgroundColor: WidgetStatePropertyAll(
+                  const Color(0xFF1E293B),
+                ),
+                surfaceTintColor: WidgetStatePropertyAll(
+                  Colors.transparent,
                 ),
               ),
             ),
@@ -127,7 +262,7 @@ class MyApp extends StatelessWidget {
             ),
             navigationBarTheme: const NavigationBarThemeData(
               backgroundColor: Color(0xFF1E293B),
-              indicatorColor: Color(0xFF245B31),
+              indicatorColor: Color(0xFF2E7D32),
               labelTextStyle: WidgetStatePropertyAll(
                 TextStyle(color: Color(0xFFE2E8F0)),
               ),

@@ -512,7 +512,16 @@ class _DashboardScreenState extends State<DashboardScreen>
               children: [
                 Container(
                   padding: const EdgeInsets.fromLTRB(22, 22, 22, 14),
-                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    image: const DecorationImage(
+                      image: AssetImage(
+                        'assets/reference/NetAgent_Glossy_Green_3D.png',
+                      ),
+                      fit: BoxFit.cover,
+                      opacity: 0.16,
+                    ),
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -987,7 +996,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     showAboutDialog(
                       context: context,
                       applicationName: 'وكيل نت',
-                      applicationVersion: '3.5.0',
+                      applicationVersion: '3.6.0',
                       applicationLegalese: 'إدارة مشتركي الإنترنت',
                     );
                   },
@@ -1651,18 +1660,23 @@ class _DashboardScreenState extends State<DashboardScreen>
     required Color color,
   }) {
     final colors = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
-      constraints: const BoxConstraints(minHeight: 120),
-      padding: const EdgeInsets.all(16),
+      constraints: const BoxConstraints(minHeight: 128),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.outlineVariant),
-        boxShadow: const [
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.green.shade100,
+          width: 1.2,
+        ),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x0D16243A),
-            blurRadius: 10,
-            offset: Offset(0, 3),
+            color: color.withValues(alpha: isDark ? 0.12 : 0.12),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -1676,8 +1690,15 @@ class _DashboardScreenState extends State<DashboardScreen>
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.11),
-                  borderRadius: BorderRadius.circular(10),
+                  gradient: LinearGradient(
+                    colors: [
+                      color.withValues(alpha: 0.22),
+                      color.withValues(alpha: 0.08),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Image.asset(
                   _referenceAssetPath(assetName),
@@ -1695,7 +1716,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     value,
                     textAlign: TextAlign.right,
                     style: TextStyle(
-                      fontSize: 30,
+                      fontSize: 28,
                       fontWeight: FontWeight.w900,
                       color: color,
                       height: 1.1,
@@ -1711,9 +1732,9 @@ class _DashboardScreenState extends State<DashboardScreen>
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.w800,
-              color: colors.onSurface,
+              color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1F2937),
             ),
           ),
           const SizedBox(height: 4),
@@ -1723,7 +1744,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 11,
-              color: colors.onSurfaceVariant,
+              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -1739,7 +1760,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     final colors = Theme.of(context).colorScheme;
     return Row(
       children: [
-        Icon(icon, color: const Color(0xFF075ECF), size: 20),
+        Icon(icon, color: const Color(0xFF2E7D32), size: 20),
         const SizedBox(width: 7),
         Text(
           title,
@@ -2181,24 +2202,30 @@ class _DashboardScreenState extends State<DashboardScreen>
     VoidCallback onTap,
   ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final greenTone = const Color(0xFF2E7D32);
+    final accent = color == greenTone ? greenTone : color;
+
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(18),
       child: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              color.withValues(alpha: 0.35),
-              color.withValues(alpha: 0.12),
+              accent.withValues(alpha: 0.18),
+              accent.withValues(alpha: 0.08),
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color.withValues(alpha: 0.25)),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: accent.withValues(alpha: isDark ? 0.38 : 0.22),
+            width: 1.2,
+          ),
           boxShadow: [
             BoxShadow(
-              color: color.withValues(alpha: 0.2),
+              color: accent.withValues(alpha: 0.16),
               blurRadius: 12,
               offset: const Offset(0, 6),
             ),
@@ -2209,7 +2236,15 @@ class _DashboardScreenState extends State<DashboardScreen>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: color, size: 22),
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: accent, size: 18),
+              ),
               const SizedBox(width: 10),
               Text(
                 title,
@@ -2334,8 +2369,9 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       'active_profile',
     ]) {
       final v = s.sasData[key];
-      if (v != null && v.toString().trim().isNotEmpty)
+      if (v != null && v.toString().trim().isNotEmpty) {
         return v.toString().trim();
+      }
     }
     return s.type.trim().isEmpty ? '—' : s.type;
   }
@@ -2401,7 +2437,6 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
   Future<void> _editDebt(Subscriber s) async {
     final oldPaid = s.paid;
     final oldRemaining = s.remaining;
-    final hadRecordedActivation = AppStore.hasRecordedActivation(s);
     final priceC = TextEditingController(text: s.price.toStringAsFixed(0));
     final paidC = TextEditingController(text: s.paid.toStringAsFixed(0));
     final remainingC = TextEditingController(
@@ -2600,21 +2635,26 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
             : 'تعديل زيادة الواصل من الديون',
         decreaseNote: 'تصحيح تخفيض الواصل من الديون',
       );
+      InvoiceRecord? invoice;
 
       if (delta.abs() > 0.0001) {
-        final receiptNumber = await AppStore.issueReceiptNumber(persist: false);
-        s.registerInvoiceFromPayment(
-          receiptNumber: receiptNumber,
-          amount: delta,
-          at: now,
-          note: delta >= 0
-              ? (payNow ? 'فاتورة تسديد كامل' : 'فاتورة تعديل زيادة الواصل')
-              : 'فاتورة تصحيح تخفيض الواصل',
-        );
-        if (delta > 0 && hadRecordedActivation) {
+        if (delta > 0) {
+          final receiptNumber = await AppStore.issueReceiptNumber(
+            persist: false,
+          );
+          invoice = s.registerInvoiceFromPayment(
+            receiptNumber: receiptNumber,
+            amount: delta,
+            at: now,
+            note: payNow ? 'فاتورة تسديد كامل' : 'فاتورة تعديل زيادة الواصل',
+          );
+        }
+        if (delta > 0) {
           await AppStore.addDailyTaskEvent(
             DailyTaskEvent(
-              type: 'debt_payment',
+              type: oldRemaining <= 0.0001 && s.remaining > 0.0001
+                  ? DailyTaskEvent.debtEntryCollectionType
+                  : 'debt_payment',
               subscriberUser: s.user,
               subscriberName: s.name,
               at: now,
@@ -2627,10 +2667,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
             persist: false,
           );
         }
-        paymentDate = _date(now);
-      } else if (parsedRemaining >= 0 &&
-          (parsedPrice - parsedRemaining - oldPaid).abs() > 0.0001) {
-        paymentDate = _date(now);
+        if (delta > 0) paymentDate = _date(now);
       }
       final addedDebt = DailyTaskEvent.addedDebtAmount(
         previousRemaining: oldRemaining,
@@ -2659,17 +2696,20 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       if (mounted) {
         final afterPaid = s.paid;
         final afterRemaining = s.remaining;
+        final syncWarning = AppStore.lastSaveSyncError == null
+            ? ''
+            : ' | حُفظ محلياً وتعذرت المزامنة';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               'تم الحفظ: الواصل ${oldPaid.toStringAsFixed(0)} -> ${afterPaid.toStringAsFixed(0)} | '
-              'المتبقي ${oldRemaining.toStringAsFixed(0)} -> ${afterRemaining.toStringAsFixed(0)}',
+              'المتبقي ${oldRemaining.toStringAsFixed(0)} -> ${afterRemaining.toStringAsFixed(0)}$syncWarning',
             ),
           ),
         );
       }
-      if (payNow && mounted) {
-        await _openReceipt(s);
+      if (payNow && invoice != null && mounted) {
+        await _openReceipt(s, invoice: invoice);
       }
     }
   }
@@ -2750,11 +2790,14 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
     await AppStore.save();
     if (!mounted) return;
     setState(() {});
+    final syncWarning = AppStore.lastSaveSyncError == null
+        ? ''
+        : ' | حُفظ محلياً وتعذرت المزامنة';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           'تمت إضافة ${amount.toStringAsFixed(0)} د.ع | '
-          'المتبقي ${s.remaining.toStringAsFixed(0)} د.ع',
+          'المتبقي ${s.remaining.toStringAsFixed(0)} د.ع$syncWarning',
         ),
       ),
     );
@@ -2849,6 +2892,13 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
     s.paymentDate = _date(now);
     await AppStore.save();
     if (mounted) setState(() {});
+    if (mounted && AppStore.lastSaveSyncError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم حفظ الدفعة محلياً، لكن تعذرت المزامنة'),
+        ),
+      );
+    }
   }
 
   Future<void> _showPaymentHistory(Subscriber s) async {
@@ -3197,17 +3247,20 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
           if (importedSub['name'] != null &&
               importedSub['name'].toString().isNotEmpty &&
               s.name.trim().toLowerCase() ==
-                  importedSub['name'].toString().trim().toLowerCase())
+                importedSub['name'].toString().trim().toLowerCase()) {
             return true;
+            }
           if (importedSub['user'] != null &&
               importedSub['user'].toString().isNotEmpty &&
               s.user.trim().toLowerCase() ==
-                  importedSub['user'].toString().trim().toLowerCase())
+                importedSub['user'].toString().trim().toLowerCase()) {
             return true;
+            }
           if (importedSub['phone'] != null &&
               importedSub['phone'].toString().isNotEmpty &&
-              s.phone.trim() == importedSub['phone'].toString().trim())
+              s.phone.trim() == importedSub['phone'].toString().trim()) {
             return true;
+            }
           return false;
         }).firstOrNull;
 
@@ -3240,10 +3293,12 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
     }
   }
 
-  Future<void> _openReceipt(Subscriber s) async {
+  Future<void> _openReceipt(Subscriber s, {InvoiceRecord? invoice}) async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => ReceiptScreen(subscriber: s)),
+      MaterialPageRoute(
+        builder: (_) => ReceiptScreen(subscriber: s, invoice: invoice),
+      ),
     );
     if (mounted) setState(() {});
   }
@@ -3264,12 +3319,16 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
               s.name.toLowerCase().contains(q) ||
               s.user.toLowerCase().contains(q) ||
               s.phone.contains(q) ||
-              s.type.toLowerCase().contains(q);
+              s.type.toLowerCase().contains(q) ||
+              s.packageDisplay.toLowerCase().contains(q) ||
+              _sasProfile(s).toLowerCase().contains(q);
           if (!matchesSearch) return false;
-          if (_debtFilter == 'غير مسدد')
+          if (_debtFilter == 'غير مسدد') {
             return s.remaining > 0.0001 && s.paid <= 0.0001;
-          if (_debtFilter == 'تسديد جزئي')
+          }
+          if (_debtFilter == 'تسديد جزئي') {
             return s.remaining > 0.0001 && s.paid > 0.0001;
+          }
           return true;
         }).toList()..sort(
           (a, b) => a.name.trim().toLowerCase().compareTo(
@@ -3330,6 +3389,19 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('الديون والحسابات'),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          flexibleSpace: Stack(
+            fit: StackFit.expand,
+            children: [
+              const ColoredBox(color: Color(0xFF2E7D32)),
+              Image.asset(
+                'assets/reference/NetAgent_Glossy_Green_3D.png',
+                fit: BoxFit.cover,
+                alignment: Alignment.center,
+              ),
+            ],
+          ),
           actions: [
             IconButton(
               tooltip: 'استيراد Excel',
@@ -3421,7 +3493,8 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                   controller: _debtSearchC,
                   onChanged: (v) => setState(() => _debtQuery = v),
                   decoration: InputDecoration(
-                    hintText: 'بحث عن اسم المشترك أو اليوزر أو الهاتف...',
+                    hintText:
+                      'بحث بالاسم أو اليوزر أو الهاتف أو الباقة...',
                     prefixIcon: Icon(Icons.search, color: green),
                     suffixIcon: _debtQuery.isEmpty
                         ? null
@@ -3585,8 +3658,9 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                               rowsPerPage: _rowsPerPage,
                               availableRowsPerPage: const [10, 50, 100],
                               onRowsPerPageChanged: (value) {
-                                if (value != null)
+                                if (value != null) {
                                   setState(() => _rowsPerPage = value);
+                                }
                               },
                               sortColumnIndex: _debtSortBy == 'name'
                                   ? 1
@@ -4043,8 +4117,9 @@ class _DebtsDataSource extends DataTableSource {
       'active_profile',
     ]) {
       final v = s.sasData[key];
-      if (v != null && v.toString().trim().isNotEmpty)
+      if (v != null && v.toString().trim().isNotEmpty) {
         return v.toString().trim();
+      }
     }
     return s.type.trim().isEmpty ? '—' : s.type;
   }

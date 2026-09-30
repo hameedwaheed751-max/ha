@@ -613,7 +613,7 @@ class SasApiService {
       final cleanSasPath = sasPath.endsWith('/')
           ? sasPath.substring(0, sasPath.length - 1)
           : sasPath;
-      return '${_webProxyBase}/sas$cleanSasPath';
+      return '$_webProxyBase/sas$cleanSasPath';
     }
     if (_isResellerServer) {
       if (_resellerApiServer != null) {
@@ -721,7 +721,7 @@ class SasApiService {
       final encrypted = _cryptoJsEncrypt(payload, _passphrase);
       Future<http.Response> sendLogin() {
         final uri = _usesWebProxy
-            ? Uri.parse('${_webProxyBase}/sas/api.php?action=login')
+            ? Uri.parse('$_webProxyBase/sas/api.php?action=login')
             : Uri.parse('$normalizedUrl/api.php?action=login');
         final headers = <String, String>{
           'Content-Type': 'application/json',
@@ -1323,121 +1323,6 @@ class SasApiService {
   num? _asNum(dynamic v) {
     if (v is num) return v;
     return num.tryParse((v ?? '').toString().replaceAll(',', '').trim());
-  }
-
-  bool _isSensitiveDebugKey(String key) {
-    final normalized = key.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-    return normalized.contains('password') ||
-        normalized.contains('passwd') ||
-        normalized.contains('token') ||
-        normalized.contains('cookie') ||
-        normalized.contains('authorization') ||
-        normalized.contains('secret') ||
-        normalized == 'pin';
-  }
-
-  bool _isFinancialDebugKey(String key) {
-    final normalized = key.toLowerCase();
-    return const [
-      'balance',
-      'amount',
-      'price',
-      'cost',
-      'deduction',
-      'deduct',
-      'credit',
-      'debit',
-      'remaining',
-      'money',
-      'wallet',
-      'charge',
-      'fee',
-      'total',
-      'collected',
-    ].any(normalized.contains);
-  }
-
-  bool _isTransactionDebugKey(String key) {
-    final normalized = key.toLowerCase();
-    return normalized.contains('transaction') ||
-        normalized.contains('reference') ||
-        normalized.contains('invoice');
-  }
-
-  void _collectDebugResponseData(
-    dynamic node,
-    String path,
-    List<String> fieldPaths,
-    Map<String, dynamic> financialValues,
-    Map<String, dynamic> transactionValues,
-  ) {
-    if (node is Map) {
-      for (final entry in node.entries) {
-        final key = entry.key.toString();
-        final childPath = path.isEmpty ? key : '$path.$key';
-        fieldPaths.add(childPath);
-        if (_isSensitiveDebugKey(key)) continue;
-        final value = entry.value;
-        if (_isFinancialDebugKey(key) && value is! Map && value is! List) {
-          financialValues[childPath] = value;
-        }
-        if (_isTransactionDebugKey(key) && value is! Map && value is! List) {
-          transactionValues[childPath] = value;
-        }
-        _collectDebugResponseData(
-          value,
-          childPath,
-          fieldPaths,
-          financialValues,
-          transactionValues,
-        );
-      }
-    } else if (node is List) {
-      for (var index = 0; index < node.length; index++) {
-        _collectDebugResponseData(
-          node[index],
-          '$path[$index]',
-          fieldPaths,
-          financialValues,
-          transactionValues,
-        );
-      }
-    }
-  }
-
-  void _debugResponseShape(
-    String label,
-    dynamic response, {
-    int? statusCode,
-    Uri? endpoint,
-    String? method,
-  }) {
-    if (!kDebugMode) return;
-    final fieldPaths = <String>[];
-    final financialValues = <String, dynamic>{};
-    final transactionValues = <String, dynamic>{};
-    _collectDebugResponseData(
-      response,
-      '',
-      fieldPaths,
-      financialValues,
-      transactionValues,
-    );
-    _debugLog('====== [SAS DEBUG][$label] ======');
-    if (endpoint != null) _debugLog('endpoint=$endpoint');
-    if (method != null) _debugLog('method=$method');
-    if (statusCode != null) _debugLog('status_code=$statusCode');
-    _debugLog('response_type=${response.runtimeType}');
-    _debugLog(
-      'response_field_paths=${fieldPaths.isEmpty ? "<none>" : fieldPaths}',
-    );
-    _debugLog(
-      'financial_values=${financialValues.isEmpty ? "<none>" : financialValues}',
-    );
-    _debugLog(
-      'transaction_values=${transactionValues.isEmpty ? "<none>" : transactionValues}',
-    );
-    _debugLog('====== [SAS DEBUG][$label END] ======');
   }
 
   Future<dynamic> activateUser(

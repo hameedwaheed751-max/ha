@@ -59,10 +59,11 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
     await value.save();
     AppStore.sasUsername = user.text.trim();
     await AppStore.save();
-    if (mounted)
+    if (mounted) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('تم حفظ إعدادات SAS')));
+    }
   }
 
   Future<void> _test() async {
@@ -85,11 +86,12 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
       final sync = await SasSyncService.sync(
         api,
       ).timeout(const Duration(seconds: 30));
-      if (mounted)
+      if (mounted) {
         setState(
           () => result =
               'نجح الاتصال والمزامنة. المقروءة: ${sync.read} | المضافة: ${sync.added} | المحدثة: ${sync.updated}',
         );
+      }
     } catch (e) {
       if (mounted) setState(() => result = 'فشل الاتصال: $e');
     } finally {

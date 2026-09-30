@@ -34,6 +34,10 @@ class InvoiceRecord {
     required this.at,
     required this.monthKey,
     this.note = '',
+    this.subscriptionAmountSnapshot,
+    this.paidAmountSnapshot,
+    this.remainingAmountSnapshot,
+    this.packageSnapshot,
   });
 
   int receiptNumber;
@@ -41,6 +45,10 @@ class InvoiceRecord {
   DateTime at;
   String monthKey;
   String note;
+  double? subscriptionAmountSnapshot;
+  double? paidAmountSnapshot;
+  double? remainingAmountSnapshot;
+  String? packageSnapshot;
 
   Map<String, dynamic> toJson() => {
     'receiptNumber': receiptNumber,
@@ -48,15 +56,34 @@ class InvoiceRecord {
     'at': at.toIso8601String(),
     'monthKey': monthKey,
     'note': note,
+    if (subscriptionAmountSnapshot != null)
+      'subscriptionAmountSnapshot': subscriptionAmountSnapshot,
+    if (paidAmountSnapshot != null) 'paidAmountSnapshot': paidAmountSnapshot,
+    if (remainingAmountSnapshot != null)
+      'remainingAmountSnapshot': remainingAmountSnapshot,
+    if (packageSnapshot != null) 'packageSnapshot': packageSnapshot,
   };
 
-  factory InvoiceRecord.fromJson(Map<String, dynamic> j) => InvoiceRecord(
-    receiptNumber: int.tryParse((j['receiptNumber'] ?? '').toString()) ?? 0,
-    amount: (j['amount'] ?? 0).toDouble(),
-    at: DateTime.tryParse((j['at'] ?? '').toString()) ?? DateTime.now(),
-    monthKey: (j['monthKey'] ?? '').toString().trim(),
-    note: (j['note'] ?? '').toString(),
-  );
+  factory InvoiceRecord.fromJson(Map<String, dynamic> j) {
+    double? optionalDouble(dynamic value) {
+      if (value is num) return value.toDouble();
+      return double.tryParse((value ?? '').toString());
+    }
+
+    return InvoiceRecord(
+      receiptNumber: int.tryParse((j['receiptNumber'] ?? '').toString()) ?? 0,
+      amount: (j['amount'] ?? 0).toDouble(),
+      at: DateTime.tryParse((j['at'] ?? '').toString()) ?? DateTime.now(),
+      monthKey: (j['monthKey'] ?? '').toString().trim(),
+      note: (j['note'] ?? '').toString(),
+      subscriptionAmountSnapshot: optionalDouble(
+        j['subscriptionAmountSnapshot'],
+      ),
+      paidAmountSnapshot: optionalDouble(j['paidAmountSnapshot']),
+      remainingAmountSnapshot: optionalDouble(j['remainingAmountSnapshot']),
+      packageSnapshot: j['packageSnapshot']?.toString(),
+    );
+  }
 }
 
 class DailyTaskEvent {
@@ -77,6 +104,8 @@ class DailyTaskEvent {
   double amount;
   double remainingAfter;
   String note;
+
+  static const debtEntryCollectionType = 'debt_entry_collection';
 
   Map<String, dynamic> toJson() => {
     'type': type,
@@ -106,8 +135,12 @@ class DailyTaskEvent {
     required double remaining,
     required String note,
     bool addRemainingDebtEvent = true,
+    bool isReactivation = false,
   }) {
-    final safeCollected = collected.isFinite && collected > 0 ? collected : 0.0;
+    final safeCollected =
+        !isReactivation && collected.isFinite && collected > 0
+        ? collected
+        : 0.0;
     final safeRemaining = remaining.isFinite && remaining > 0 ? remaining : 0.0;
     return [
       DailyTaskEvent(
@@ -213,20 +246,29 @@ class AccountingMonthlySummary {
     required this.subscriberSales,
     required this.profit,
     required this.activationCount,
+    this.grossCollections = 0,
+    this.paymentCorrections = 0,
   });
 
   final double sasDeductions;
   final double subscriberSales;
   final double profit;
   final int activationCount;
+  final double grossCollections;
+  final double paymentCorrections;
+
+  double get netCollections => grossCollections + paymentCorrections;
 
   factory AccountingMonthlySummary.fromRecords({
     required Iterable<AccountingActivationRecord> activations,
+    Iterable<PaymentRecord> payments = const [],
   }) {
     var sasDeductions = 0.0;
     var subscriberSales = 0.0;
     var profit = 0.0;
     var activationCount = 0;
+    var grossCollections = 0.0;
+    var paymentCorrections = 0.0;
 
     for (final activation in activations) {
       activationCount++;
@@ -234,12 +276,22 @@ class AccountingMonthlySummary {
       subscriberSales += activation.saleAmount;
       profit += activation.profit;
     }
+    for (final payment in payments) {
+      if (!payment.amount.isFinite) continue;
+      if (payment.amount > 0) {
+        grossCollections += payment.amount;
+      } else if (payment.amount < 0) {
+        paymentCorrections += payment.amount;
+      }
+    }
 
     return AccountingMonthlySummary(
       sasDeductions: sasDeductions,
       subscriberSales: subscriberSales,
       profit: profit,
       activationCount: activationCount,
+      grossCollections: grossCollections,
+      paymentCorrections: paymentCorrections,
     );
   }
 }
@@ -299,6 +351,7 @@ class DailyTaskSummary {
     required this.debtPaymentCases,
     required this.activationCollected,
     required this.debtPaymentsCollected,
+    required this.debtRepaymentsTotal,
     required this.debtAddedTotal,
   });
 
@@ -306,9 +359,12 @@ class DailyTaskSummary {
   final int debtPaymentCases;
   final double activationCollected;
   final double debtPaymentsCollected;
+  final double debtRepaymentsTotal;
   final double debtAddedTotal;
 
   double get totalCollected => activationCollected + debtPaymentsCollected;
+
+  double get netDebtMovement => debtAddedTotal - debtRepaymentsTotal;
 
   factory DailyTaskSummary.fromEvents(
     Iterable<DailyTaskEvent> events, {
@@ -318,6 +374,7 @@ class DailyTaskSummary {
     var debtPaymentCases = 0;
     var activationCollected = 0.0;
     var debtPaymentsCollected = 0.0;
+    var debtRepaymentsTotal = 0.0;
     var debtAddedTotal = 0.0;
 
     for (final event in events) {
@@ -325,9 +382,12 @@ class DailyTaskSummary {
       if (event.type == 'activation') {
         activationCases++;
         if (amount > 0) activationCollected += amount;
-      } else if (event.type == 'debt_payment' && amount > 0) {
+      } else if ((event.type == 'debt_payment' ||
+              event.type == 'debt_entry_collection') &&
+          amount > 0) {
         debtPaymentCases++;
         debtPaymentsCollected += amount;
+        if (event.type == 'debt_payment') debtRepaymentsTotal += amount;
       } else if (event.type == 'debt_added' && amount > 0) {
         debtAddedTotal += amount;
       }
@@ -338,9 +398,20 @@ class DailyTaskSummary {
       debtPaymentCases: debtPaymentCases,
       activationCollected: activationCollected,
       debtPaymentsCollected: debtPaymentsCollected,
+      debtRepaymentsTotal: debtRepaymentsTotal,
       debtAddedTotal: debtAddedTotal,
     );
   }
+}
+
+class DebtAdjustmentResult {
+  const DebtAdjustmentResult({
+    required this.paymentDelta,
+    required this.addedDebt,
+  });
+
+  final double paymentDelta;
+  final double addedDebt;
 }
 
 class Subscriber {
@@ -448,7 +519,7 @@ class Subscriber {
       return safeCurrentPaid.clamp(0, safePrice).toDouble();
     }
 
-    final tentative = safeCurrentPaid - safePartialAmount;
+    final tentative = safePrice - safePartialAmount;
     return tentative.clamp(0, safePrice).toDouble();
   }
 
@@ -518,6 +589,29 @@ class Subscriber {
     return delta;
   }
 
+  DebtAdjustmentResult adjustDebtAmounts({
+    required double subscriptionAmount,
+    required double paidAmount,
+    DateTime? at,
+  }) {
+    final previousRemaining = remaining;
+    price = subscriptionAmount;
+    normalizeDebtFields();
+    final paymentDelta = adjustPaidToTarget(
+      paidAmount.clamp(0, price).toDouble(),
+      at: at,
+      increaseNote: 'تعديل الواصل من شاشة الديون',
+      decreaseNote: 'تخفيض الواصل من شاشة الديون',
+    );
+    return DebtAdjustmentResult(
+      paymentDelta: paymentDelta,
+      addedDebt: DailyTaskEvent.addedDebtAmount(
+        previousRemaining: previousRemaining,
+        currentRemaining: remaining,
+      ),
+    );
+  }
+
   double applyPartialPayment(double amount, {DateTime? at, String? note}) {
     normalizeDebtFields();
     _backfillLegacyPaidToPayments(at: at);
@@ -559,6 +653,10 @@ class Subscriber {
       at: stamp,
       monthKey: monthKeyOf(stamp),
       note: note,
+      subscriptionAmountSnapshot: price,
+      paidAmountSnapshot: paid,
+      remainingAmountSnapshot: remaining,
+      packageSnapshot: packageDisplay,
     );
     invoices.add(invoice);
     return invoice;
@@ -865,6 +963,8 @@ class AppStore {
   static const String subscribersRevisionKey = 'subscribersRevision';
   static const String packagesRevisionKey = 'packagesRevision';
   static const String dailyTaskEventsKey = 'dailyTaskEvents';
+  static const int dailyTaskRetentionDays = 400;
+  static const int maxDailyTaskEvents = 12000;
   static const String accountingActivationsKey = 'accountingActivations';
   static const String subscriptionNodeKey = 'subscription';
   static String? _loadedUid;
@@ -959,6 +1059,7 @@ class AppStore {
   static String subscriptionStatus = 'inactive';
   static double balance = 0;
   static int nextReceiptNumber = 1;
+  static String? lastSaveSyncError;
   static DateTime? lastSasSync;
   static int subscribersRevision = 0;
   static int packagesRevision = 0;
@@ -2101,6 +2202,7 @@ class AppStore {
   }
 
   static Future<void> save({Subscriber? changedDebtSubscriber}) async {
+    lastSaveSyncError = null;
     if (!_isLoggedIn) {
       debugPrint('AppStore.save: User not logged in, saving locally only');
     }
@@ -2227,6 +2329,7 @@ class AppStore {
       await ref.child('messageTemplates').set(messageTemplates);
       debugPrint('Firebase save completed successfully');
     } catch (e) {
+      lastSaveSyncError = e.toString();
       debugPrint('Firebase save failed: $e');
     }
   }
@@ -2470,7 +2573,8 @@ class AppStore {
       if (event.subscriberUser.trim().toLowerCase() != user ||
           (event.type != 'activation' &&
               event.type != 'debt_added' &&
-              event.type != 'debt_payment')) {
+            event.type != 'debt_payment' &&
+              event.type != DailyTaskEvent.debtEntryCollectionType)) {
         continue;
       }
       if (latestFinancialEvent == null ||
@@ -2480,17 +2584,21 @@ class AppStore {
     }
 
     return (latestFinancialEvent?.type == 'debt_added' ||
-            latestFinancialEvent?.type == 'debt_payment') &&
+          latestFinancialEvent?.type == 'debt_payment' ||
+          latestFinancialEvent?.type ==
+            DailyTaskEvent.debtEntryCollectionType) &&
         (latestFinancialEvent!.remainingAfter - subscriber.remaining).abs() <=
             0.0001;
   }
 
   static void _trimDailyTaskEvents() {
     final now = DateTime.now();
-    dailyTaskEvents.removeWhere((e) => now.difference(e.at).inDays > 30);
-    if (dailyTaskEvents.length > 3000) {
+    dailyTaskEvents.removeWhere(
+      (event) => now.difference(event.at).inDays > dailyTaskRetentionDays,
+    );
+    if (dailyTaskEvents.length > maxDailyTaskEvents) {
       dailyTaskEvents.sort((a, b) => a.at.compareTo(b.at));
-      final overflow = dailyTaskEvents.length - 3000;
+      final overflow = dailyTaskEvents.length - maxDailyTaskEvents;
       dailyTaskEvents.removeRange(0, overflow);
     }
   }

@@ -1,3 +1,7 @@
+import 'dart:typed_data';
+
+import 'package:excel/excel.dart' as xls;
+import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 
 import '../models.dart';
@@ -58,8 +62,30 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
           .toList()
         ..sort((a, b) => b.at.compareTo(a.at));
 
-  AccountingMonthlySummary get _summary =>
-      AccountingMonthlySummary.fromRecords(activations: _activations);
+  AccountingMonthlySummary get _summary => AccountingMonthlySummary.fromRecords(
+    activations: _activations,
+    payments: AppStore.subscribers
+        .expand((subscriber) => subscriber.payments)
+        .where((payment) => _inSelectedMonth(payment.at)),
+  );
+
+  DailyTaskSummary get _monthlyDebtSummary => DailyTaskSummary.fromEvents(
+    AppStore.dailyTaskEvents.where((event) => _inSelectedMonth(event.at)),
+  );
+
+  double get _monthlyInvoiceTotal => AppStore.subscribers
+      .expand((subscriber) => subscriber.invoices)
+      .where(
+      (invoice) =>
+        (invoice.monthKey.isNotEmpty
+          ? invoice.monthKey
+          : Subscriber.monthKeyOf(invoice.at)) ==
+        Subscriber.monthKeyOf(_month),
+      )
+      .fold<double>(0, (total, invoice) => total + invoice.amount);
+
+    double get _invoiceReconciliationDifference =>
+      _monthlyInvoiceTotal - _summary.netCollections;
 
   String _money(double value) {
     final rounded = value.round();
@@ -152,6 +178,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     final requestedMonth = _month;
     setState(() {
       _loadingJournalMonth = true;
+      _journalMonth = null;
       _journalMonthError = null;
     });
     try {
@@ -174,12 +201,135 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     }
   }
 
+  Future<void> _exportMonthlyReport() async {
+    try {
+      final summary = _summary;
+      final activations = _activations;
+      final excel = xls.Excel.createExcel();
+      final sheet = excel['التقرير الحسابي'];
+      final defaultSheet = excel.getDefaultSheet();
+      if (defaultSheet != null && defaultSheet != 'التقرير الحسابي') {
+        excel.delete(defaultSheet);
+      }
+
+      sheet.appendRow([
+        xls.TextCellValue('الشهر'),
+        xls.TextCellValue('${_monthNames[_month.month - 1]} ${_month.year}'),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('إجمالي إيداعات SAS'),
+        _journalMonth == null
+            ? xls.TextCellValue('غير متاح')
+            : xls.DoubleCellValue(_journalMonth!.deposits),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('إجمالي استقطاعات SAS'),
+        _journalMonth == null
+            ? xls.TextCellValue('غير متاح')
+            : xls.DoubleCellValue(_journalMonth!.deductions),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('إجمالي الدفعات المستلمة'),
+        xls.DoubleCellValue(summary.grossCollections),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('تصحيحات تخفيض الواصل'),
+        xls.DoubleCellValue(summary.paymentCorrections),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('إجمالي الدين المضاف'),
+        xls.DoubleCellValue(_monthlyDebtSummary.debtAddedTotal),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('المحصل من الديون'),
+        xls.DoubleCellValue(_monthlyDebtSummary.debtPaymentsCollected),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('صافي حركة الدين'),
+        xls.DoubleCellValue(_monthlyDebtSummary.netDebtMovement),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('صافي حركة الدفعات'),
+        xls.DoubleCellValue(summary.netCollections),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('إجمالي الفواتير'),
+        xls.DoubleCellValue(_monthlyInvoiceTotal),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('فرق الفواتير عن صافي حركة الدفعات'),
+        xls.DoubleCellValue(_invoiceReconciliationDifference),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('إجمالي المبيعات'),
+        xls.DoubleCellValue(summary.subscriberSales),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('إجمالي الربح'),
+        xls.DoubleCellValue(summary.profit),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('عدد عمليات التفعيل'),
+        xls.IntCellValue(summary.activationCount),
+      ]);
+      sheet.appendRow([xls.TextCellValue('تفاصيل التفعيلات')]);
+      sheet.appendRow([
+        xls.TextCellValue('التاريخ'),
+        xls.TextCellValue('المشترك'),
+        xls.TextCellValue('اليوزر'),
+        xls.TextCellValue('الباقة'),
+        xls.TextCellValue('سعر البيع'),
+        xls.TextCellValue('استقطاع SAS'),
+        xls.TextCellValue('الربح'),
+      ]);
+      for (final record in activations) {
+        sheet.appendRow([
+          xls.TextCellValue(_dateTime(record.at)),
+          xls.TextCellValue(record.subscriberName),
+          xls.TextCellValue(record.subscriberUser),
+          xls.TextCellValue(record.packageName),
+          xls.DoubleCellValue(record.saleAmount),
+          xls.DoubleCellValue(record.sasDeduction),
+          xls.DoubleCellValue(record.profit),
+        ]);
+      }
+
+      final encoded = excel.encode();
+      if (encoded == null) throw Exception('تعذر إنشاء ملف Excel');
+      final monthStamp =
+          '${_month.year}${_month.month.toString().padLeft(2, '0')}';
+      final savedPath = await FileSaver.instance.saveFile(
+        name: 'وكيل-نت_تقرير-حسابي_$monthStamp',
+        bytes: Uint8List.fromList(encoded),
+        fileExtension: 'xlsx',
+        mimeType: MimeType.microsoftExcel,
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            savedPath.isEmpty
+                ? 'تم حفظ التقرير بنجاح'
+                : 'تم حفظ التقرير بنجاح:\n$savedPath',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تصدير التقرير: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final summary = _summary;
     final activations = _activations;
     final balanceAdded = _journalMonth?.deposits ?? 0;
     final sasDeductions = _journalMonth?.deductions ?? 0;
+    final debtSummary = _monthlyDebtSummary;
     final profit = summary.profit;
     final latestSasBalance = _journalMonth?.latestBalance;
     return Directionality(
@@ -187,7 +337,26 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('التقارير الحسابية'),
+          foregroundColor: Colors.white,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          flexibleSpace: Stack(
+            fit: StackFit.expand,
+            children: [
+              const ColoredBox(color: Color(0xFF2E7D32)),
+              Image.asset(
+                'assets/reference/NetAgent_Glossy_Green_3D.png',
+                fit: BoxFit.cover,
+                alignment: Alignment.center,
+              ),
+            ],
+          ),
           actions: [
+            IconButton(
+              onPressed: _loadingJournalMonth ? null : _exportMonthlyReport,
+              tooltip: 'تصدير تقرير الشهر إلى Excel',
+              icon: const Icon(Icons.download_rounded),
+            ),
             IconButton(
               onPressed: _loadingSasBalance || _loadingJournalMonth
                   ? null
@@ -277,6 +446,62 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                       label: 'عدد عمليات التفعيل',
                       value: '${summary.activationCount}',
                       color: const Color(0xFF75538F),
+                    ),
+                    _MetricTile(
+                      width: width,
+                      icon: Icons.payments_outlined,
+                      label: 'الدفعات المستلمة',
+                      value: _money(summary.grossCollections),
+                      color: const Color(0xFF2E7D32),
+                    ),
+                    _MetricTile(
+                      width: width,
+                      icon: Icons.undo_rounded,
+                      label: 'تصحيحات تخفيض الواصل',
+                      value: _money(summary.paymentCorrections),
+                      color: const Color(0xFFC04A35),
+                    ),
+                    _MetricTile(
+                      width: width,
+                      icon: Icons.account_balance_outlined,
+                      label: 'صافي حركة الدفعات',
+                      value: _money(summary.netCollections),
+                      color: const Color(0xFF2468A2),
+                    ),
+                    _MetricTile(
+                      width: width,
+                      icon: Icons.receipt_long_outlined,
+                      label: 'إجمالي الفواتير',
+                      value: _money(_monthlyInvoiceTotal),
+                      color: const Color(0xFF75538F),
+                    ),
+                    _MetricTile(
+                      width: width,
+                      icon: Icons.add_card_outlined,
+                      label: 'إجمالي الدين المضاف',
+                      value: _money(debtSummary.debtAddedTotal),
+                      color: const Color(0xFF8B6914),
+                    ),
+                    _MetricTile(
+                      width: width,
+                      icon: Icons.account_balance_wallet_outlined,
+                      label: 'المحصل من الديون',
+                      value: _money(debtSummary.debtPaymentsCollected),
+                      color: const Color(0xFFF57C00),
+                    ),
+                    _MetricTile(
+                      width: width,
+                      icon: Icons.compare_arrows_rounded,
+                      label: 'صافي حركة الدين',
+                      value: _money(debtSummary.netDebtMovement),
+                      color: const Color(0xFF2E7D32),
+                    ),
+                    _MetricTile(
+                      width: width,
+                      icon: Icons.compare_arrows_rounded,
+                      label: 'فرق الفواتير عن صافي الدفعات',
+                      value: _money(_invoiceReconciliationDifference),
+                      color: const Color(0xFFC04A35),
                     ),
                   ],
                 );

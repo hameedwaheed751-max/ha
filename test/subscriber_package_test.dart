@@ -174,18 +174,20 @@ void main() {
   });
 
   test('merges Firebase daily tasks without duplicates across devices', () {
+    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    final eventDay = DateTime(yesterday.year, yesterday.month, yesterday.day);
     final localEvent = DailyTaskEvent(
       type: 'activation',
       subscriberUser: 'user1',
       subscriberName: 'Local User',
-      at: DateTime(2026, 8, 10, 9),
+      at: DateTime(eventDay.year, eventDay.month, eventDay.day, 9),
       amount: 10000,
     );
     final remoteEvent = DailyTaskEvent(
       type: 'debt_payment',
       subscriberUser: 'user2',
       subscriberName: 'Remote User',
-      at: DateTime(2026, 8, 10, 10),
+      at: DateTime(eventDay.year, eventDay.month, eventDay.day, 10),
       amount: 5000,
       remainingAfter: 15000,
     );

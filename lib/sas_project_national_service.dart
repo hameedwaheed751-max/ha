@@ -343,6 +343,73 @@ class SasProjectNationalService {
     return _fetchPage('/api/sessions', pageSize: pageSize);
   }
 
+  Future<Map<String, dynamic>> activateSubscription({
+    required String subscriptionId,
+    String? customerId,
+    String? paymentMethod,
+    Map<String, dynamic>? extraPayload,
+  }) async {
+    final id = subscriptionId.trim();
+    if (id.isEmpty) {
+      throw const SasProjectNationalException(
+        'معرّف الاشتراك المطلوب للتفعيل FTTH غير موجود',
+      );
+    }
+
+    final body = <String, dynamic>{
+      'simulatedPrice': extraPayload?['simulatedPrice'] ?? 0,
+      'bundleId': extraPayload?['bundleId'] ?? 'FTTH_BASIC',
+      'services': extraPayload?['services'] ?? const [
+        {'value': 'BASIC', 'type': 'Base'},
+        {'value': 'PARENTAL_CONTROL', 'type': 'Vas'},
+        {'value': 'IPTV', 'type': 'Vas'},
+      ],
+      'commitmentPeriodValue': extraPayload?['commitmentPeriodValue'] ?? 1,
+      'salesType': extraPayload?['salesType'] ?? 0,
+      'paymentDetails': {
+        'paymentMethod': paymentMethod ?? 'Tabadul',
+        'statusPageBaseUrl': '$_baseUrl/page/tabadul-payment-status',
+      },
+      'changeType': extraPayload?['changeType'] ?? 1,
+    };
+
+    if (extraPayload != null) {
+      for (final entry in extraPayload.entries) {
+        if (!body.containsKey(entry.key)) {
+          body[entry.key] = entry.value;
+        }
+      }
+    }
+
+    final response = await _client
+        .post(
+          _uri('/api/subscriptions/$id/change'),
+          headers: {
+            'Accept': 'application/json, text/plain, */*',
+            'Content-Type': 'application/json',
+            'Origin': _baseUrl,
+            'Referer': '$_baseUrl/subscriptions/item/$id/customer/${customerId ?? ''}/renew-subscription',
+            'X-Client-App': settings.clientApp,
+            'X-User-Role': settings.userRole,
+          },
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 45));
+
+    _log('FTTH activate subscription response: HTTP ${response.statusCode}');
+    final data = _decodeObject(response, 'FTTH activate subscription');
+    final paymentUrl = ((data['paymentUrl'] ?? data['payment_url']) ?? '').toString();
+    if (paymentUrl.isEmpty && data['orderNumber'] == null) {
+      throw SasProjectNationalException(
+        'استجابة التفعيل FTTH لا تحتوي على paymentUrl أو orderNumber',
+        statusCode: response.statusCode,
+        response: data,
+      );
+    }
+
+    return data;
+  }
+
   Future<List<Map<String, dynamic>>> _fetchPage(
     String path, {
     required int pageSize,

@@ -42,7 +42,9 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
         _DailyTaskFilter.all => true,
         _DailyTaskFilter.activation => event.type == 'activation',
         _DailyTaskFilter.payment =>
-          event.type == 'debt_payment' && event.amount > 0,
+          (event.type == 'debt_payment' ||
+                  event.type == DailyTaskEvent.debtEntryCollectionType) &&
+              event.amount > 0,
         _DailyTaskFilter.debtAdded =>
           event.type == 'debt_added' && event.amount > 0,
       };
@@ -51,7 +53,23 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: const Text('المهام اليومية')),
+        appBar: AppBar(
+          title: const Text('المهام اليومية'),
+          foregroundColor: Colors.white,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          flexibleSpace: Stack(
+            fit: StackFit.expand,
+            children: [
+              const ColoredBox(color: Color(0xFF2E7D32)),
+              Image.asset(
+                'assets/reference/NetAgent_Glossy_Green_3D.png',
+                fit: BoxFit.cover,
+                alignment: Alignment.center,
+              ),
+            ],
+          ),
+        ),
         body: LayoutBuilder(
           builder: (context, constraints) {
             final horizontalPadding = constraints.maxWidth < 600 ? 12.0 : 24.0;
@@ -205,9 +223,9 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
         Colors.deepPurple,
       ),
       (
-        'المضاف إلى الديون',
-        _money(summary.debtAddedTotal),
-        Icons.add_card_outlined,
+        'دين اليوم',
+        _money(summary.netDebtMovement),
+        Icons.compare_arrows_rounded,
         Colors.red,
       ),
     ];
@@ -345,7 +363,9 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
 
   Widget _activityRow(DailyTaskEvent event) {
     final isActivation = event.type == 'activation';
-    final isPayment = event.type == 'debt_payment';
+    final isEntryCollection =
+        event.type == DailyTaskEvent.debtEntryCollectionType;
+    final isPayment = event.type == 'debt_payment' || isEntryCollection;
     final color = isActivation
         ? const Color(0xFF087F5B)
         : isPayment
@@ -359,7 +379,9 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
     final label = isActivation
         ? 'تفعيل'
         : isPayment
-        ? 'تسديد دين'
+      ? isEntryCollection
+          ? 'واصل الاشتراك'
+          : 'تسديد دين'
         : 'إضافة دين';
     final amountLabel = isPayment || isActivation ? 'الواصل' : 'المضاف';
     final amount = event.amount;

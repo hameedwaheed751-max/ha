@@ -1,4 +1,6 @@
 // ignore_for_file: unnecessary_underscores, use_build_context_synchronously
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models.dart';
@@ -14,12 +16,17 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _imagePicker = ImagePicker();
+  final Set<String> _knownMessageIds = {};
+  final List<ChatMessage> _pendingNotifications = [];
   bool _sending = false;
   Future<bool>? _isAdminFuture;
+  Timer? _notificationTimer;
 
   @override
   void initState() {
     super.initState();
+    _knownMessageIds.addAll(AppStore.chatMessages.map((message) => message.id));
+    AppStore.chatMessagesChange.addListener(_handleChatMessagesChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     _isAdminFuture = AppStore.isAdmin;
   }
@@ -28,7 +35,110 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _textController.dispose();
     _scrollController.dispose();
+    AppStore.chatMessagesChange.removeListener(_handleChatMessagesChanged);
+    _notificationTimer?.cancel();
     super.dispose();
+  }
+
+  void _handleChatMessagesChanged() {
+    final newMessages = <ChatMessage>[];
+    for (final message in AppStore.chatMessages) {
+      if (_knownMessageIds.add(message.id) &&
+          message.senderEmail != AppStore.agentEmail) {
+        newMessages.add(message);
+      }
+    }
+    if (newMessages.isEmpty || !mounted) return;
+
+    setState(() {
+      _pendingNotifications.addAll(newMessages.reversed);
+      _scheduleNextNotification();
+    });
+  }
+
+  void _scheduleNextNotification() {
+    if (_notificationTimer != null || _pendingNotifications.isEmpty) return;
+    _notificationTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      setState(() {
+        _pendingNotifications.removeAt(0);
+        _notificationTimer = null;
+        _scheduleNextNotification();
+      });
+    });
+  }
+
+  void _dismissNotification() {
+    if (_pendingNotifications.isEmpty) return;
+    _notificationTimer?.cancel();
+    setState(() {
+      _pendingNotifications.removeAt(0);
+      _notificationTimer = null;
+      _scheduleNextNotification();
+    });
+  }
+
+  Widget _buildIncomingNotification(bool isDark) {
+    final message = _pendingNotifications.first;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF163B2D) : const Color(0xFFE7F6EC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isDark ? const Color(0xFF2E6B4B) : const Color(0xFFB9E4C7),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Padding(
+            padding: EdgeInsetsDirectional.only(start: 12),
+            child: Icon(
+              Icons.mark_chat_unread_outlined,
+              color: Color(0xFF22834D),
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    message.senderName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : const Color(0xFF17452B),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    message.text.isEmpty ? 'أرسل صورة' : message.text,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isDark
+                          ? const Color(0xFFD1E8D8)
+                          : const Color(0xFF315B40),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'إغلاق الإشعار',
+            onPressed: _dismissNotification,
+            icon: Icon(
+              Icons.close,
+              size: 19,
+              color: isDark ? Colors.white70 : const Color(0xFF315B40),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _scrollToBottom() {
@@ -133,6 +243,8 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         body: Column(
           children: [
+            if (_pendingNotifications.isNotEmpty)
+              _buildIncomingNotification(isDark),
             Expanded(
               child: ValueListenableBuilder<int>(
                 valueListenable: AppStore.chatMessagesChange,

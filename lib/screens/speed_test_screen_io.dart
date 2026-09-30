@@ -587,8 +587,9 @@ class _GaugePainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
 
     canvas.drawArc(rect, startAngle, sweepAngle, false, track);
-    if (progress > 0)
+    if (progress > 0) {
       canvas.drawArc(rect, startAngle, sweepAngle * progress, false, arc);
+    }
   }
 
   @override

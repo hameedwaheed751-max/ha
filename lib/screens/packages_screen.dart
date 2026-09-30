@@ -114,7 +114,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
         ),
         body: ValueListenableBuilder<int>(
           valueListenable: _refreshToken,
-          builder: (context, _, __) {
+          builder: (_, _, _) {
             final packages = AppStore.packages;
             if (packages.isEmpty) {
               return const Center(

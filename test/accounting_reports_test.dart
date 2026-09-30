@@ -31,6 +31,20 @@ void main() {
     expect(summary.activationCount, 2);
   });
 
+  test('monthly accounting separates collections from payment corrections', () {
+    final summary = AccountingMonthlySummary.fromRecords(
+      activations: const [],
+      payments: [
+        PaymentRecord(amount: 12000, at: DateTime(2026, 3, 10)),
+        PaymentRecord(amount: -2000, at: DateTime(2026, 3, 11)),
+      ],
+    );
+
+    expect(summary.grossCollections, 12000);
+    expect(summary.paymentCorrections, -2000);
+    expect(summary.netCollections, 10000);
+  });
+
   test('activation accounting record preserves optional SAS balances', () {
     final original = AccountingActivationRecord(
       subscriberUser: 'subscriber-1',

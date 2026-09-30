@@ -1,0 +1,14 @@
+{
+  "devDependencies": {
+    "eslint": "^10.10.0",
+    "prettier": "^3.9.6",
+    "wrangler": "^4.134.0"
+  },
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
+  },
+  "dependencies": {
+    "render-cli": "^0.3.2"
+  }
+}

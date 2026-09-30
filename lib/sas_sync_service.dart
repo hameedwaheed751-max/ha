@@ -88,8 +88,9 @@ class SasSyncService {
         existing.sasData['activation_date'];
     if (markerValue is String && markerValue.trim().isNotEmpty) {
       final parsed = DateTime.tryParse(markerValue.trim());
-      if (parsed != null)
+      if (parsed != null) {
         return DateTime(parsed.year, parsed.month, parsed.day);
+      }
     }
     return DateTime(
       remoteStartDate.year,
@@ -471,8 +472,9 @@ class SasSyncService {
       if (v is bool) return v;
       if (v is num) return v != 0;
       final x = v.toString().toLowerCase().trim();
-      if (['1', 'true', 'active', 'enabled', 'yes', 'on'].contains(x))
+      if (['1', 'true', 'active', 'enabled', 'yes', 'on'].contains(x)) {
         return true;
+      }
       if ([
         '0',
         'false',
@@ -481,8 +483,9 @@ class SasSyncService {
         'no',
         'off',
         'expired',
-      ].contains(x))
+      ].contains(x)) {
         return false;
+      }
       return fallback;
     }
 

@@ -43,6 +43,25 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     return '$date $time';
   }
 
+  String _snapshotAmount(double? snapshot, double current) {
+    if (widget.invoice == null) return current.toStringAsFixed(0);
+    return snapshot?.toStringAsFixed(0) ?? 'غير محفوظ في الوصل القديم';
+  }
+
+  String get _receiptPackage {
+    if (widget.invoice == null) return subscriber.type;
+    return widget.invoice!.packageSnapshot ?? 'غير محفوظ في الوصل القديم';
+  }
+
+  String get _receiptPaymentDate {
+    if (widget.invoice == null) {
+      return subscriber.paymentDate.isEmpty
+          ? 'غير محدد'
+          : subscriber.paymentDate;
+    }
+    return fmt(widget.invoice!.at);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -78,19 +97,27 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       'اسم المشترك': subscriber.name,
       'اليوزر': subscriber.user,
       'رقم الهاتف': subscriber.phone,
-      'الباقة': subscriber.type,
+      'الباقة': _receiptPackage,
       if (widget.invoice != null)
         'مبلغ الفاتورة': widget.invoice!.amount.toStringAsFixed(0),
-      'مبلغ الاشتراك': subscriber.price.toStringAsFixed(0),
-      'الواصل': subscriber.paid.toStringAsFixed(0),
-      'المتبقي': subscriber.remaining.toStringAsFixed(0),
+      'مبلغ الاشتراك': _snapshotAmount(
+        widget.invoice?.subscriptionAmountSnapshot,
+        subscriber.price,
+      ),
+      'الواصل': _snapshotAmount(
+        widget.invoice?.paidAmountSnapshot,
+        subscriber.paid,
+      ),
+      'المتبقي': _snapshotAmount(
+        widget.invoice?.remainingAmountSnapshot,
+        subscriber.remaining,
+      ),
       if (widget.invoice != null)
         'الشهر المحاسبي': invoiceMonthKey,
       'تاريخ التفعيل': fmt(subscriber.startDate),
-      'تاريخ التسديد':
-          subscriber.paymentDate.isEmpty ? 'غير محدد' : subscriber.paymentDate,
+      'تاريخ التسديد': _receiptPaymentDate,
       'تاريخ الانتهاء': fmt(subscriber.endDate),
-      if (subscriber.payments.isNotEmpty)
+      if (widget.invoice == null && subscriber.payments.isNotEmpty)
         'آخر دفعة': subscriber.payments.last.amount.toStringAsFixed(0),
       'تاريخ إصدار الوصل': issuedAt,
     };
@@ -263,21 +290,34 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                       row('اسم المشترك', subscriber.name),
                       row('اليوزر', subscriber.user),
                       row('رقم الهاتف', subscriber.phone),
-                      row('الباقة', subscriber.type),
+                      row('الباقة', _receiptPackage),
                       if (widget.invoice != null)
                         row('مبلغ الفاتورة', widget.invoice!.amount.toStringAsFixed(0)),
-                      row('مبلغ الاشتراك', subscriber.price.toStringAsFixed(0)),
-                      row('الواصل', subscriber.paid.toStringAsFixed(0)),
-                      row('المتبقي', subscriber.remaining.toStringAsFixed(0)),
+                      row(
+                        'مبلغ الاشتراك',
+                        _snapshotAmount(
+                          widget.invoice?.subscriptionAmountSnapshot,
+                          subscriber.price,
+                        ),
+                      ),
+                      row(
+                        'الواصل',
+                        _snapshotAmount(
+                          widget.invoice?.paidAmountSnapshot,
+                          subscriber.paid,
+                        ),
+                      ),
+                      row(
+                        'المتبقي',
+                        _snapshotAmount(
+                          widget.invoice?.remainingAmountSnapshot,
+                          subscriber.remaining,
+                        ),
+                      ),
                       if (widget.invoice != null)
                         row('الشهر المحاسبي', invoiceMonthKey),
                       row('تاريخ التفعيل', fmt(subscriber.startDate)),
-                      row(
-                        'تاريخ التسديد',
-                        subscriber.paymentDate.isEmpty
-                            ? 'غير محدد'
-                            : subscriber.paymentDate,
-                      ),
+                      row('تاريخ التسديد', _receiptPaymentDate),
                       row('تاريخ الانتهاء', fmt(subscriber.endDate)),
                       row('تاريخ إصدار الوصل', issuedAt),
                       const Divider(height: 28),

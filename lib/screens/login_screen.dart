@@ -546,7 +546,7 @@ try {
                               decoration: InputDecoration(
                                 labelText: 'اسم المستخدم',
                                 hintText: 'أدخل اسم المستخدم',
-                                prefixIcon: const Icon(Icons.person_outline),
+                                prefixIcon: const Icon(Icons.person_outline, color: Color(0xFF2E7D32)),
                                 filled: true,
                                 fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
                                 border: OutlineInputBorder(
@@ -554,11 +554,11 @@ try {
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: colorScheme.outlineVariant),
+                                  borderSide: BorderSide(color: Colors.green.shade200),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: colorScheme.primary, width: 1.6),
+                                  borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 1.8),
                                 ),
                               ),
                               validator: (value) {
@@ -577,11 +577,12 @@ try {
                               decoration: InputDecoration(
                                 labelText: 'كلمة المرور',
                                 hintText: 'أدخل كلمة المرور',
-                                prefixIcon: const Icon(Icons.lock_outline),
+                                prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFF2E7D32)),
                                 suffixIcon: IconButton(
                                   onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                                   icon: Icon(
                                     _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                                    color: const Color(0xFF2E7D32),
                                   ),
                                 ),
                                 filled: true,
@@ -591,11 +592,11 @@ try {
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: colorScheme.outlineVariant),
+                                  borderSide: BorderSide(color: Colors.green.shade200),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: colorScheme.primary, width: 1.6),
+                                  borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 1.8),
                                 ),
                               ),
                               validator: (value) {
@@ -606,15 +607,19 @@ try {
                               },
                             ),
                             const SizedBox(height: 10),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            Wrap(
+                              alignment: WrapAlignment.spaceBetween,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
                                 Row(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Checkbox(
                                       value: _rememberMe,
                                       onChanged: (value) {
-                                        setState(() => _rememberMe = value ?? false);
+                                        setState(
+                                          () => _rememberMe = value ?? false,
+                                        );
                                         if (!(_rememberMe)) {
                                           SharedPreferences.getInstance().then((prefs) async {
                                             await prefs.setBool(_rememberMeKey, false);
@@ -625,14 +630,16 @@ try {
                                       },
                                       visualDensity: VisualDensity.compact,
                                     ),
-                                    Text(
-                                      'تذكرني',
-                                      style: textTheme.bodyMedium,
-                                    ),
+                                    Text('تذكرني', style: textTheme.bodyMedium),
                                   ],
                                 ),
                                 TextButton(
                                   onPressed: () {},
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                    ),
+                                  ),
                                   child: const Text('نسيت كلمة المرور؟'),
                                 ),
                               ],
@@ -669,7 +676,7 @@ try {
                                           }
                                         },
                                   style: FilledButton.styleFrom(
-                                    backgroundColor: const Color(0xFF1565C0),
+                                    backgroundColor: const Color(0xFF2E7D32),
                                     foregroundColor: Colors.white,
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(16),
@@ -726,6 +733,9 @@ TextButton(
                                   ),
                                 );
                               },
+                              style: TextButton.styleFrom(
+                                foregroundColor: const Color(0xFF2E7D32),
+                              ),
                               child: const Text('الاشتراك وإنشاء الحساب'),
 ),
                           ],

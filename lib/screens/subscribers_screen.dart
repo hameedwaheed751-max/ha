@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
+import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
 import '../services/render_whatsapp_service.dart';
 import 'add_subscriber_screen.dart';
@@ -53,6 +54,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
   Future<void> _loadColumnPreferences() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _columnVisibility['ip'] = prefs.getBool('col_ip') ?? true;
       _columnVisibility['remainingDays'] =
@@ -95,8 +97,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       if (!basicMatch) return false;
 
       if (_advancedStatus != 'الكل') {
-        if (_advancedStatus == 'فعال' && (!s.isActive || s.disabled))
+        if (_advancedStatus == 'فعال' && (!s.isActive || s.disabled)) {
           return false;
+        }
         if (_advancedStatus == 'منتهي الصلاحية' && !s.expired) return false;
         if (_advancedStatus == 'معطل' && !s.disabled) return false;
         if (_advancedStatus == 'ينتهي قريباً') {
@@ -122,10 +125,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         if (_advancedConnection == 'غير متصل' && online) return false;
       }
 
-      if (_advancedPackage != 'الكل' && s.packageDisplay != _advancedPackage)
+      if (_advancedPackage != 'الكل' && s.packageDisplay != _advancedPackage) {
         return false;
-      if (_advancedParent != 'الكل' && _parentText(s) != _advancedParent)
+      }
+      if (_advancedParent != 'الكل' && _parentText(s) != _advancedParent) {
         return false;
+      }
       if (_advancedMac.trim().isNotEmpty &&
           !_macText(
             s,
@@ -547,6 +552,97 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
   }
 
+  Future<void> _activateFtthSubscriber(
+    Subscriber s, {
+    BuildContext? modalContext,
+  }) async {
+    try {
+      if (modalContext != null && modalContext.mounted) {
+        Navigator.pop(modalContext);
+      }
+
+      final settings = await SasProjectNationalSettings.load();
+      final service = SasProjectNationalService(settings);
+
+      final subscriptionId = s.sasId.trim().isNotEmpty
+          ? s.sasId.trim()
+          : (s.sasData['subscription_id'] ?? s.sasData['id'] ?? '')
+                .toString()
+                .trim();
+      if (subscriptionId.isEmpty) {
+        throw Exception('معرّف اشتراك FTTH غير موجود في بيانات المشترك');
+      }
+
+      final customerId = (s.sasData['customer_id'] ?? s.sasData['customerId'] ?? '')
+          .toString()
+          .trim();
+      final rawSubscription = s.sasData['rawSubscription'];
+      final bundleId = (rawSubscription is Map && rawSubscription['bundle'] is Map)
+          ? ((rawSubscription['bundle']['id'] ?? rawSubscription['bundle']['code']) ?? 'FTTH_BASIC')
+              .toString()
+          : 'FTTH_BASIC';
+      final services = [
+        {'value': 'BASIC', 'type': 'Base'},
+        {'value': 'PARENTAL_CONTROL', 'type': 'Vas'},
+        {'value': 'IPTV', 'type': 'Vas'},
+      ];
+
+      final result = await service.activateSubscription(
+        subscriptionId: subscriptionId,
+        customerId: customerId,
+        paymentMethod: 'Tabadul',
+        extraPayload: {
+          'simulatedPrice': s.price,
+          'bundleId': bundleId,
+          'services': services,
+          'commitmentPeriodValue': 1,
+          'salesType': 0,
+          'changeType': 1,
+        },
+      );
+
+      final paymentUrl = ((result['paymentUrl'] ?? result['payment_url']) ?? '')
+          .toString()
+          .trim();
+      final orderNumber = ((result['orderNumber'] ?? result['order_number']) ?? '')
+          .toString()
+          .trim();
+
+      if (!mounted) return;
+
+      if (paymentUrl.isNotEmpty) {
+        final uri = Uri.tryParse(paymentUrl);
+        if (uri != null) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              orderNumber.isNotEmpty
+                  ? '✅ تم إنشاء طلب FTTH بنجاح — Order: $orderNumber'
+                  : '✅ تم إنشاء طلب FTTH بنجاح وإعادة توجيه الدفع',
+            ),
+            backgroundColor: Colors.green.shade600,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ فشل تفعيل FTTH: $e'),
+            backgroundColor: Colors.red.shade600,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _activateSubscriber(
     Subscriber s, {
     BuildContext? modalContext,
@@ -564,8 +660,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     final userId = int.tryParse(rawId);
 
     if (userId == null || userId == 0) {
-      if (modalContext != null && modalContext.mounted)
+      if (modalContext != null && modalContext.mounted) {
         Navigator.pop(modalContext);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -577,6 +674,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       return;
     }
 
+    final hadActivationHistory = AppStore.hasRecordedActivation(s);
     try {
       final settings = await SasSettings.load();
       if (settings.username.trim().isEmpty || settings.password.isEmpty) {
@@ -639,6 +737,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           SasSyncService.activationDateFromSas(userData) ??
           SasSyncService.activationDateFromSas(activationResponse) ??
           DateTime.now();
+        final recordedAt = DateTime.now();
       _setStartDateAsActivationDay(s, at: activatedAt);
 
       // استخراج تاريخ الانتهاء من userData إذا توفر
@@ -658,7 +757,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           packageName: s.packageDisplay,
           saleAmount: s.price,
           sasDeduction: activationAmount,
-          at: activatedAt,
+          at: recordedAt,
         ),
         persist: false,
       );
@@ -666,11 +765,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       for (final event in DailyTaskEvent.activationSettlement(
         subscriberUser: s.user,
         subscriberName: s.name,
-        at: activatedAt,
+        at: recordedAt,
         collected: s.paid,
         remaining: s.remaining,
         note: 'تفعيل من قائمة المشتركين',
         addRemainingDebtEvent: !debtAlreadyRecorded,
+        isReactivation: hadActivationHistory,
       )) {
         await AppStore.addDailyTaskEvent(event, persist: false);
       }
@@ -824,7 +924,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 ),
                 const Divider(),
                 _op(Icons.check_circle, Colors.green, 'تفعيل', () {
-                  _activateSubscriber(s, modalContext: ctx);
+                  if (s.source == 'ftth') {
+                    _activateFtthSubscriber(s, modalContext: ctx);
+                  } else {
+                    _activateSubscriber(s, modalContext: ctx);
+                  }
                 }),
                 _op(Icons.edit, Colors.blue, 'تعديل الديون والحسابات', () {
                   Navigator.pop(ctx);
@@ -1069,25 +1173,40 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
   InputDecoration _greenDropdownDecoration(String label, IconData icon) {
     final colors = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return InputDecoration(
       labelText: label,
-      labelStyle: TextStyle(color: colors.onSurfaceVariant),
+      labelStyle: TextStyle(
+        color: isDark ? const Color(0xFFE2E8F0) : colors.onSurfaceVariant,
+      ),
       floatingLabelStyle: TextStyle(color: colors.primary),
-      prefixIcon: Icon(icon, color: colors.onSurfaceVariant),
+      prefixIcon: Icon(
+        icon,
+        color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF2E7D32),
+      ),
       filled: true,
-      fillColor: colors.surfaceContainerHighest,
+      fillColor: isDark
+          ? const Color(0xFF1E293B)
+          : colors.surfaceContainerHighest,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: Colors.grey.shade300),
+        borderSide: BorderSide(
+          color: isDark ? const Color(0xFF475569) : Colors.green.shade200,
+        ),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: Colors.grey.shade300, width: 1.2),
+        borderSide: BorderSide(
+          color: isDark ? const Color(0xFF475569) : Colors.green.shade200,
+          width: 1.2,
+        ),
       ),
       focusedBorder: const OutlineInputBorder(
         borderRadius: BorderRadius.all(Radius.circular(14)),
         borderSide: BorderSide(color: Color(0xFF2E7D32), width: 2),
       ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     );
   }
 
@@ -1452,8 +1571,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
       try {
         final overview = await api.fetchUserOverview(userId);
-        if (overview is Map)
+        if (overview is Map) {
           s.sasData.addAll(Map<String, dynamic>.from(overview));
+        }
       } catch (_) {}
 
       s.setPackageValue(profileName);
@@ -1492,6 +1612,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             barrierDismissible: false,
             builder: (_) => const Center(child: CircularProgressIndicator()),
           );
+          final hadActivationHistory = AppStore.hasRecordedActivation(s);
           final activationResponse = await api
               .activateUser(userId)
               .timeout(const Duration(seconds: 30));
@@ -1500,6 +1621,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           final activatedAt =
               SasSyncService.activationDateFromSas(activationResponse) ??
               DateTime.now();
+            final recordedAt = DateTime.now();
           _setStartDateAsActivationDay(s, at: activatedAt);
 
           // جلب بيانات المشترك المحدثة من SAS
@@ -1532,7 +1654,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               packageName: s.packageDisplay,
               saleAmount: s.price,
               sasDeduction: activationAmount,
-              at: activatedAt,
+              at: recordedAt,
             ),
             persist: false,
           );
@@ -1540,11 +1662,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           for (final event in DailyTaskEvent.activationSettlement(
             subscriberUser: s.user,
             subscriberName: s.name,
-            at: activatedAt,
+            at: recordedAt,
             collected: s.paid,
             remaining: s.remaining,
             note: 'تفعيل بعد تغيير الباقة',
             addRemainingDebtEvent: !debtAlreadyRecorded,
+            isReactivation: hadActivationHistory,
           )) {
             await AppStore.addDailyTaskEvent(event, persist: false);
           }
@@ -1659,9 +1782,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 onPressed: () async {
                   final oldPaid = s.paid;
                   final oldRemaining = s.remaining;
-                  final hadRecordedActivation = AppStore.hasRecordedActivation(
-                    s,
-                  );
                   final newPrice = _parseAmount(price.text.trim());
                   final newPaidAmount = _parseAmount(paid.text.trim());
                   if (newPrice == null || newPrice < 0) {
@@ -1681,23 +1801,14 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     return;
                   }
 
-                  s.price = newPrice;
-                  s.normalizeDebtFields();
-
                   final now = DateTime.now();
-                  final targetPaidAmount = newPaidAmount
-                      .clamp(0, newPrice)
-                      .toDouble();
-                  final delta = s.adjustPaidToTarget(
-                    targetPaidAmount,
+                  final adjustment = s.adjustDebtAmounts(
+                    subscriptionAmount: newPrice,
+                    paidAmount: newPaidAmount,
                     at: now,
-                    increaseNote: 'تعديل الواصل من شاشة الديون',
-                    decreaseNote: 'تخفيض الواصل من شاشة الديون',
                   );
-                  final addedDebt = DailyTaskEvent.addedDebtAmount(
-                    previousRemaining: oldRemaining,
-                    currentRemaining: s.remaining,
-                  );
+                  final delta = adjustment.paymentDelta;
+                  final addedDebt = adjustment.addedDebt;
                   if (delta.abs() <= 0.0001 && addedDebt <= 0.0001) {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -1710,13 +1821,13 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   }
 
                   InvoiceRecord? invoice;
-                  if (delta.abs() > 0.0001) {
+                  if (delta > 0.0001) {
                     final receiptNumber = await AppStore.issueReceiptNumber(
                       persist: false,
                     );
                     invoice = s.registerInvoiceFromPayment(
                       receiptNumber: receiptNumber,
-                      amount: delta.abs(),
+                      amount: delta,
                       at: now,
                       note: s.remaining <= 0.0001
                           ? 'تعديل تسديد كامل'
@@ -1724,14 +1835,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     );
                   }
 
-                  if (delta > 0 && hadRecordedActivation) {
+                  if (delta > 0) {
                     await AppStore.addDailyTaskEvent(
                       DailyTaskEvent(
-                        type: 'debt_payment',
+                        type: oldRemaining <= 0.0001 && addedDebt > 0.0001
+                            ? DailyTaskEvent.debtEntryCollectionType
+                            : 'debt_payment',
                         subscriberUser: s.user,
                         subscriberName: s.name,
                         at: now,
-                        amount: delta.abs(),
+                        amount: delta,
                         remainingAfter: s.remaining,
                         note: s.remaining <= 0.0001
                             ? 'تسديد كامل'
@@ -1756,7 +1869,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     );
                   }
 
-                  s.paymentDate = fmt(now);
+                  if (delta > 0.0001) s.paymentDate = fmt(now);
+                  if (s.paid <= 0) s.paymentDate = '';
                   await AppStore.save();
 
                   if (ctx.mounted) Navigator.pop(ctx);
@@ -1772,11 +1886,14 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
                   if (mounted) {
                     setState(() {});
+                    final syncWarning = AppStore.lastSaveSyncError == null
+                        ? ''
+                        : ' | حُفظ محلياً وتعذرت المزامنة';
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
                           'تم الحفظ: الاشتراك ${newPrice.toStringAsFixed(0)} | الواصل ${oldPaid.toStringAsFixed(0)} -> ${s.paid.toStringAsFixed(0)} | '
-                          'المتبقي ${oldRemaining.toStringAsFixed(0)} -> ${s.remaining.toStringAsFixed(0)}',
+                          'المتبقي ${oldRemaining.toStringAsFixed(0)} -> ${s.remaining.toStringAsFixed(0)}$syncWarning',
                         ),
                       ),
                     );
@@ -1890,8 +2007,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   String _sasText(Subscriber s, List<String> keys, [String fallback = '—']) {
     for (final key in keys) {
       final v = s.sasData[key];
-      if (v != null && v.toString().trim().isNotEmpty)
+      if (v != null && v.toString().trim().isNotEmpty) {
         return v.toString().trim();
+      }
     }
     return fallback;
   }
@@ -2316,6 +2434,19 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         appBar: AppBar(
           title: Text(pageTitle),
           centerTitle: true,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          flexibleSpace: Stack(
+            fit: StackFit.expand,
+            children: [
+              const ColoredBox(color: Color(0xFF2E7D32)),
+              Image.asset(
+                'assets/reference/NetAgent_Glossy_Green_3D.png',
+                fit: BoxFit.cover,
+                alignment: Alignment.center,
+              ),
+            ],
+          ),
           actions: [
             IconButton(
               tooltip: 'تحديث',
@@ -2600,7 +2731,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'لا توجد مشتركين',
+                          AppStore.subscribers.isEmpty
+                              ? 'لا يوجد مشتركين مسجلين'
+                              : 'لا توجد نتائج مطابقة للبحث أو التصفية',
+                          textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(color: Colors.grey.shade600),
                         ),
@@ -2645,8 +2779,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                             rowsPerPage: _rowsPerPage,
                             availableRowsPerPage: const [10, 50, 500],
                             onRowsPerPageChanged: (value) {
-                              if (value != null)
+                              if (value != null) {
                                 setState(() => _rowsPerPage = value);
+                              }
                             },
                             sortColumnIndex: _sortColumnIndex,
                             sortAscending: _sortAsc,

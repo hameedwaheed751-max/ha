@@ -167,8 +167,9 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
       if (!_isCurrent(run)) return;
       final downloadSeconds =
           stopwatch.elapsedMicroseconds / Duration.microsecondsPerSecond;
-      if (receivedBytes == 0 || downloadSeconds <= 0)
+      if (receivedBytes == 0 || downloadSeconds <= 0) {
         throw Exception('لم تصل بيانات اختبار التحميل');
+      }
       setState(() {
         _download = receivedBytes * 8 / downloadSeconds / 1000000;
         _stage = 'جاري اختبار الرفع...';
@@ -598,8 +599,9 @@ class _GaugePainter extends CustomPainter {
       ..strokeWidth = 10
       ..strokeCap = StrokeCap.round;
     canvas.drawArc(rect, startAngle, sweepAngle, false, track);
-    if (progress > 0)
+    if (progress > 0) {
       canvas.drawArc(rect, startAngle, sweepAngle * progress, false, arc);
+    }
   }
 
   @override
