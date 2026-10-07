@@ -2,6 +2,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models.dart';
 
@@ -25,6 +26,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    AppStore.markChatOpened();
     _knownMessageIds.addAll(AppStore.chatMessages.map((message) => message.id));
     AppStore.chatMessagesChange.addListener(_handleChatMessagesChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
@@ -42,9 +44,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _handleChatMessagesChanged() {
     final newMessages = <ChatMessage>[];
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
     for (final message in AppStore.chatMessages) {
       if (_knownMessageIds.add(message.id) &&
-          message.senderEmail != AppStore.agentEmail) {
+          message.senderUid != currentUid) {
         newMessages.add(message);
       }
     }
@@ -61,9 +64,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _notificationTimer = Timer(const Duration(seconds: 5), () {
       if (!mounted) return;
       setState(() {
-        _pendingNotifications.removeAt(0);
+        _pendingNotifications.clear();
         _notificationTimer = null;
-        _scheduleNextNotification();
       });
     });
   }
@@ -72,14 +74,21 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_pendingNotifications.isEmpty) return;
     _notificationTimer?.cancel();
     setState(() {
-      _pendingNotifications.removeAt(0);
+      _pendingNotifications.clear();
       _notificationTimer = null;
-      _scheduleNextNotification();
     });
   }
 
   Widget _buildIncomingNotification(bool isDark) {
-    final message = _pendingNotifications.first;
+    final count = _pendingNotifications.length;
+    final previewMessage = _pendingNotifications.isNotEmpty
+        ? _pendingNotifications.first
+        : null;
+    final senderName = previewMessage?.senderName ?? 'الدردشة';
+    final previewText = previewMessage == null
+        ? ''
+        : (previewMessage.text.isEmpty ? 'أرسل صورة' : previewMessage.text);
+
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 10, 12, 2),
       decoration: BoxDecoration(
@@ -91,11 +100,19 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       child: Row(
         children: [
-          const Padding(
-            padding: EdgeInsetsDirectional.only(start: 12),
-            child: Icon(
-              Icons.mark_chat_unread_outlined,
-              color: Color(0xFF22834D),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 12),
+            child: CircleAvatar(
+              radius: 14,
+              backgroundColor: const Color(0xFF22834D),
+              child: Text(
+                count.toString(),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ),
           Expanded(
@@ -105,7 +122,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    message.senderName,
+                    count > 1 ? 'رسائل جديدة' : 'رسالة جديدة',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -114,7 +131,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                   Text(
-                    message.text.isEmpty ? 'أرسل صورة' : message.text,
+                    count > 1
+                        ? '$count رسائل واردة من $senderName'
+                        : '$senderName: $previewText',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -269,9 +288,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     reverse: true,
                     itemBuilder: (context, index) {
                       final msg = messages[index];
-                      final isMe = msg.senderEmail == AppStore.agentEmail;
+                      final isMe =
+                          msg.senderUid == FirebaseAuth.instance.currentUser?.uid;
                       final time =
                           '${msg.sentAt.hour.toString().padLeft(2, '0')}:${msg.sentAt.minute.toString().padLeft(2, '0')}';
+                      final isDeleted = msg.deletedAt != null;
                       return GestureDetector(
                         onLongPress: () => _showMessageOptions(context, msg),
                         child: Align(
@@ -313,7 +334,21 @@ class _ChatScreenState extends State<ChatScreen> {
                                     fontSize: 12,
                                   ),
                                 ),
-                                if (msg.text.isNotEmpty) ...[
+                                if (isDeleted) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'تم حذف هذه الرسالة',
+                                    style: TextStyle(
+                                      color: isMe
+                                          ? Colors.white70
+                                          : (isDark
+                                                ? const Color(0xFF94A3B8)
+                                                : Colors.grey.shade600),
+                                      fontSize: 14,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ] else if (msg.text.isNotEmpty) ...[
                                   const SizedBox(height: 4),
                                   Text(
                                     msg.text,
@@ -327,7 +362,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                     ),
                                   ),
                                 ],
-                                if (msg.imageUrl != null &&
+                                if (!isDeleted &&
+                                    msg.imageUrl != null &&
                                     msg.imageUrl!.isNotEmpty) ...[
                                   const SizedBox(height: 8),
                                   ClipRRect(
@@ -487,14 +523,25 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _showMessageOptions(BuildContext context, ChatMessage msg) {
-    final isMe = msg.senderEmail == AppStore.agentEmail;
+  Future<void> _showMessageOptions(BuildContext context, ChatMessage msg) async {
+    final isMe = msg.senderUid == FirebaseAuth.instance.currentUser?.uid;
+    final isAdminUser = await AppStore.isAdmin;
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (isMe || isAdminUser) ...[
+              ListTile(
+                leading: const Icon(Icons.delete),
+                title: const Text('حذف'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _deleteMessage(context, msg);
+                },
+              ),
+            ],
             if (isMe) ...[
               ListTile(
                 leading: const Icon(Icons.edit),
@@ -502,14 +549,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 onTap: () {
                   Navigator.pop(ctx);
                   _editMessage(context, msg);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete),
-                title: const Text('حذف'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _deleteMessage(context, msg);
                 },
               ),
             ],

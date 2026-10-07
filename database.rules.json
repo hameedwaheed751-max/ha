@@ -2,6 +2,12 @@
   "rules": {
     ".read": false,
     ".write": false,
+    "global_chat": {
+      "chat": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
     "agents": {
       "$agentId": {
         ".read": "auth != null && ($agentId === auth.uid || $agentId.matches('^' + auth.uid + '_.+$') || root.child('agents').child(auth.uid).child('profile').child('currentAgentId').val() === $agentId)",

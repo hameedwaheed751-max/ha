@@ -1,8 +1,12 @@
+import 'dart:convert';
+
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../firebase_options.dart';
 import '../models.dart';
@@ -127,11 +131,8 @@ class PaymentRequestRecord {
         'governorate': governorate,
         'region': region,
         'address': address,
-        'password': password,
-        'approvedBy': approvedBy,
-        'approvedAt': approvedAt,
-        'rejectedBy': rejectedBy,
-        'rejectedAt': rejectedAt,
+        if (approvedAt != null) 'approvedAt': approvedAt,
+        if (rejectedAt != null) 'rejectedAt': rejectedAt,
         'rejectReason': rejectReason,
         'isRenewal': isRenewal,
         'renewalForUid': renewalForUid,
@@ -216,250 +217,85 @@ class PaymentRequestService {
   static String get _adminSubscriptionRequestsSnakePath => '$adminRootNode/$subscriptionRequestsSnakeNode';
   static String get _adminSubscriptionRequestsCamelPath => '$adminRootNode/$subscriptionRequestsCamelNode';
 
-  static Map<String, dynamic> _mapOf(dynamic value) {
-    if (value is Map) return Map<String, dynamic>.from(value);
-    return <String, dynamic>{};
-  }
+  static FirebaseFunctions get _functions =>
+      FirebaseFunctions.instanceFor(region: 'us-central1');
+
+  static String _requestTokenKey(String purpose, String uid) =>
+      'payment_request_${purpose}_$uid';
 
   static int? _toInt(dynamic value) {
     if (value is int) return value;
     if (value is num) return value.toInt();
-    if (value is String && value.trim().isNotEmpty) {
-      return int.tryParse(value.trim());
-    }
+    if (value is String) return int.tryParse(value.trim());
     return null;
   }
 
-  static bool _isRenewalRecord(Map<String, dynamic> raw) {
-    final isRenewalFlag = raw['isRenewal'] == true || raw['isRenewal'].toString().toLowerCase() == 'true';
-    final renewalForUid = (raw['renewalForUid'] ?? '').toString().trim();
-    final requestType = (raw['requestType'] ?? '').toString().trim().toLowerCase();
-    return isRenewalFlag || renewalForUid.isNotEmpty || requestType == 'renewal';
+  static Future<void> _saveRequestCapabilities({
+    required String ownerKey,
+    required String requestId,
+    required String receiptToken,
+    required String statusToken,
+  }) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_requestTokenKey('id', ownerKey), requestId);
+    await preferences.setString(_requestTokenKey('status', ownerKey), statusToken);
+    await preferences.setString(_requestTokenKey('receipt', requestId), receiptToken);
   }
 
-  static bool _matchesAccount(Map<String, dynamic> raw, {required String uid, required String email}) {
-    final normalizedEmail = email.trim().toLowerCase();
-    final rawUidA = (raw['renewalForUid'] ?? '').toString().trim();
-    final rawUidB = (raw['uid'] ?? '').toString().trim();
-    final rawEmail = (raw['email'] ?? '').toString().trim().toLowerCase();
-
-    if (uid.trim().isNotEmpty && (rawUidA == uid.trim() || rawUidB == uid.trim())) {
-      return true;
-    }
-    if (normalizedEmail.isNotEmpty && rawEmail == normalizedEmail) {
-      return true;
-    }
-    return false;
-  }
-
-  static int? _eventTs(Map<String, dynamic> raw) {
-    return _toInt(raw['reviewedAt']) ??
-      _toInt(raw['approvedAt']) ??
-      _toInt(raw['rejectedAt']) ??
-      _toInt(raw['createdAt']);
-  }
-
-  static RenewalRequestState? _latestRenewalFromRootMap(
-    Map<String, dynamic> rootMap, {
-    required String uid,
-    required String email,
-  }) {
-    final adminMap = _mapOf(rootMap[adminRootNode]);
-    final adminRequests = _mapOf(adminMap[paymentRequestsNode]);
-    final legacyRequests = _mapOf(rootMap[paymentRequestsNode]);
-    final allRequests = <String, dynamic>{
-      ...legacyRequests,
-      ...adminRequests,
-    };
-
-    final adminHistory = _mapOf(adminMap[paymentHistoryNode]);
-    final legacyHistory = _mapOf(rootMap[paymentHistoryNode]);
-    final allHistory = <String, dynamic>{
-      ...legacyHistory,
-      ...adminHistory,
-    };
-
-    RenewalRequestState? latestPending;
-    RenewalRequestState? latestResolved;
-
-    for (final entry in allRequests.entries) {
-      if (entry.value is! Map) continue;
-      final raw = Map<String, dynamic>.from(entry.value as Map);
-      if (!_isRenewalRecord(raw) || !_matchesAccount(raw, uid: uid, email: email)) continue;
-
-      final status = (raw['status'] ?? 'pending').toString().trim().toLowerCase();
-      if (status != 'pending') continue;
-
-      final createdAt = _toInt(raw['createdAt']) ?? DateTime.now().millisecondsSinceEpoch;
-      final state = RenewalRequestState(
-        requestId: (raw['requestId'] ?? entry.key).toString(),
-        status: 'pending',
-        createdAt: createdAt,
-        rejectionReason: (raw['rejectReason'] ?? raw['rejectionReason'] ?? '').toString(),
-        reviewedAt: _eventTs(raw),
-        selectedPlan: (raw['selectedPlan'] ?? '').toString(),
-      );
-      if (latestPending == null || state.sortTs > latestPending.sortTs) {
-        latestPending = state;
-      }
-    }
-
-    for (final entry in allHistory.entries) {
-      if (entry.value is! Map) continue;
-      final raw = Map<String, dynamic>.from(entry.value as Map);
-      if (!_isRenewalRecord(raw) || !_matchesAccount(raw, uid: uid, email: email)) continue;
-
-      final status = (raw['status'] ?? '').toString().trim().toLowerCase();
-      if (status != 'approved' && status != 'rejected') continue;
-
-      final createdAt = _toInt(raw['createdAt']) ?? DateTime.now().millisecondsSinceEpoch;
-      final state = RenewalRequestState(
-        requestId: (raw['requestId'] ?? entry.key).toString(),
-        status: status,
-        createdAt: createdAt,
-        rejectionReason: (raw['rejectReason'] ?? raw['rejectionReason'] ?? '').toString(),
-        reviewedAt: _eventTs(raw),
-        selectedPlan: (raw['selectedPlan'] ?? '').toString(),
-      );
-      if (latestResolved == null || state.sortTs > latestResolved.sortTs) {
-        latestResolved = state;
-      }
-    }
-
-    return latestPending ?? latestResolved;
+  static Future<RenewalRequestState?> _getRenewalRequestStatus(String uid) async {
+    final preferences = await SharedPreferences.getInstance();
+    final requestId = preferences.getString(_requestTokenKey('id', uid)) ?? '';
+    final statusToken = preferences.getString(_requestTokenKey('status', uid)) ?? '';
+    if (requestId.isEmpty || statusToken.isEmpty) return null;
+    final result = await _functions.httpsCallable('getPaymentRequestStatus').call<Map<String, dynamic>>({
+      'requestId': requestId,
+      'statusToken': statusToken,
+    });
+    final raw = result.data['request'];
+    if (raw is! Map) return null;
+    final request = Map<String, dynamic>.from(raw);
+    return RenewalRequestState(
+      requestId: (request['requestId'] ?? requestId).toString(),
+      status: (request['status'] ?? '').toString(),
+      createdAt: _toInt(request['createdAt']) ?? 0,
+      rejectionReason: (request['rejectionReason'] ?? '').toString(),
+      selectedPlan: (request['selectedPlan'] ?? '').toString(),
+    );
   }
 
   static Future<RenewalRequestState?> findLatestRenewalRequestForAccount({
     required String uid,
     required String email,
-  }) async {
-    await _migrateLegacyAdminNodesIfNeeded();
-    final snap = await _root.get();
-    final rootMap = _mapOf(snap.value);
-    return _latestRenewalFromRootMap(rootMap, uid: uid.trim(), email: email.trim().toLowerCase());
-  }
+  }) => _getRenewalRequestStatus(uid.trim());
 
   static Stream<RenewalRequestState?> watchLatestRenewalRequestForAccount({
     required String uid,
     required String email,
-  }) {
-    return _root.onValue.asyncMap((event) async {
-      await _migrateLegacyAdminNodesIfNeeded();
-      final rootValue = event.snapshot.value;
-      if (rootValue is! Map) return null;
-      final rootMap = _mapOf(rootValue);
-      return _latestRenewalFromRootMap(rootMap, uid: uid.trim(), email: email.trim().toLowerCase());
-    });
-  }
-
-  static Future<void> _migrateLegacyAdminNodesIfNeeded() async {
-    if (_legacyMigrationAttempted) return;
-    _legacyMigrationAttempted = true;
-
-    try {
-      final rootSnap = await _root.get();
-      final rootMap = _mapOf(rootSnap.value);
-      final adminMap = _mapOf(rootMap[adminRootNode]);
-      final updates = <String, dynamic>{};
-
-      void migrateNode({required String legacyNode, required String adminPath, required String adminNodeName}) {
-        final legacyData = _mapOf(rootMap[legacyNode]);
-        if (legacyData.isEmpty) return;
-
-        final adminData = _mapOf(adminMap[adminNodeName]);
-        if (adminData.isEmpty) {
-          updates[adminPath] = legacyData;
-        } else {
-          for (final entry in legacyData.entries) {
-            if (!adminData.containsKey(entry.key)) {
-              updates['$adminPath/${entry.key}'] = entry.value;
-            }
-          }
-        }
-
-        updates[legacyNode] = null;
-      }
-
-      migrateNode(
-        legacyNode: paymentRequestsNode,
-        adminPath: _adminPaymentRequestsPath,
-        adminNodeName: paymentRequestsNode,
-      );
-      migrateNode(
-        legacyNode: paymentHistoryNode,
-        adminPath: _adminPaymentHistoryPath,
-        adminNodeName: paymentHistoryNode,
-      );
-      migrateNode(
-        legacyNode: subscriptionRequestsSnakeNode,
-        adminPath: _adminSubscriptionRequestsSnakePath,
-        adminNodeName: subscriptionRequestsSnakeNode,
-      );
-      migrateNode(
-        legacyNode: subscriptionRequestsCamelNode,
-        adminPath: _adminSubscriptionRequestsCamelPath,
-        adminNodeName: subscriptionRequestsCamelNode,
-      );
-
-      if (updates.isNotEmpty) {
-        await _root.update(updates);
-      }
-    } catch (_) {
-      // Keep app behavior stable if migration cannot run now.
+  }) async* {
+    while (true) {
+      yield await _getRenewalRequestStatus(uid.trim());
+      await Future<void>.delayed(const Duration(seconds: 5));
     }
   }
 
-  static Future<String> _resolveRequestPath(String requestId) async {
-    final adminPath = '$_adminPaymentRequestsPath/$requestId';
-    final adminSnap = await _root.child(adminPath).get();
-    if (adminSnap.exists) return adminPath;
-
-    final legacyPath = '$paymentRequestsNode/$requestId';
-    final legacySnap = await _root.child(legacyPath).get();
-    if (legacySnap.exists) return legacyPath;
-
-    return adminPath;
+  static Stream<List<PaymentRequestRecord>> watchRequests({String? status}) async* {
+    while (true) {
+      final result = await _functions.httpsCallable('listPaymentRequests').call<Map<String, dynamic>>({
+        'status': status ?? 'pending',
+      });
+      final rawRequests = result.data['requests'];
+      final records = rawRequests is List
+          ? rawRequests.whereType<Map>().map((raw) => PaymentRequestRecord.fromMap(
+                Map<String, dynamic>.from(raw),
+              )).toList()
+          : <PaymentRequestRecord>[];
+      yield records;
+      await Future<void>.delayed(const Duration(seconds: 5));
+    }
   }
 
-  static DatabaseReference requestRef(String requestId) => _root.child('$_adminPaymentRequestsPath/$requestId');
-  static DatabaseReference historyRef(String requestId) => _root.child('$_adminPaymentHistoryPath/$requestId');
-  static DatabaseReference subscriptionRef(String uid) => _root.child('agents/$uid/$subscriptionNode');
-
-  static Stream<List<PaymentRequestRecord>> watchRequests({String? status}) {
-    return _root.onValue.asyncMap((event) async {
-      await _migrateLegacyAdminNodesIfNeeded();
-      final rootValue = event.snapshot.value;
-      if (rootValue is! Map) return const <PaymentRequestRecord>[];
-
-      final rootMap = _mapOf(rootValue);
-      final adminMap = _mapOf(rootMap[adminRootNode]);
-      final adminRequests = _mapOf(adminMap[paymentRequestsNode]);
-      final legacyRequests = _mapOf(rootMap[paymentRequestsNode]);
-      final mergedRequests = <String, dynamic>{
-        ...legacyRequests,
-        ...adminRequests,
-      };
-
-      final records = <PaymentRequestRecord>[];
-      for (final entry in mergedRequests.entries) {
-        if (entry.value is Map) {
-          final raw = Map<String, dynamic>.from(entry.value as Map);
-          final existingId = (raw['requestId'] ?? '').toString().trim();
-          if (existingId.isEmpty) {
-            raw['requestId'] = entry.key.toString();
-          }
-          final record = PaymentRequestRecord.fromMap(raw);
-          if (status == null || status.isEmpty || record.status == status) {
-            records.add(record);
-          }
-        }
-      }
-      records.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      return records;
-    });
-  }
-
-  static Stream<List<PaymentRequestRecord>> watchPendingRequests() => watchRequests(status: 'pending');
+  static Stream<List<PaymentRequestRecord>> watchPendingRequests() =>
+      watchRequests(status: 'pending');
 
   static Future<String> createRequest({
     String uid = '',
@@ -479,283 +315,85 @@ class PaymentRequestService {
     bool isRenewal = false,
     String renewalForUid = '',
   }) async {
-    final normalizedPlan = PaymentPlanCatalog.normalize(selectedPlan);
-    final docRef = _root.child(_adminPaymentRequestsPath).push();
-    final requestId = docRef.key ?? DateTime.now().millisecondsSinceEpoch.toString();
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final payload = PaymentRequestRecord(
-      requestId: requestId,
-      uid: uid,
-      email: email,
-      agentName: agentName,
-      phone: phone,
-      selectedPlan: normalizedPlan,
-      amount: amount,
-      paymentMethod: paymentMethod,
-      transferNumber: transferNumber,
-      receiptImage: receiptImage,
-      status: 'pending',
-      createdAt: now,
-      userType: userType,
-      governorate: governorate,
-      region: region,
-      address: address,
-      password: password,
-      isRenewal: isRenewal,
-      renewalForUid: renewalForUid,
-    );
-
-    await requestRef(requestId).set(payload.toMap());
+    final result = await _functions.httpsCallable('createPaymentRequest').call<Map<String, dynamic>>({
+      'uid': uid,
+      'email': email.trim().toLowerCase(),
+      'agentName': agentName,
+      'phone': phone,
+      'governorate': governorate,
+      'region': region,
+      'address': address,
+      'selectedPlan': PaymentPlanCatalog.normalize(selectedPlan),
+      'amount': amount,
+      'paymentMethod': paymentMethod,
+      'transferNumber': transferNumber,
+      'password': password,
+      'isRenewal': isRenewal,
+      'renewalForUid': renewalForUid,
+    });
+    final requestId = (result.data['requestId'] ?? '').toString();
+    if (requestId.isEmpty) throw StateError('Backend did not return requestId');
+    final receiptToken = (result.data['receiptToken'] ?? '').toString();
+    final statusToken = (result.data['statusToken'] ?? '').toString();
+    if (receiptToken.isNotEmpty && statusToken.isNotEmpty) {
+      await _saveRequestCapabilities(
+        ownerKey: uid.trim().isNotEmpty ? uid.trim() : email.trim().toLowerCase(),
+        requestId: requestId,
+        receiptToken: receiptToken,
+        statusToken: statusToken,
+      );
+    }
     return requestId;
   }
 
   static Future<String?> uploadReceiptImage({required String requestId, required XFile file}) async {
-    final storageRef = FirebaseStorage.instance.ref('admin/paymentRequests/$requestId/${file.name}');
     final bytes = await file.readAsBytes();
-    final task = await storageRef.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
-    return task.ref.getDownloadURL();
+    final preferences = await SharedPreferences.getInstance();
+    final token = preferences.getString(_requestTokenKey('receipt', requestId)) ?? '';
+    if (token.isEmpty) throw StateError('Receipt upload capability is missing or expired');
+    final extension = file.name.split('.').last.toLowerCase();
+    final contentType = switch (extension) {
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      'pdf' => 'application/pdf',
+      _ => 'image/jpeg',
+    };
+    final result = await _functions.httpsCallable('uploadPaymentReceipt').call<Map<String, dynamic>>({
+      'requestId': requestId,
+      'receiptToken': token,
+      'contentType': contentType,
+      'base64': base64Encode(bytes),
+    });
+    return result.data['receiptImage']?.toString();
   }
 
-  static Future<void> markRequestAsPendingReview({required String requestId, required Map<String, dynamic> patch}) async {
-    final path = await _resolveRequestPath(requestId);
-    await _root.child(path).update(patch);
+  static Future<void> markRequestAsPendingReview({
+    required String requestId,
+    required Map<String, dynamic> patch,
+  }) async {
+    final result = await _functions.httpsCallable('getPaymentRequestStatus').call<Map<String, dynamic>>({
+      'requestId': requestId,
+      'statusToken': patch['statusToken'] ?? '',
+    });
+    if (result.data['request'] is Map) {
+      return;
+    }
   }
 
   static Future<void> addHistoryEntry(String requestId, Map<String, dynamic> history) async {
-    await historyRef(requestId).set(history);
-  }
-
-  static String _isoDate(DateTime value) => value.toUtc().toIso8601String();
-
-  static DateTime? _parseDate(dynamic value) {
-    if (value is String && value.trim().isNotEmpty) {
-      return DateTime.tryParse(value.trim())?.toUtc();
-    }
-    if (value is int) {
-      return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true);
-    }
-    if (value is num) {
-      return DateTime.fromMillisecondsSinceEpoch(value.toInt(), isUtc: true);
-    }
-    return null;
-  }
-
-  static (String firstName, String lastName) _splitName(String fullName) {
-    final parts = fullName
-        .trim()
-        .split(RegExp(r'\s+'))
-        .where((p) => p.isNotEmpty)
-        .toList();
-    if (parts.isEmpty) return ('', '');
-    if (parts.length == 1) return (parts.first, '');
-    return (parts.first, parts.sublist(1).join(' '));
-  }
-
-  static Future<String> _ensureAgentUid(PaymentRequestRecord request) async {
-    final existingUid = request.uid.trim();
-    if (existingUid.isNotEmpty) return existingUid;
-
-    final email = request.email.trim().toLowerCase();
-    final password = request.password;
-    if (email.isEmpty || password.isEmpty) {
-      throw Exception('الطلب لا يحتوي بيانات حساب كافية (email/password)');
-    }
-
-    final appName = 'agent-create-${DateTime.now().microsecondsSinceEpoch}';
-    FirebaseApp? tempApp;
-    try {
-      tempApp = await Firebase.initializeApp(
-        name: appName,
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-      final tempAuth = FirebaseAuth.instanceFor(app: tempApp);
-      try {
-        final cred = await tempAuth.createUserWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
-        return cred.user!.uid;
-      } on FirebaseAuthException catch (e) {
-        if (e.code == 'email-already-in-use') {
-          final cred = await tempAuth.signInWithEmailAndPassword(
-            email: email,
-            password: password,
-          );
-          return cred.user!.uid;
-        }
-        rethrow;
-      } finally {
-        await tempAuth.signOut();
-      }
-    } on FirebaseAuthException catch (e) {
-      throw Exception('تعذر إنشاء حساب الوكيل: ${e.message ?? e.code}');
-    } finally {
-      if (tempApp != null) {
-        await tempApp.delete();
-      }
-    }
-  }
-
-  static Future<String?> _findAgentUidByEmail(String email) async {
-    final normalized = email.trim().toLowerCase();
-    if (normalized.isEmpty) return null;
-
-    final snapshot = await _root.child('agents').get();
-    final value = snapshot.value;
-    if (value is! Map) return null;
-
-    for (final entry in value.entries) {
-      if (entry.value is! Map) continue;
-      final node = Map<String, dynamic>.from(entry.value as Map);
-      final profile = node['profile'] is Map
-          ? Map<String, dynamic>.from(node['profile'] as Map)
-          : <String, dynamic>{};
-      final candidateEmail = (profile['email'] ?? '').toString().trim().toLowerCase();
-      if (candidateEmail == normalized) {
-        return entry.key.toString();
-      }
-    }
-    return null;
-  }
-
-  static Future<String> _resolveRenewalUid(PaymentRequestRecord request) async {
-    final directUid = request.renewalForUid.trim().isNotEmpty
-        ? request.renewalForUid.trim()
-        : request.uid.trim();
-    if (directUid.isNotEmpty) return directUid;
-
-    final byEmail = await _findAgentUidByEmail(request.email);
-    if (byEmail != null && byEmail.isNotEmpty) return byEmail;
-
-    throw Exception('تعذر تحديد الحساب الحالي للتجديد.');
+    return;
   }
 
   static Future<Map<String, dynamic>> approveRequest({
     required PaymentRequestRecord request,
     required String approvedBy,
   }) async {
-    final isRenewal = request.isRenewal || request.renewalForUid.trim().isNotEmpty;
-    final uid = isRenewal
-        ? await _resolveRenewalUid(request)
-        : await _ensureAgentUid(request);
-
-    final now = DateTime.now().toUtc();
-    final normalizedPlan = PaymentPlanCatalog.normalize(request.selectedPlan);
-    final durationDays = PaymentPlanCatalog.durationDays(normalizedPlan);
-
-    final profileName = request.agentName.trim();
-    final nameParts = _splitName(profileName);
-
-    final agentRef = _root.child('agents/$uid');
-    final agentSnap = await agentRef.get();
-    if (!agentSnap.exists) {
-      await agentRef.set(AppStore.buildEmptyAgentNodePayload(uid: uid));
-    }
-
-    final resolvedRole = request.userType.trim().toLowerCase() == 'admin' ? 'admin' : 'agent';
-    final profilePayload = <String, dynamic>{
-      'email': request.email.trim().toLowerCase(),
-      'name': profileName,
-      'firstName': nameParts.$1,
-      'lastName': nameParts.$2,
-      'phone': request.phone.trim(),
-      'governorate': request.governorate.trim(),
-      'region': request.region.trim(),
-      'address': request.address.trim(),
-      'emailKey': request.email.trim().toLowerCase(),
-      'agentKey': request.email.trim().toLowerCase(),
-      'currentAgentId': uid,
-      'role': resolvedRole,
-      'status': 'active',
-      'approvedAt': now.millisecondsSinceEpoch,
-    };
-
-    await agentRef.child('profile').update(profilePayload);
-    await agentRef.child('settings').update({
-      'officeAddress': request.address.trim(),
-    });
-
-    final existingSubSnap = await subscriptionRef(uid).get();
-    final existingSub = existingSubSnap.value is Map
-        ? Map<String, dynamic>.from(existingSubSnap.value as Map)
-        : <String, dynamic>{};
-
-    final existingStatus = (existingSub['status'] ?? '').toString();
-    final existingEnd = _parseDate(existingSub['endDate']);
-    final startDate = isRenewal
-      ? now
-      : (existingStatus == 'active' &&
-          existingEnd != null &&
-          existingEnd.isAfter(now))
-        ? existingEnd
-        : now;
-    final endDate = startDate.add(Duration(days: durationDays));
-
-    final subscriptionPayload = <String, dynamic>{
-      'plan': normalizedPlan,
-      'status': 'active',
-      'durationDays': durationDays,
-      'startDate': _isoDate(startDate),
-      'endDate': _isoDate(endDate),
-      'autoExpire': true,
-      'lastPaymentId': request.requestId,
-    };
-
-    final historyPayload = <String, dynamic>{
-      ...request.toMap(),
-      'uid': uid,
-      'status': 'approved',
-      'approvedBy': approvedBy,
-      'approvedAt': now.millisecondsSinceEpoch,
-      'subscription': subscriptionPayload,
-    };
-
-    final subscriptionRequestPayload = <String, dynamic>{
+    final result = await _functions.httpsCallable('approvePaymentRequest').call<Map<String, dynamic>>({
       'requestId': request.requestId,
-      'uid': uid,
-      'firstName': nameParts.$1,
-      'lastName': nameParts.$2,
-      'phone': request.phone,
-      'email': request.email,
-      'selectedPlan': normalizedPlan,
-      'amount': request.amount,
-      'paymentMethod': request.paymentMethod,
-      'transferNumber': request.transferNumber,
-      'receiptImageUrl': request.receiptImage,
-      'status': 'approved',
-      'password': request.password,
-      'rejectionReason': '',
-      'createdAt': request.createdAt,
-      'reviewedAt': now.millisecondsSinceEpoch,
       'approvedBy': approvedBy,
-      'approvedAt': now.millisecondsSinceEpoch,
-      'source': 'paymentRequests',
-      'isRenewal': isRenewal,
-      'renewalForUid': uid,
-      'requestType': isRenewal ? 'renewal' : 'new',
-    };
-
-    final updates = <String, dynamic>{
-      'agents/$uid/$subscriptionNode': subscriptionPayload,
-      '$_adminPaymentHistoryPath/${request.requestId}': historyPayload,
-      '$_adminSubscriptionRequestsSnakePath/${request.requestId}': subscriptionRequestPayload,
-      '$_adminSubscriptionRequestsCamelPath/${request.requestId}': subscriptionRequestPayload,
-      '$paymentHistoryNode/${request.requestId}': null,
-      '$subscriptionRequestsSnakeNode/${request.requestId}': null,
-      '$subscriptionRequestsCamelNode/${request.requestId}': null,
-      '$_adminPaymentRequestsPath/${request.requestId}': null,
-      '$paymentRequestsNode/${request.requestId}': null,
-    };
-    await _root.update(updates);
-
-    return <String, dynamic>{
-      'startDate': _isoDate(startDate),
-      'endDate': _isoDate(endDate),
-      'durationDays': durationDays,
-      'plan': normalizedPlan,
-      'planLabel': PaymentPlanCatalog.label(normalizedPlan),
-      'uid': uid,
-    };
+    });
+    final data = result.data;
+    return Map<String, dynamic>.from(data);
   }
 
   static Future<void> rejectRequest({
@@ -763,53 +401,11 @@ class PaymentRequestService {
     required String rejectedBy,
     required String rejectReason,
   }) async {
-    final now = DateTime.now().toUtc();
-
-    final historyPayload = <String, dynamic>{
-      ...request.toMap(),
-      'status': 'rejected',
-      'rejectedBy': rejectedBy,
-      'rejectedAt': now.millisecondsSinceEpoch,
-      'rejectReason': rejectReason,
-    };
-
-    final nameParts = _splitName(request.agentName);
-    final subscriptionRequestPayload = <String, dynamic>{
+    await _functions.httpsCallable('rejectPaymentRequest').call<Map<String, dynamic>>({
       'requestId': request.requestId,
-      'uid': request.uid,
-      'firstName': nameParts.$1,
-      'lastName': nameParts.$2,
-      'phone': request.phone,
-      'email': request.email,
-      'selectedPlan': request.selectedPlan,
-      'amount': request.amount,
-      'paymentMethod': request.paymentMethod,
-      'transferNumber': request.transferNumber,
-      'receiptImageUrl': request.receiptImage,
-      'status': 'rejected',
-      'password': request.password,
-      'rejectionReason': rejectReason,
-      'createdAt': request.createdAt,
-      'reviewedAt': now.millisecondsSinceEpoch,
       'rejectedBy': rejectedBy,
-      'rejectedAt': now.millisecondsSinceEpoch,
-      'source': 'paymentRequests',
-      'isRenewal': request.isRenewal,
-      'renewalForUid': request.renewalForUid,
-      'requestType': request.isRenewal ? 'renewal' : 'new',
-    };
-
-    final updates = <String, dynamic>{
-      '$_adminPaymentHistoryPath/${request.requestId}': historyPayload,
-      '$_adminSubscriptionRequestsSnakePath/${request.requestId}': subscriptionRequestPayload,
-      '$_adminSubscriptionRequestsCamelPath/${request.requestId}': subscriptionRequestPayload,
-      '$paymentHistoryNode/${request.requestId}': null,
-      '$subscriptionRequestsSnakeNode/${request.requestId}': null,
-      '$subscriptionRequestsCamelNode/${request.requestId}': null,
-      '$_adminPaymentRequestsPath/${request.requestId}': null,
-      '$paymentRequestsNode/${request.requestId}': null,
-    };
-    await _root.update(updates);
+      'rejectReason': rejectReason,
+    });
   }
 
   static String subscriptionStatusText(String status) {

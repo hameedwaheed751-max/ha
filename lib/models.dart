@@ -301,29 +301,38 @@ class ChatMessage {
     required this.id,
     required this.senderName,
     required this.senderEmail,
+    this.senderUid = '',
     required this.text,
     required this.sentAt,
     this.editedAt,
     this.deletedAt,
+    this.deletedByUid = '',
+    this.deletedByAdmin = false,
     this.imageUrl,
   });
 
   final String id;
   final String senderName;
   final String senderEmail;
+  final String senderUid;
   final String text;
   final DateTime sentAt;
   final DateTime? editedAt;
   final DateTime? deletedAt;
+  final String deletedByUid;
+  final bool deletedByAdmin;
   final String? imageUrl;
 
   Map<String, dynamic> toJson() => {
     'senderName': senderName,
     'senderEmail': senderEmail,
+    if (senderUid.isNotEmpty) 'senderUid': senderUid,
     'text': text,
     'sentAt': sentAt.toIso8601String(),
     if (editedAt != null) 'editedAt': editedAt!.toIso8601String(),
     if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
+    if (deletedByUid.isNotEmpty) 'deletedByUid': deletedByUid,
+    'deletedByAdmin': deletedByAdmin,
     if (imageUrl != null) 'imageUrl': imageUrl,
   };
 
@@ -332,6 +341,7 @@ class ChatMessage {
         id: id,
         senderName: (j['senderName'] ?? 'مجهول').toString(),
         senderEmail: (j['senderEmail'] ?? '').toString(),
+        senderUid: (j['senderUid'] ?? '').toString(),
         text: (j['text'] ?? '').toString(),
         sentAt:
             DateTime.tryParse((j['sentAt'] ?? '').toString()) ?? DateTime.now(),
@@ -341,6 +351,8 @@ class ChatMessage {
         deletedAt: j['deletedAt'] != null
             ? DateTime.tryParse(j['deletedAt'].toString())
             : null,
+        deletedByUid: (j['deletedByUid'] ?? '').toString(),
+        deletedByAdmin: j['deletedByAdmin'] == true,
         imageUrl: j['imageUrl']?.toString(),
       );
 }
@@ -986,6 +998,7 @@ class AppStore {
   static String agentKey = '';
   static final List<ChatMessage> chatMessages = [];
   static final ValueNotifier<int> chatMessagesChange = ValueNotifier<int>(0);
+  static DateTime _lastChatOpenedAt = DateTime.now();
   static final ValueNotifier<bool> themeModeChange = ValueNotifier<bool>(false);
   static StreamSubscription<DatabaseEvent>? chatListener;
   static bool isDarkMode = false;
@@ -1099,38 +1112,8 @@ class AppStore {
   static bool get _isWindowsDesktop =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
 
-  static DatabaseReference? get _chatRef {
-    final officeKey = _officeChatKey();
-    if (officeKey != null && officeKey.isNotEmpty) {
-      return FirebaseDatabase.instance.ref('offices/$officeKey/chat');
-    }
-    final key = agentKey.trim();
-    if (key.isNotEmpty) {
-      return FirebaseDatabase.instance.ref('offices/$key/chat');
-    }
-    final uid = _uid;
-    if (uid != null && uid.isNotEmpty) {
-      final derivedKey =
-          '${agentEmail.trim().toLowerCase()}__${sasUsername.trim().toLowerCase()}';
-      if (derivedKey.trim().isNotEmpty) {
-        return FirebaseDatabase.instance.ref('offices/$derivedKey/chat');
-      }
-      return FirebaseDatabase.instance.ref('offices/$uid/chat');
-    }
-    return null;
-  }
-
-  static String? _officeChatKey() {
-    final name = officeName.trim();
-    if (name.isEmpty) return null;
-    final normalized = name
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9\u0600-\u06FF]+'), '_')
-        .replaceAll(RegExp(r'_+'), '_')
-        .replaceAll(RegExp(r'^_|_$'), '');
-    if (normalized.isEmpty) return null;
-    return normalized;
-  }
+  static DatabaseReference get _chatRef =>
+      FirebaseDatabase.instance.ref('global_chat/chat');
 
   static void _migrateNearExpiryTemplate() {
     // Always normalize activation and near-expiry to the canonical wording.
@@ -2652,8 +2635,14 @@ class AppStore {
   static Future<void> startChatSync() async {
     chatListener?.cancel();
     final ref = _chatRef;
-    if (ref == null) return;
     try {
+      debugPrint('CHAT DEBUG UID: $_uid');
+      debugPrint('CHAT DEBUG agentEmail: $agentEmail');
+      debugPrint('CHAT DEBUG sasUsername: $sasUsername');
+      debugPrint('CHAT DEBUG officeName: $officeName');
+      debugPrint('CHAT DEBUG agentKey: $agentKey');
+      debugPrint('CHAT DEBUG _chatRef: ${_chatRef.path}');
+      debugPrint('CHAT DEBUG ref.path: ${ref.path}');
       final event = await ref.once();
       final snapshot = event.snapshot;
       if (snapshot.value is Map) {
@@ -2675,8 +2664,10 @@ class AppStore {
         chatMessagesChange.value++;
       }
 
+      debugPrint('CHAT LISTENER ATTACHED');
       chatListener = ref.onChildAdded.listen((event) {
         final snapshot = event.snapshot;
+        debugPrint('CHAT MESSAGE RECEIVED ${snapshot.key}');
         if (snapshot.value is! Map) return;
         final msg = ChatMessage.fromJson(
           snapshot.key!,
@@ -2692,6 +2683,23 @@ class AppStore {
     }
   }
 
+  static int get unreadChatCount {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null) return 0;
+    return chatMessages
+        .where(
+          (message) =>
+              message.senderUid != currentUid &&
+              message.sentAt.isAfter(_lastChatOpenedAt),
+        )
+        .length;
+  }
+
+  static void markChatOpened() {
+    _lastChatOpenedAt = DateTime.now();
+    chatMessagesChange.value++;
+  }
+
   static void stopChatSync() {
     chatListener?.cancel();
     chatListener = null;
@@ -2704,19 +2712,23 @@ class AppStore {
 
   static Future<bool> sendChatMessage(String text, {String? imageUrl}) async {
     final ref = _chatRef;
-    if (ref == null || (text.trim().isEmpty && imageUrl == null)) {
+    final senderUid = _uid;
+    if (senderUid == null ||
+        senderUid.isEmpty ||
+        (text.trim().isEmpty && imageUrl == null)) {
       debugPrint(
         'sendChatMessage: ref is null or content empty. agentKey=$agentKey, uid=$_uid',
       );
       return false;
     }
+    final msgId = ref.push().key;
+    if (msgId == null) return false;
     try {
-      final msgId =
-          '${DateTime.now().millisecondsSinceEpoch}_${chatMessages.length}';
       final msg = ChatMessage(
         id: msgId,
         senderName: effectiveAgentName,
         senderEmail: agentEmail,
+        senderUid: senderUid,
         text: text.trim(),
         sentAt: DateTime.now(),
         imageUrl: imageUrl,
@@ -2759,7 +2771,10 @@ class AppStore {
 
   static Future<bool> editChatMessage(String msgId, String newText) async {
     final ref = _chatRef;
-    if (ref == null || newText.trim().isEmpty) return false;
+    final senderUid = _uid;
+    if (senderUid == null || senderUid.isEmpty || newText.trim().isEmpty) {
+      return false;
+    }
     try {
       final snapshot = await ref.child(msgId).get();
       if (!snapshot.exists) return false;
@@ -2767,11 +2782,12 @@ class AppStore {
         msgId,
         Map<String, dynamic>.from(snapshot.value as Map),
       );
-      if (msg.senderEmail != agentEmail) return false;
+      if (msg.senderUid != senderUid) return false;
       final updated = ChatMessage(
         id: msgId,
         senderName: msg.senderName,
         senderEmail: msg.senderEmail,
+        senderUid: msg.senderUid,
         text: newText.trim(),
         sentAt: msg.sentAt,
         editedAt: DateTime.now(),
@@ -2797,7 +2813,8 @@ class AppStore {
 
   static Future<bool> deleteChatMessage(String msgId) async {
     final ref = _chatRef;
-    if (ref == null) return false;
+    final senderUid = _uid;
+    if (senderUid == null || senderUid.isEmpty) return false;
     try {
       final snapshot = await ref.child(msgId).get();
       if (!snapshot.exists) return false;
@@ -2805,10 +2822,16 @@ class AppStore {
         msgId,
         Map<String, dynamic>.from(snapshot.value as Map),
       );
-      if (msg.senderEmail != agentEmail) return false;
+      final isAdminUser = await isAdmin;
+      if (msg.senderUid != senderUid && !isAdminUser) return false;
+      final deletedAt = DateTime.now();
       await ref
           .child(msgId)
-          .update({'deletedAt': DateTime.now().toIso8601String()})
+          .update({
+            'deletedAt': deletedAt.toIso8601String(),
+            'deletedByUid': senderUid,
+            'deletedByAdmin': isAdminUser,
+          })
           .timeout(const Duration(seconds: 10));
       final index = chatMessages.indexWhere((m) => m.id == msgId);
       if (index >= 0) {
@@ -2816,9 +2839,13 @@ class AppStore {
           id: msgId,
           senderName: msg.senderName,
           senderEmail: msg.senderEmail,
-          text: '',
+          senderUid: msg.senderUid,
+          text: msg.text,
           sentAt: msg.sentAt,
-          deletedAt: DateTime.now(),
+          deletedAt: deletedAt,
+          deletedByUid: senderUid,
+          deletedByAdmin: isAdminUser,
+          imageUrl: msg.imageUrl,
         );
         chatMessagesChange.value++;
       }
@@ -2830,11 +2857,18 @@ class AppStore {
   }
 
   static Future<void> deleteAllChat() async {
-    if (!await isAdmin) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
     final ref = _chatRef;
-    if (ref == null) return;
     try {
-      await ref.remove().timeout(const Duration(seconds: 10));
+      final token = await user.getIdTokenResult(true);
+      if (token.claims?['admin'] != true) return;
+      final snapshot = await ref.get().timeout(const Duration(seconds: 10));
+      for (final child in snapshot.children) {
+        final key = child.key;
+        if (key == null) continue;
+        await ref.child(key).remove().timeout(const Duration(seconds: 10));
+      }
       chatMessages.clear();
       chatMessagesChange.value++;
     } catch (e) {

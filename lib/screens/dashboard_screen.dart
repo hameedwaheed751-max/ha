@@ -1371,7 +1371,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                         const SizedBox(height: 22),
                         _sectionTitle('الوصول السريع', Icons.bolt_rounded),
                         const SizedBox(height: 10),
-                        _quickActionsGrid(),
+                        ValueListenableBuilder<int>(
+                          valueListenable: AppStore.chatMessagesChange,
+                          builder: (context, _, __) => _quickActionsGrid(),
+                        ),
                         const SizedBox(height: 22),
                         _sasInformationSection(
                           active: active,
@@ -1776,6 +1779,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _quickActionsGrid() {
     final colors = Theme.of(context).colorScheme;
+    final chatUnreadCount = AppStore.unreadChatCount;
     final actions = <(String, String, Color, VoidCallback)>[
       (
         'مشترك جديد',
@@ -1851,27 +1855,57 @@ class _DashboardScreenState extends State<DashboardScreen>
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: colors.outlineVariant),
                     ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    child: Stack(
+                      clipBehavior: Clip.none,
                       children: [
-                        Image.asset(
-                          _referenceAssetPath(action.$2),
-                          width: 38,
-                          height: 38,
-                          fit: BoxFit.contain,
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Image.asset(
+                              _referenceAssetPath(action.$2),
+                              width: 38,
+                              height: 38,
+                              fit: BoxFit.contain,
+                            ),
+                            const SizedBox(height: 9),
+                            Text(
+                              action.$1,
+                              maxLines: 2,
+                              textAlign: TextAlign.center,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: colors.onSurface,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 9),
-                        Text(
-                          action.$1,
-                          maxLines: 2,
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: colors.onSurface,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
+                        if (action.$1 == 'الدردشة' && chatUnreadCount > 0)
+                          Positioned(
+                            top: -4,
+                            right: -4,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              constraints: const BoxConstraints(minWidth: 22),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFD32F2F),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.white, width: 1.5),
+                              ),
+                              child: Text(
+                                chatUnreadCount > 99 ? '99+' : '$chatUnreadCount',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
