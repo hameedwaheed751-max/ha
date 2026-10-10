@@ -87,6 +87,11 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     double get _invoiceReconciliationDifference =>
       _monthlyInvoiceTotal - _summary.netCollections;
 
+    double get _currentOutstandingDebt => AppStore.subscribers.fold<double>(
+      0,
+      (total, subscriber) => total + subscriber.remaining,
+    );
+
   String _money(double value) {
     final rounded = value.round();
     final sign = rounded < 0 ? '-' : '';
@@ -229,7 +234,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
             : xls.DoubleCellValue(_journalMonth!.deductions),
       ]);
       sheet.appendRow([
-        xls.TextCellValue('إجمالي الدفعات المستلمة'),
+        xls.TextCellValue('الدفعات الموجبة المسجلة'),
         xls.DoubleCellValue(summary.grossCollections),
       ]);
       sheet.appendRow([
@@ -237,16 +242,20 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
         xls.DoubleCellValue(summary.paymentCorrections),
       ]);
       sheet.appendRow([
-        xls.TextCellValue('إجمالي الدين المضاف'),
+        xls.TextCellValue('المطالبات المضافة خلال الشهر'),
         xls.DoubleCellValue(_monthlyDebtSummary.debtAddedTotal),
       ]);
       sheet.appendRow([
-        xls.TextCellValue('المحصل من الديون'),
+        xls.TextCellValue('الواصل من التسديد'),
         xls.DoubleCellValue(_monthlyDebtSummary.debtPaymentsCollected),
       ]);
       sheet.appendRow([
-        xls.TextCellValue('صافي حركة الدين'),
+        xls.TextCellValue('صافي حركة الدين خلال الشهر'),
         xls.DoubleCellValue(_monthlyDebtSummary.netDebtMovement),
+      ]);
+      sheet.appendRow([
+        xls.TextCellValue('الرصيد الحالي المتبقي على المشتركين'),
+        xls.DoubleCellValue(_currentOutstandingDebt),
       ]);
       sheet.appendRow([
         xls.TextCellValue('صافي حركة الدفعات'),
@@ -323,6 +332,46 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     }
   }
 
+  Widget _metricSection(
+    String title,
+    IconData icon,
+    List<(IconData, String, String, Color)> metrics,
+    double tileWidth,
+  ) =>
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 19, color: const Color(0xFF2E7D32)),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final metric in metrics)
+                _MetricTile(
+                  width: tileWidth,
+                  icon: metric.$1,
+                  label: metric.$2,
+                  value: metric.$3,
+                  color: metric.$4,
+                ),
+            ],
+          ),
+        ],
+      );
+
   @override
   Widget build(BuildContext context) {
     final summary = _summary;
@@ -330,6 +379,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     final balanceAdded = _journalMonth?.deposits ?? 0;
     final sasDeductions = _journalMonth?.deductions ?? 0;
     final debtSummary = _monthlyDebtSummary;
+    final currentOutstandingDebt = _currentOutstandingDebt;
     final profit = summary.profit;
     final latestSasBalance = _journalMonth?.latestBalance;
     return Directionality(
@@ -393,115 +443,127 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                 final spacing = 12.0;
                 final width =
                     (constraints.maxWidth - spacing * (columns - 1)) / columns;
-                return Wrap(
-                  spacing: spacing,
-                  runSpacing: spacing,
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.add_card_rounded,
-                      label: 'إجمالي إيداعات SAS',
-                      value: _loadingJournalMonth
-                          ? '...'
-                          : _money(balanceAdded),
-                      color: const Color(0xFF1B7F5C),
+                    _metricSection(
+                      'حركة رصيد SAS',
+                      Icons.cloud_outlined,
+                      [
+                        (
+                          Icons.add_card_rounded,
+                          'إيداعات الشهر',
+                          _loadingJournalMonth ? '...' : _money(balanceAdded),
+                          const Color(0xFF1B7F5C),
+                        ),
+                        (
+                          Icons.account_balance_wallet_outlined,
+                          'الاستقطاعات الفعلية',
+                          _loadingJournalMonth ? '...' : _money(sasDeductions),
+                          const Color(0xFFC04A35),
+                        ),
+                        (
+                          Icons.calculate_outlined,
+                          'الرصيد بعد آخر حركة',
+                          _loadingJournalMonth
+                              ? '...'
+                              : latestSasBalance == null
+                              ? 'غير متاح'
+                              : _money(latestSasBalance),
+                          const Color(0xFF4E5D78),
+                        ),
+                      ],
+                      width,
                     ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.account_balance_wallet_outlined,
-                      label: 'إجمالي المبالغ المستقطعة فعلياً من SAS',
-                      value: _loadingJournalMonth
-                          ? '...'
-                          : _money(sasDeductions),
-                      color: const Color(0xFFC04A35),
+                    const SizedBox(height: 20),
+                    _metricSection(
+                      'المبيعات والتحصيل من المشتركين',
+                      Icons.point_of_sale_outlined,
+                      [
+                        (
+                          Icons.receipt_long_rounded,
+                          'المبيعات المسجلة',
+                          _money(summary.subscriberSales),
+                          const Color(0xFF2468A2),
+                        ),
+                        (
+                          Icons.trending_up_rounded,
+                          'الربح المسجل',
+                          _loadingJournalMonth ? '...' : _money(profit),
+                          const Color(0xFF8B6914),
+                        ),
+                        (
+                          Icons.task_alt_rounded,
+                          'عمليات التفعيل',
+                          '${summary.activationCount}',
+                          const Color(0xFF75538F),
+                        ),
+                        (
+                          Icons.payments_outlined,
+                          'الدفعات الموجبة المسجلة',
+                          _money(summary.grossCollections),
+                          const Color(0xFF2E7D32),
+                        ),
+                        (
+                          Icons.undo_rounded,
+                          'تصحيحات تخفيض الواصل',
+                          _money(summary.paymentCorrections),
+                          const Color(0xFFC04A35),
+                        ),
+                        (
+                          Icons.account_balance_outlined,
+                          'صافي حركة الدفعات',
+                          _money(summary.netCollections),
+                          const Color(0xFF2468A2),
+                        ),
+                        (
+                          Icons.receipt_long_outlined,
+                          'الفواتير المسجلة',
+                          _money(_monthlyInvoiceTotal),
+                          const Color(0xFF75538F),
+                        ),
+                        (
+                          Icons.compare_arrows_rounded,
+                          'فرق الفواتير عن صافي الدفعات',
+                          _money(_invoiceReconciliationDifference),
+                          const Color(0xFFC04A35),
+                        ),
+                      ],
+                      width,
                     ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.receipt_long_outlined,
-                      label: 'إجمالي المبيعات من المشتركين',
-                      value: _money(summary.subscriberSales),
-                      color: const Color(0xFF2468A2),
+                    const SizedBox(height: 20),
+                    _metricSection(
+                      'حركة الديون',
+                      Icons.account_balance_outlined,
+                      [
+                        (
+                          Icons.add_card_outlined,
+                          'المطالبات المضافة خلال الشهر',
+                          _money(debtSummary.debtAddedTotal),
+                          const Color(0xFF8B6914),
+                        ),
+                        (
+                          Icons.account_balance_wallet_outlined,
+                          'الواصل من التسديد',
+                          _money(debtSummary.debtPaymentsCollected),
+                          const Color(0xFFF57C00),
+                        ),
+                      ],
+                      width,
                     ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.trending_up_rounded,
-                      label: 'إجمالي الربح',
-                      value: _loadingJournalMonth ? '...' : _money(profit),
-                      color: const Color(0xFF8B6914),
-                    ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.calculate_outlined,
-                      label: 'الرصيد بعد آخر حركة في SAS',
-                      value: _loadingJournalMonth
-                          ? '...'
-                          : latestSasBalance == null
-                          ? 'غير متاح'
-                          : _money(latestSasBalance),
-                      color: const Color(0xFF4E5D78),
-                    ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.task_alt_rounded,
-                      label: 'عدد عمليات التفعيل',
-                      value: '${summary.activationCount}',
-                      color: const Color(0xFF75538F),
-                    ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.payments_outlined,
-                      label: 'الدفعات المستلمة',
-                      value: _money(summary.grossCollections),
-                      color: const Color(0xFF2E7D32),
-                    ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.undo_rounded,
-                      label: 'تصحيحات تخفيض الواصل',
-                      value: _money(summary.paymentCorrections),
-                      color: const Color(0xFFC04A35),
-                    ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.account_balance_outlined,
-                      label: 'صافي حركة الدفعات',
-                      value: _money(summary.netCollections),
-                      color: const Color(0xFF2468A2),
-                    ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.receipt_long_outlined,
-                      label: 'إجمالي الفواتير',
-                      value: _money(_monthlyInvoiceTotal),
-                      color: const Color(0xFF75538F),
-                    ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.add_card_outlined,
-                      label: 'إجمالي الدين المضاف',
-                      value: _money(debtSummary.debtAddedTotal),
-                      color: const Color(0xFF8B6914),
-                    ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.account_balance_wallet_outlined,
-                      label: 'المحصل من الديون',
-                      value: _money(debtSummary.debtPaymentsCollected),
-                      color: const Color(0xFFF57C00),
-                    ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.compare_arrows_rounded,
-                      label: 'صافي حركة الدين',
-                      value: _money(debtSummary.netDebtMovement),
-                      color: const Color(0xFF2E7D32),
-                    ),
-                    _MetricTile(
-                      width: width,
-                      icon: Icons.compare_arrows_rounded,
-                      label: 'فرق الفواتير عن صافي الدفعات',
-                      value: _money(_invoiceReconciliationDifference),
-                      color: const Color(0xFFC04A35),
+                    const SizedBox(height: 20),
+                    _metricSection(
+                      'الرصيد الحالي (يشمل الديون السابقة)',
+                      Icons.account_balance_outlined,
+                      [
+                        (
+                          Icons.pending_actions_outlined,
+                          'المتبقي الحالي على المشتركين',
+                          _money(currentOutstandingDebt),
+                          const Color(0xFFC04A35),
+                        ),
+                      ],
+                      width,
                     ),
                   ],
                 );

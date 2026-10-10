@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -7,6 +8,24 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'services/user_role_service.dart';
 import 'dart:async';
+
+final RegExp _subscriberUuidPattern = RegExp(
+  r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+);
+
+String _normalizeSubscriberId(String? value) {
+  final normalized = value?.trim() ?? '';
+  if (_subscriberUuidPattern.hasMatch(normalized)) return normalized;
+
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  final hex = bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+      '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+      '${hex.substring(20)}';
+}
 
 class PaymentRecord {
   PaymentRecord({required this.amount, required this.at, this.note = ''});
@@ -106,6 +125,15 @@ class DailyTaskEvent {
   String note;
 
   static const debtEntryCollectionType = 'debt_entry_collection';
+  static const debtEditType = 'debt_edit';
+  static const subscriberCreatedType = 'subscriber_created';
+  static const subscriberUpdatedType = 'subscriber_updated';
+  static const subscriberDeletedType = 'subscriber_deleted';
+  static const subscriberPackageChangedType = 'subscriber_package_changed';
+  static const subscriberDisabledType = 'subscriber_disabled';
+  static const subscriberEnabledType = 'subscriber_enabled';
+  static const subscriberExtendedType = 'subscriber_extended';
+  static const activationRequestedType = 'activation_requested';
 
   Map<String, dynamic> toJson() => {
     'type': type,
@@ -428,6 +456,7 @@ class DebtAdjustmentResult {
 
 class Subscriber {
   Subscriber({
+    String? subscriberId,
     required this.user,
     required this.name,
     required this.phone,
@@ -449,10 +478,12 @@ class Subscriber {
     Map<String, dynamic>? sasData,
     List<PaymentRecord>? payments,
     List<InvoiceRecord>? invoices,
-  }) : payments = payments ?? <PaymentRecord>[],
+    }) : subscriberId = _normalizeSubscriberId(subscriberId),
+      payments = payments ?? <PaymentRecord>[],
        invoices = invoices ?? <InvoiceRecord>[],
        sasData = sasData ?? <String, dynamic>{};
 
+    final String subscriberId;
   String user;
   String name;
   String phone;
@@ -803,6 +834,7 @@ class Subscriber {
   static bool detectOnline(dynamic node) => _detectOnline(node);
 
   Map<String, dynamic> toJson() => {
+    'subscriberId': subscriberId,
     'user': user,
     'name': name,
     'phone': phone,
@@ -837,6 +869,7 @@ class Subscriber {
     );
 
     final subscriber = Subscriber(
+      subscriberId: (j['subscriberId'] ?? '').toString(),
       user: j['user'] ?? '',
       name: j['name'] ?? '',
       phone: j['phone'] ?? '',
@@ -1426,8 +1459,24 @@ class AppStore {
           ].where((e) => e.isNotEmpty).join(' ').trim();
           await p.setString('agentName', agentName);
         }
-        if (profile['email'] != null) {
-          agentEmail = profile['email'].toString().trim();
+        final authenticatedEmail =
+            FirebaseAuth.instance.currentUser?.email?.trim() ?? '';
+        final storedProfileEmail = (profile['email'] ?? '').toString().trim();
+        if (authenticatedEmail.isNotEmpty) {
+          agentEmail = authenticatedEmail;
+          await p.setString('agentEmail', agentEmail);
+          if (storedProfileEmail != authenticatedEmail) {
+            try {
+              await snapshot.ref.child('profile').update({
+                'email': authenticatedEmail,
+                'updatedAt': ServerValue.timestamp,
+              });
+            } catch (e) {
+              debugPrint('Could not sync authenticated profile email: $e');
+            }
+          }
+        } else if (storedProfileEmail.isNotEmpty) {
+          agentEmail = storedProfileEmail;
           await p.setString('agentEmail', agentEmail);
         }
         if (profile['agentKey'] != null) {
@@ -1443,7 +1492,9 @@ class AppStore {
         refreshSubscriptionStatus();
       }
 
+      var acceptedRemoteSubscribers = false;
       if (remoteRevision > localRevisionBeforePull || allowRemoteBootstrap) {
+        acceptedRemoteSubscribers = true;
         final rawJson = jsonEncode(agentData['subscribers'] ?? <dynamic>[]);
         await p.setString('subscribers', rawJson);
         if (remoteRevision > 0) {
@@ -1455,7 +1506,10 @@ class AppStore {
           'Skip stale Firebase subscribers snapshot. remoteRevision=$remoteRevision, localRevision=$subscribersRevision',
         );
       }
-      await _loadSubscribers(p);
+      await _loadSubscribers(
+        p,
+        persistMissingIdsToFirebase: acceptedRemoteSubscribers,
+      );
       if (remoteRevision > localRevisionBeforePull || allowRemoteBootstrap) {
         applyDebtsPayload(agentData['debts']);
         await p.setString(
@@ -1476,10 +1530,19 @@ class AppStore {
     }
   }
 
-  static Future<void> _loadSubscribers(SharedPreferences p, {List<dynamic>? preDecoded}) async {
+  static Future<void> _loadSubscribers(
+    SharedPreferences p, {
+    List<dynamic>? preDecoded,
+    bool persistMissingIdsToFirebase = false,
+  }) async {
+    final primaryRaw = p.getString('subscribers');
+    final storageKey = preDecoded != null ||
+            (primaryRaw != null && primaryRaw.isNotEmpty)
+        ? 'subscribers'
+        : 'subscribers_backup';
     final raw = preDecoded != null
         ? jsonEncode(preDecoded)
-        : (p.getString('subscribers') ?? p.getString('subscribers_backup'));
+        : (primaryRaw ?? p.getString('subscribers_backup'));
     subscribers.clear();
     if (raw != null && raw.isNotEmpty) {
       try {
@@ -1504,6 +1567,12 @@ class AppStore {
         subscribers
           ..clear()
           ..addAll(temp);
+        await _persistMissingSubscriberIds(
+          p,
+          decoded,
+          storageKey,
+          persistToFirebase: persistMissingIdsToFirebase,
+        );
       } catch (_) {
         final backup = p.getString('subscribers_backup');
         if (backup != null && backup.isNotEmpty && backup != raw) {
@@ -1515,10 +1584,69 @@ class AppStore {
                 (e) => Subscriber.fromJson(Map<String, dynamic>.from(e)),
               ),
             );
+            await _persistMissingSubscriberIds(
+              p,
+              decoded,
+              'subscribers_backup',
+              persistToFirebase: persistMissingIdsToFirebase,
+            );
           } catch (_) {
             subscribers.clear();
           }
         }
+      }
+    }
+  }
+
+  static Future<void> _persistMissingSubscriberIds(
+    SharedPreferences preferences,
+    dynamic decoded,
+    String storageKey, {
+    required bool persistToFirebase,
+  }) async {
+    var subscriberIndex = 0;
+    var changed = false;
+    final firebaseUpdates = <String, dynamic>{};
+
+    void assignId(dynamic record, String databasePath) {
+      if (record is! Map || subscriberIndex >= subscribers.length) return;
+      final subscriber = subscribers[subscriberIndex++];
+      final currentId = (record['subscriberId'] ?? '').toString();
+      if (_subscriberUuidPattern.hasMatch(currentId)) return;
+      record['subscriberId'] = subscriber.subscriberId;
+      firebaseUpdates['$databasePath/subscriberId'] = subscriber.subscriberId;
+      changed = true;
+    }
+
+    void assignCollection(dynamic collection, String databasePath) {
+      if (collection is List) {
+        for (var index = 0; index < collection.length; index++) {
+          assignId(collection[index], '$databasePath/$index');
+        }
+      } else if (collection is Map) {
+        for (final entry in collection.entries) {
+          assignId(entry.value, '$databasePath/${entry.key}');
+        }
+      }
+    }
+
+    if (decoded is List) {
+      assignCollection(decoded, 'subscribers');
+    } else if (decoded is Map && decoded['subscribers'] is List) {
+      assignCollection(decoded['subscribers'], 'subscribers');
+    } else if (decoded is Map) {
+      assignCollection(decoded, 'subscribers');
+    }
+
+    if (!changed) return;
+    await preferences.setString(storageKey, jsonEncode(decoded));
+    if (persistToFirebase && _isLoggedIn && firebaseUpdates.isNotEmpty) {
+      try {
+        await _agentRef.update(firebaseUpdates).timeout(
+          const Duration(seconds: 10),
+        );
+      } catch (e) {
+        debugPrint('Subscriber id Firebase update failed: $e');
       }
     }
   }
@@ -2184,6 +2312,73 @@ class AppStore {
         .timeout(const Duration(seconds: 10));
   }
 
+  static Future<bool> saveAgentProfile({
+    required String name,
+    required String email,
+    required String phone,
+    String currentPassword = '',
+    String newPassword = '',
+  }) async {
+    final normalizedName = name.trim();
+    final normalizedEmail = email.trim();
+    final normalizedPhone = phone.trim();
+    final user = FirebaseAuth.instance.currentUser;
+    final previousEmail = (user?.email ?? agentEmail).trim();
+    final emailChanged =
+        normalizedEmail.toLowerCase() != previousEmail.toLowerCase();
+    final passwordChanged = newPassword.isNotEmpty;
+    var emailVerificationSent = false;
+
+    if (user != null && (emailChanged || passwordChanged)) {
+      if (currentPassword.isEmpty) {
+        throw StateError('أدخل كلمة المرور الحالية لتأكيد التغيير.');
+      }
+      if (!user.providerData.any((provider) => provider.providerId == 'password')) {
+        throw StateError('تغيير البريد أو كلمة المرور غير متاح لهذا النوع من الحسابات.');
+      }
+
+      final credential = EmailAuthProvider.credential(
+        email: previousEmail,
+        password: currentPassword,
+      );
+      await user.reauthenticateWithCredential(credential);
+      if (emailChanged) {
+        await user.verifyBeforeUpdateEmail(normalizedEmail);
+        emailVerificationSent = true;
+      }
+      if (passwordChanged) await user.updatePassword(newPassword);
+    } else if (user == null && passwordChanged) {
+      throw StateError('يجب تسجيل الدخول لتغيير كلمة المرور.');
+    }
+
+    if (user != null) {
+      await _agentRef.child('profile').update({
+        'name': normalizedName,
+        'email': user.email ?? normalizedEmail,
+        'phone': normalizedPhone,
+        'updatedAt': ServerValue.timestamp,
+      });
+    }
+
+    agentName = normalizedName;
+    agentEmail = user?.email ?? normalizedEmail;
+    officePhone = normalizedPhone;
+
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString('agentName', agentName);
+    await preferences.setString('agentEmail', agentEmail);
+    await preferences.setString('officePhone', officePhone);
+    if (emailChanged && !emailVerificationSent) {
+      await preferences.setString('savedLoginEmail', agentEmail);
+      await preferences.setString('lastSignedInEmail', agentEmail);
+    }
+    if (passwordChanged) {
+      await preferences.remove('savedLoginPassword');
+      await preferences.setBool('rememberMe', false);
+    }
+    return emailVerificationSent;
+  }
+
   static Future<void> save({Subscriber? changedDebtSubscriber}) async {
     lastSaveSyncError = null;
     if (!_isLoggedIn) {
@@ -2455,7 +2650,11 @@ class AppStore {
               subscribersRevision = remoteRevision;
               await p.setInt(subscribersRevisionKey, subscribersRevision);
             }
-            await _loadSubscribers(p, preDecoded: subscribersData);
+            await _loadSubscribers(
+              p,
+              preDecoded: subscribersData,
+              persistMissingIdsToFirebase: true,
+            );
             applyDebtsPayload(agentData['debts']);
             await p.setString(
               'subscribers',

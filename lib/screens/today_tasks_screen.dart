@@ -88,6 +88,14 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
                     children: [
                       _reportHeader(summary),
                       const SizedBox(height: 16),
+                      const Text(
+                        'ملخص اليوم',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
                       _summaryGrid(summary),
                       const SizedBox(height: 24),
                       _activityHeader(events.length),
@@ -215,18 +223,6 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
         _money(summary.debtPaymentsCollected),
         Icons.account_balance_wallet_outlined,
         Colors.orange,
-      ),
-      (
-        'المجموع الواصل اليوم',
-        _money(summary.totalCollected),
-        Icons.calculate_outlined,
-        Colors.deepPurple,
-      ),
-      (
-        'دين اليوم',
-        _money(summary.netDebtMovement),
-        Icons.compare_arrows_rounded,
-        Colors.red,
       ),
     ];
     return LayoutBuilder(
@@ -383,7 +379,7 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
           ? 'واصل الاشتراك'
           : 'تسديد دين'
         : 'إضافة دين';
-    final amountLabel = isPayment || isActivation ? 'الواصل' : 'المضاف';
+    final amountLabel = isActivation ? null : isPayment ? 'الواصل' : 'المضاف';
     final amount = event.amount;
 
     return Padding(
@@ -439,14 +435,14 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '$amountLabel: ${_money(amount)}',
-                style: TextStyle(color: color, fontWeight: FontWeight.w800),
-              ),
-              if (!isActivation)
+          if (amountLabel != null)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '$amountLabel: ${_money(amount)}',
+                  style: TextStyle(color: color, fontWeight: FontWeight.w800),
+                ),
                 Text(
                   'المتبقي: ${_money(event.remainingAfter)}',
                   style: const TextStyle(
@@ -454,8 +450,8 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
                     color: Color(0xFF64748B),
                   ),
                 ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
     );

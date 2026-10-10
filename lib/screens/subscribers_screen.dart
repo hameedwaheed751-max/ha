@@ -7,6 +7,7 @@ import '../sas_api_service.dart';
 import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
 import '../services/render_whatsapp_service.dart';
+import '../services/subscriber_financial_ledger.dart';
 import 'add_subscriber_screen.dart';
 import 'receipt_screen.dart';
 import 'subscriber_details_screen.dart';
@@ -321,6 +322,30 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     return n;
   }
 
+  Future<double?> _confirmActivation(Subscriber subscriber) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('تأكيد تفعيل المشترك'),
+          content: Text('هل تريد تفعيل اشتراك ${subscriber.name}؟'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('تفعيل'),
+            ),
+          ],
+        ),
+      ),
+    );
+    return confirmed == true ? 0.0 : null;
+  }
+
   double? _parseAmount(String raw) {
     final normalized = raw
         .trim()
@@ -340,6 +365,28 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         .replaceAll('٬', '');
     if (normalized.isEmpty) return null;
     return double.tryParse(normalized);
+  }
+
+  Future<void> _recordLedgerTransaction({
+    required Subscriber subscriber,
+    required FinancialTransactionType type,
+    required double amount,
+    required DateTime date,
+    required String referenceId,
+    required String note,
+  }) async {
+    try {
+      await SubscriberFinancialLedger().addTransaction(
+        subscriberId: subscriber.subscriberId,
+        date: date,
+        type: type,
+        amount: amount,
+        referenceId: referenceId,
+        note: note,
+      );
+    } catch (error) {
+      debugPrint('Financial ledger write failed: $error');
+    }
   }
 
   double _toNum(dynamic value) {
@@ -601,6 +648,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         },
       );
 
+      await _recordSubscriberActivity(
+        s,
+        DailyTaskEvent.activationRequestedType,
+        'تم إنشاء طلب تفعيل FTTH',
+      );
+
       final paymentUrl = ((result['paymentUrl'] ?? result['payment_url']) ?? '')
           .toString()
           .trim();
@@ -675,6 +728,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
 
     final hadActivationHistory = AppStore.hasRecordedActivation(s);
+    final confirmedSaleAmount = await _confirmActivation(s);
+    if (confirmedSaleAmount == null) return;
     try {
       final settings = await SasSettings.load();
       if (settings.username.trim().isEmpty || settings.password.isEmpty) {
@@ -755,7 +810,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           subscriberUser: s.user,
           subscriberName: s.name,
           packageName: s.packageDisplay,
-          saleAmount: s.price,
+          saleAmount: confirmedSaleAmount,
           sasDeduction: activationAmount,
           at: recordedAt,
         ),
@@ -923,17 +978,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   ),
                 ),
                 const Divider(),
-                _op(Icons.check_circle, Colors.green, 'تفعيل', () {
-                  if (s.source == 'ftth') {
-                    _activateFtthSubscriber(s, modalContext: ctx);
-                  } else {
-                    _activateSubscriber(s, modalContext: ctx);
-                  }
-                }),
-                _op(Icons.edit, Colors.blue, 'تعديل الديون والحسابات', () {
-                  Navigator.pop(ctx);
-                  _debt(s);
-                }),
                 _op(
                   Icons.badge_outlined,
                   Colors.indigo,
@@ -949,9 +993,18 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     if (changed == true && mounted) setState(() {});
                   },
                 ),
-                _op(Icons.person_add, Colors.teal, 'إضافة', () {
+                _op(Icons.person_add, Colors.teal, 'إضافة مشترك جديد', () {
                   Navigator.pop(ctx);
                   add();
+                }),
+                _op(Icons.check_circle, Colors.green, 'تفعيل', () async {
+                  if (s.source == 'ftth') {
+                    final confirmed = await _confirmFtthActivation(s);
+                    if (!confirmed || !ctx.mounted) return;
+                    _activateFtthSubscriber(s, modalContext: ctx);
+                  } else {
+                    _activateSubscriber(s, modalContext: ctx);
+                  }
                 }),
                 _op(Icons.calendar_month, Colors.orange, 'تمديد', () {
                   Navigator.pop(ctx);
@@ -1003,6 +1056,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     s.disabled = true;
                     s.active = false;
                     await AppStore.save();
+                    await _recordSubscriberActivity(
+                      s,
+                      DailyTaskEvent.subscriberDisabledType,
+                      'تم تعطيل المشترك في SAS',
+                    );
 
                     if (ctx.mounted) Navigator.pop(ctx);
                     if (mounted) {
@@ -1083,6 +1141,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     s.disabled = false;
                     s.active = true;
                     await AppStore.save();
+                    await _recordSubscriberActivity(
+                      s,
+                      DailyTaskEvent.subscriberEnabledType,
+                      'تم إلغاء تعطيل المشترك في SAS',
+                    );
 
                     if (ctx.mounted) Navigator.pop(ctx);
                     if (mounted) {
@@ -1123,9 +1186,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     }
                   }
                 }),
-                _op(Icons.account_balance_wallet, Colors.brown, 'الديون', () {
+                _op(Icons.account_balance_wallet, Colors.brown, 'الديون', () async {
                   Navigator.pop(ctx);
-                  _debt(s);
+                  await _debt(s);
                 }),
                 _op(Icons.phone, Colors.blue, 'اتصال مباشر', () {
                   Navigator.pop(ctx);
@@ -1162,6 +1225,51 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     title: Text(t),
     onTap: f,
   );
+
+  Future<void> _recordSubscriberActivity(
+    Subscriber subscriber,
+    String type,
+    String note,
+  ) async {
+    try {
+      await AppStore.addDailyTaskEvent(
+        DailyTaskEvent(
+          type: type,
+          subscriberUser: subscriber.user,
+          subscriberName: subscriber.name,
+          at: DateTime.now(),
+          remainingAfter: subscriber.remaining,
+          note: note,
+        ),
+      );
+    } catch (error) {
+      debugPrint('Could not save subscriber activity: $error');
+    }
+  }
+
+  Future<bool> _confirmFtthActivation(Subscriber subscriber) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => Directionality(
+            textDirection: TextDirection.rtl,
+            child: AlertDialog(
+              title: const Text('تأكيد التفعيل'),
+              content: Text('هل تريد تفعيل اشتراك ${subscriber.name}؟'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('إلغاء'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('تفعيل'),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
+  }
 
   String _newGuid() {
     final r = Random.secure();
@@ -1392,6 +1500,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                   onTimeout: () =>
                                       throw Exception('انتهت مهلة طلب التمديد'),
                                 );
+                            await _recordSubscriberActivity(
+                              s,
+                              DailyTaskEvent.subscriberExtendedType,
+                              'تم تمديد الاشتراك إلى ${nameOf(profiles.firstWhere((profile) => idOf(profile) == selectedProfileId, orElse: () => <String, dynamic>{}))} باستخدام ${selectedMethod == 'credit' ? 'رصيد المدير' : 'النقاط التشجيعية'}',
+                            );
                             if (ctx.mounted) Navigator.pop(ctx);
 
                             // v091: لا ننتظر مزامنة جميع المشتركين بعد التمديد.
@@ -1576,8 +1689,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         }
       } catch (_) {}
 
+      final previousPackage = s.packageDisplay;
       s.setPackageValue(profileName);
       await AppStore.save();
+      if (previousPackage != s.packageDisplay) {
+        await _recordSubscriberActivity(
+          s,
+          DailyTaskEvent.subscriberPackageChangedType,
+          'تم تغيير الباقة من $previousPackage إلى ${s.packageDisplay}',
+        );
+      }
       if (mounted) Navigator.pop(context);
       if (!mounted) return;
       setState(() {});
@@ -1652,7 +1773,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               subscriberUser: s.user,
               subscriberName: s.name,
               packageName: s.packageDisplay,
-              saleAmount: s.price,
+              saleAmount: 0,
               sasDeduction: activationAmount,
               at: recordedAt,
             ),
@@ -1699,10 +1820,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
   }
 
-  void _debt(Subscriber s, {bool autoOpenReceiptAfterSave = false}) {
+  Future<void> _debt(Subscriber s, {bool autoOpenReceiptAfterSave = false}) async {
     final price = TextEditingController(text: s.price.toStringAsFixed(0));
     final paid = TextEditingController(text: s.paid.toStringAsFixed(0));
-    showDialog(
+    await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => Directionality(
@@ -1780,6 +1901,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               ),
               FilledButton(
                 onPressed: () async {
+                  final oldPrice = s.price;
                   final oldPaid = s.paid;
                   final oldRemaining = s.remaining;
                   final newPrice = _parseAmount(price.text.trim());
@@ -1871,7 +1993,65 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
                   if (delta > 0.0001) s.paymentDate = fmt(now);
                   if (s.paid <= 0) s.paymentDate = '';
+                  if ((oldPrice - s.price).abs() > 0.0001 ||
+                      (oldPaid - s.paid).abs() > 0.0001 ||
+                      (oldRemaining - s.remaining).abs() > 0.0001) {
+                    final operationDate = fmt(now);
+                    final editDetails = <String>[];
+                    if (addedDebt > 0.0001) {
+                      editDetails.add(
+                        'بتاريخ $operationDate تم إضافة مبلغ دين ${addedDebt.toStringAsFixed(0)} د.ع',
+                      );
+                    }
+                    if (delta > 0.0001) {
+                      editDetails.add(
+                        'بتاريخ $operationDate تم تسديد مبلغ ${delta.toStringAsFixed(0)} د.ع',
+                      );
+                    } else if (delta < -0.0001) {
+                      editDetails.add(
+                        'بتاريخ $operationDate تم تخفيض الواصل بمبلغ ${delta.abs().toStringAsFixed(0)} د.ع',
+                      );
+                    }
+                    if (editDetails.isEmpty) {
+                      editDetails.add(
+                        'بتاريخ $operationDate تم تعديل مبلغ الاشتراك إلى ${s.price.toStringAsFixed(0)} د.ع',
+                      );
+                    }
+                    await AppStore.addDailyTaskEvent(
+                      DailyTaskEvent(
+                        type: DailyTaskEvent.debtEditType,
+                        subscriberUser: s.user,
+                        subscriberName: s.name,
+                        at: now,
+                        amount: s.remaining - oldRemaining,
+                        remainingAfter: s.remaining,
+                        note: editDetails.join(' | '),
+                      ),
+                      persist: false,
+                    );
+                  }
                   await AppStore.save();
+                  if (delta > 0.0001) {
+                    await _recordLedgerTransaction(
+                      subscriber: s,
+                      type: FinancialTransactionType.payment,
+                      amount: delta,
+                      date: now,
+                      referenceId: 'payment-receipt:${invoice!.receiptNumber}',
+                      note: invoice.note,
+                    );
+                  }
+                  if (addedDebt > 0.0001) {
+                    await _recordLedgerTransaction(
+                      subscriber: s,
+                      type: FinancialTransactionType.debt,
+                      amount: addedDebt,
+                      date: now,
+                      referenceId:
+                          'debt-edit:${s.subscriberId}:${now.toUtc().toIso8601String()}',
+                      note: 'إضافة مبلغ من شاشة ديون المشترك',
+                    );
+                  }
 
                   if (ctx.mounted) Navigator.pop(ctx);
 
@@ -1984,6 +2164,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               onPressed: () async {
                 try {
                   await AppStore.deleteSubscriber(s);
+                  await _recordSubscriberActivity(
+                    s,
+                    DailyTaskEvent.subscriberDeletedType,
+                    'تم حذف المشترك',
+                  );
                   selected = null;
                   if (ctx.mounted) Navigator.pop(ctx);
                   if (mounted) setState(() {});
@@ -2276,7 +2461,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         await Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => SubscriberDetailsScreen(subscriber: s),
+            builder: (_) => SubscriberDetailsScreen(
+              subscriber: s,
+              onEditDebt: (subscriber) => _debt(subscriber),
+              onAddDebtAmount: (subscriber) => _debt(subscriber),
+              onPartialDebtPayment: (subscriber) => _debt(subscriber),
+            ),
           ),
         );
         if (mounted) setState(() {});
@@ -2343,6 +2533,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               s.disabled = true;
               s.active = false;
               await AppStore.save();
+              await _recordSubscriberActivity(
+                s,
+                DailyTaskEvent.subscriberDisabledType,
+                'تم تعطيل المشترك في SAS',
+              );
               if (mounted) setState(() {});
             } catch (e) {
               if (context.mounted) {
@@ -2388,6 +2583,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               s.disabled = false;
               s.active = true;
               await AppStore.save();
+              await _recordSubscriberActivity(
+                s,
+                DailyTaskEvent.subscriberEnabledType,
+                'تم إلغاء تعطيل المشترك في SAS',
+              );
               if (mounted) setState(() {});
             } catch (e) {
               if (context.mounted) {
@@ -2398,7 +2598,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             }
             break;
           case 'debts':
-            _debt(s);
+            await _debt(s);
             break;
           case 'notifications':
             messageTemplates(s);
@@ -2416,7 +2616,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             await Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => SubscriberDetailsScreen(subscriber: s),
+                builder: (_) => SubscriberDetailsScreen(
+                  subscriber: s,
+                  onEditDebt: (subscriber) => _debt(subscriber),
+                  onAddDebtAmount: (subscriber) => _debt(subscriber),
+                  onPartialDebtPayment: (subscriber) => _debt(subscriber),
+                ),
               ),
             );
             if (mounted) setState(() {});
@@ -3044,6 +3249,22 @@ class _SubscribersDataSource extends DataTableSource {
     return online ? Colors.blue : Colors.green;
   }
 
+  String _statusLabel(Subscriber s) {
+    if (s.disabled) return 'معطل';
+    if (s.expired) return 'منتهي';
+    if (s.isOnline) return 'متصل';
+    if (s.isActive) return 'فعال';
+    return 'غير فعال';
+  }
+
+  IconData _statusIcon(Subscriber s) {
+    if (s.disabled) return Icons.pause_circle_outline_rounded;
+    if (s.expired) return Icons.event_busy_outlined;
+    if (s.isOnline) return Icons.wifi_rounded;
+    if (s.isActive) return Icons.check_circle_outline_rounded;
+    return Icons.radio_button_unchecked_rounded;
+  }
+
   @override
   DataRow? getRow(int index) {
     if (index >= data.length) return null;
@@ -3051,6 +3272,7 @@ class _SubscribersDataSource extends DataTableSource {
     // One-time debug: dump sasData for a specific subscriber to inspect online fields
     final selected = identical(selectedSubscriber, s);
     final remainingDays = DateTime.now().difference(s.endDate).inDays * -1;
+    final statusColor = _statusColor(s);
     final cells = [
       DataCell(
         ConstrainedBox(
@@ -3060,19 +3282,31 @@ class _SubscribersDataSource extends DataTableSource {
       ),
       DataCell(
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 64),
+          constraints: const BoxConstraints(maxWidth: 110),
           child: Center(
             child: Container(
-              width: 12,
-              height: 12,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
               decoration: BoxDecoration(
-                color: _statusColor(s),
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: _statusColor(s).withValues(alpha: 0.5),
-                    blurRadius: 4,
-                    spreadRadius: 0,
+                color: statusColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: statusColor.withValues(alpha: 0.35)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(_statusIcon(s), size: 14, color: statusColor),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      _statusLabel(s),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: statusColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -3239,7 +3473,7 @@ class _SubscribersDataSource extends DataTableSource {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    remainingDays < 0 ? 'منتهي' : '$remainingDays يوم',
+                    '${remainingDays < 0 ? 0 : remainingDays}',
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       color: remainingDays < 0

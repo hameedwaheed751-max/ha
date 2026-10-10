@@ -670,11 +670,31 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                           : paymentDate.text.trim();
                     }
                     AppStore.subscribers.add(subscriber);
+                    await AppStore.addDailyTaskEvent(
+                      DailyTaskEvent(
+                        type: DailyTaskEvent.subscriberCreatedType,
+                        subscriberUser: subscriber.user,
+                        subscriberName: subscriber.name,
+                        at: DateTime.now(),
+                        note: 'تم إنشاء ملف المشترك',
+                      ),
+                      persist: false,
+                    );
                   } else {
                     final s = widget.subscriber!;
+                    final oldUser = s.user;
+                    final oldName = s.name;
+                    final oldPhone = s.phone;
+                    final oldAddress = s.address;
+                    final oldIp = s.ip;
+                    final oldPackage = s.packageDisplay;
                     final oldPrice = s.price;
                     final oldPaid = s.paid;
                     final oldRemaining = s.remaining;
+                    final oldStartDate = s.startDate;
+                    final oldEndDate = s.endDate;
+                    final oldNotes = s.notes;
+                    final oldPaymentDate = s.paymentDate;
 
                     // إذا كان المشترك قادماً من SAS: نرسل PUT الحقيقي أولاً.
                     // لا نحفظ التعديل محلياً إذا رفضه الخادم.
@@ -772,6 +792,50 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                       if (s.ip.isNotEmpty) {
                         s.sasData['ip'] = s.ip;
                       }
+                    }
+
+                    final changedFields = <String>[
+                      if (oldName != s.name) 'الاسم',
+                      if (oldUser != s.user) 'اسم المستخدم',
+                      if (oldPhone != s.phone) 'رقم الهاتف',
+                      if (oldAddress != s.address) 'العنوان',
+                      if (oldIp != s.ip) 'عنوان IP',
+                      if ((oldPrice - s.price).abs() > 0.0001)
+                        'مبلغ الاشتراك',
+                      if ((oldPaid - s.paid).abs() > 0.0001) 'الواصل',
+                      if (!AppStore.isSameDay(oldStartDate, s.startDate))
+                        'تاريخ التفعيل',
+                      if (!AppStore.isSameDay(oldEndDate, s.endDate))
+                        'تاريخ الانتهاء',
+                      if (oldNotes != s.notes) 'الملاحظات',
+                      if (oldPaymentDate != s.paymentDate) 'تاريخ التسديد',
+                    ];
+                    final operationAt = DateTime.now();
+                    if (changedFields.isNotEmpty) {
+                      await AppStore.addDailyTaskEvent(
+                        DailyTaskEvent(
+                          type: DailyTaskEvent.subscriberUpdatedType,
+                          subscriberUser: s.user,
+                          subscriberName: s.name,
+                          at: operationAt,
+                          note:
+                              'تم تعديل بيانات المشترك: ${changedFields.join('، ')}',
+                        ),
+                        persist: false,
+                      );
+                    }
+                    if (oldPackage != s.packageDisplay) {
+                      await AppStore.addDailyTaskEvent(
+                        DailyTaskEvent(
+                          type: DailyTaskEvent.subscriberPackageChangedType,
+                          subscriberUser: s.user,
+                          subscriberName: s.name,
+                          at: operationAt,
+                          note:
+                              'تم تغيير الباقة من $oldPackage إلى ${s.packageDisplay}',
+                        ),
+                        persist: false,
+                      );
                     }
                   }
                   await AppStore.save();

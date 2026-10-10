@@ -2,7 +2,6 @@
 
 import 'dart:async';
 import 'dart:math';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:excel/excel.dart' as xls;
@@ -13,6 +12,7 @@ import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
 import '../services/auto_notification_service.dart';
 import '../services/render_whatsapp_service.dart';
+import '../services/subscriber_financial_ledger.dart';
 import 'subscribers_screen.dart';
 import 'settings_screen.dart';
 import 'alerts_screen.dart';
@@ -24,12 +24,14 @@ import 'sas_project_national_screen.dart';
 import 'receipt_screen.dart';
 import 'quick_reports_screen.dart';
 import 'today_tasks_screen.dart';
+import 'activity_log_screen.dart';
 import 'payment_requests_admin_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'login_screen.dart';
 import 'subscription_requests_admin_screen.dart';
 import 'chat_screen.dart';
 import 'add_subscriber_screen.dart';
+import 'dashboard_widgets.dart';
 import 'speed_test_screen.dart';
 import 'ping_screen.dart';
 import 'accounting_reports_screen.dart';
@@ -262,6 +264,620 @@ class _DashboardScreenState extends State<DashboardScreen>
       MaterialPageRoute(builder: (_) => SubscribersScreen(filter: f)),
     );
     if (mounted) setState(() {});
+  }
+
+  void _showProfileDialog() {
+    final nameController = TextEditingController(
+      text: AppStore.agentName.isNotEmpty
+          ? AppStore.agentName
+          : AppStore.officeName.isNotEmpty
+          ? AppStore.officeName
+          : '',
+    );
+    final emailController = TextEditingController(text: AppStore.agentEmail);
+    final phoneController = TextEditingController(text: AppStore.officePhone);
+    final currentPasswordController = TextEditingController();
+    final passwordController = TextEditingController();
+    final confirmPasswordController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        bool isEditing = false;
+        bool showPasswordFields = false;
+        bool isSaving = false;
+
+        return StatefulBuilder(
+          builder: (sheetContext, setSheet) {
+            final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
+
+            return Directionality(
+              textDirection: TextDirection.rtl,
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+                ),
+                child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.9,
+                ),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF111827) : Colors.white,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(28),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 24,
+                      offset: const Offset(0, -6),
+                    ),
+                  ],
+                ),
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Center(
+                            child: Container(
+                              width: 58,
+                              height: 5,
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.2)
+                                    : Colors.grey.shade300,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'الملف الشخصي',
+                                  style: TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w900,
+                                    color: isDark
+                                        ? const Color(0xFFE2E8F0)
+                                        : const Color(0xFF172033),
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                onPressed: () => Navigator.pop(sheetContext),
+                                icon: const Icon(Icons.close_rounded),
+                                tooltip: 'إغلاق',
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [
+                                  Color(0xFF2E7D32),
+                                  Color(0xFF1F5D2F),
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 56,
+                                  height: 56,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.18),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.person_pin_rounded,
+                                    color: Colors.white,
+                                    size: 30,
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        AppStore.agentName.isNotEmpty
+                                            ? AppStore.agentName
+                                            : AppStore.officeName.isNotEmpty
+                                            ? AppStore.officeName
+                                            : 'اسم المستخدم',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        AppStore.agentEmail.isNotEmpty
+                                            ? AppStore.agentEmail
+                                            : 'no-email@example.com',
+                                        style: TextStyle(
+                                          color: Colors.white.withValues(alpha: 0.9),
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _profileSectionTitle(
+                            'البيانات الشخصية',
+                            Icons.badge_outlined,
+                            isDark,
+                          ),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 220),
+                            transitionBuilder: (child, animation) => SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(0.08, 0),
+                                end: Offset.zero,
+                              ).animate(animation),
+                              child: FadeTransition(
+                                opacity: animation,
+                                child: child,
+                              ),
+                            ),
+                            child: isEditing
+                                ? _profileEditingForm(
+                                    isDark: isDark,
+                                    nameController: nameController,
+                                    emailController: emailController,
+                                    phoneController: phoneController,
+                                  )
+                                : Column(
+                                    key: const ValueKey('profile_view'),
+                                    children: [
+                                      _profileInfoTile(
+                                        icon: Icons.person_rounded,
+                                        label: 'الاسم الكامل',
+                                        value: AppStore.agentName.isNotEmpty
+                                            ? AppStore.agentName
+                                            : AppStore.officeName.isNotEmpty
+                                            ? AppStore.officeName
+                                            : 'غير محدد',
+                                        isDark: isDark,
+                                      ),
+                                      const SizedBox(height: 10),
+                                      _profileInfoTile(
+                                        icon: Icons.email_rounded,
+                                        label: 'البريد الإلكتروني',
+                                        value: AppStore.agentEmail.isNotEmpty
+                                            ? AppStore.agentEmail
+                                            : 'غير محدد',
+                                        isDark: isDark,
+                                      ),
+                                      const SizedBox(height: 10),
+                                      _profileInfoTile(
+                                        icon: Icons.phone_rounded,
+                                        label: 'رقم الهاتف',
+                                        value: AppStore.officePhone.isNotEmpty
+                                            ? AppStore.officePhone
+                                            : 'غير محدد',
+                                        isDark: isDark,
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                          const SizedBox(height: 16),
+                          _profileSectionTitle(
+                            'أمان الحساب',
+                            Icons.security_outlined,
+                            isDark,
+                          ),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 220),
+                            transitionBuilder: (child, animation) => SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(0, 0.14),
+                                end: Offset.zero,
+                              ).animate(animation),
+                              child: FadeTransition(
+                                opacity: animation,
+                                child: child,
+                              ),
+                            ),
+                            child: showPasswordFields
+                                ? Container(
+                                    key: const ValueKey('password_fields'),
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: isDark
+                                          ? const Color(0xFF1F2937)
+                                          : const Color(0xFFF8FAFC),
+                                      borderRadius: BorderRadius.circular(18),
+                                      border: Border.all(
+                                        color: isDark
+                                            ? Colors.white.withValues(alpha: 0.08)
+                                            : Colors.green.shade100,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Text(
+                                          'تغيير كلمة المرور',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w800,
+                                            color: isDark
+                                                ? const Color(0xFFE2E8F0)
+                                                : const Color(0xFF172033),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        _profileTextField(
+                                          controller: currentPasswordController,
+                                          label: 'كلمة المرور الحالية',
+                                          icon: Icons.lock_outline_rounded,
+                                          isDark: isDark,
+                                          obscureText: true,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        _profileTextField(
+                                          controller: passwordController,
+                                          label: 'كلمة المرور الجديدة',
+                                          icon: Icons.lock_outline_rounded,
+                                          isDark: isDark,
+                                          obscureText: true,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        _profileTextField(
+                                          controller: confirmPasswordController,
+                                          label: 'تأكيد كلمة المرور',
+                                          icon: Icons.lock_reset_rounded,
+                                          isDark: isDark,
+                                          obscureText: true,
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : const SizedBox.shrink(
+                                    key: ValueKey('no_password_fields'),
+                                  ),
+                          ),
+                          const SizedBox(height: 18),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    setSheet(() => showPasswordFields = !showPasswordFields);
+                                  },
+                                  icon: const Icon(Icons.lock_outline_rounded),
+                                  label: Text(
+                                    showPasswordFields
+                                        ? 'إخفاء كلمة المرور'
+                                        : 'تغيير كلمة المرور',
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: isSaving ? null : () async {
+                                    final enteredName = nameController.text.trim();
+                                    final enteredEmail = emailController.text.trim();
+                                    final enteredPhone = phoneController.text.trim();
+
+                                    if (!isEditing && !showPasswordFields) {
+                                      setSheet(() => isEditing = true);
+                                      return;
+                                    }
+
+                                    if (enteredName.isEmpty ||
+                                        enteredEmail.isEmpty ||
+                                        enteredPhone.isEmpty) {
+                                      ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'يرجى ملء الاسم والإيميل ورقم الهاتف.',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    final emailChanged = enteredEmail.toLowerCase() !=
+                                        AppStore.agentEmail.trim().toLowerCase();
+                                    final newPassword = passwordController.text;
+                                    final confirmPassword = confirmPasswordController.text;
+                                    final passwordChanged = newPassword.isNotEmpty ||
+                                        confirmPassword.isNotEmpty;
+
+                                    if ((emailChanged || passwordChanged) &&
+                                        currentPasswordController.text.isEmpty) {
+                                      setSheet(() => showPasswordFields = true);
+                                      ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'أدخل كلمة المرور الحالية لتأكيد تغيير بيانات الدخول.',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
+
+                                    if (passwordChanged) {
+                                      if (newPassword.isEmpty || confirmPassword.isEmpty) {
+                                        ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'يرجى إدخال كلمة المرور الجديدة وتأكيدها.',
+                                            ),
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      if (newPassword != confirmPassword) {
+                                        ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('كلمتا المرور غير متطابقتين.'),
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                    }
+
+                                    setSheet(() => isSaving = true);
+                                    try {
+                                      final emailVerificationSent =
+                                          await AppStore.saveAgentProfile(
+                                        name: enteredName,
+                                        email: enteredEmail,
+                                        phone: enteredPhone,
+                                        currentPassword:
+                                            currentPasswordController.text,
+                                        newPassword: newPassword,
+                                      );
+                                      if (!mounted || !sheetContext.mounted) return;
+                                      if (mounted) setState(() {});
+                                      Navigator.pop(sheetContext);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            emailVerificationSent
+                                                ? 'تم حفظ البيانات. تحقق من بريدك لتأكيد عنوان البريد الجديد.'
+                                                : 'تم حفظ بيانات الملف الشخصي بنجاح.',
+                                          ),
+                                        ),
+                                      );
+                                    } on FirebaseAuthException catch (error) {
+                                      if (!sheetContext.mounted) return;
+                                      final message = switch (error.code) {
+                                        'wrong-password' || 'invalid-credential' =>
+                                          'كلمة المرور الحالية غير صحيحة.',
+                                        'email-already-in-use' =>
+                                          'هذا البريد الإلكتروني مستخدم بالفعل.',
+                                        'invalid-email' =>
+                                          'صيغة البريد الإلكتروني غير صحيحة.',
+                                        'requires-recent-login' =>
+                                          'انتهت صلاحية التحقق. سجل الخروج ثم الدخول وحاول مجددًا.',
+                                        _ => 'تعذر حفظ البيانات: ${error.message ?? error.code}',
+                                      };
+                                      ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                        SnackBar(content: Text(message)),
+                                      );
+                                    } catch (error) {
+                                      if (!sheetContext.mounted) return;
+                                      final message = error is StateError
+                                          ? error.message.toString()
+                                          : 'تعذر حفظ البيانات. تحقق من الاتصال وحاول مجددًا.';
+                                      ScaffoldMessenger.of(sheetContext).showSnackBar(
+                                        SnackBar(content: Text(message)),
+                                      );
+                                    } finally {
+                                      if (sheetContext.mounted) {
+                                        setSheet(() => isSaving = false);
+                                      }
+                                    }
+                                  },
+                                  icon: isSaving
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(Icons.save_rounded),
+                                  label: Text(
+                                    isEditing || showPasswordFields
+                                        ? 'حفظ'
+                                        : 'تعديل الملف',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _profileInfoTile({
+    required IconData icon,
+    required String label,
+    required String value,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1F2937) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.green.shade100,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: const Color(0xFF2E7D32), size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF172033),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _profileSectionTitle(String title, IconData icon, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 19, color: const Color(0xFF2E7D32)),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+              color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF172033),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _profileTextField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    required bool isDark,
+    bool obscureText = false,
+  }) {
+    return TextField(
+      controller: controller,
+      obscureText: obscureText,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, size: 18),
+        filled: true,
+        fillColor: isDark ? const Color(0xFF111827) : Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: isDark ? Colors.white.withValues(alpha: 0.12) : Colors.grey.shade300,
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: isDark ? Colors.white.withValues(alpha: 0.12) : Colors.grey.shade300,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 1.4),
+        ),
+      ),
+    );
+  }
+
+  Widget _profileEditingForm({
+    required bool isDark,
+    required TextEditingController nameController,
+    required TextEditingController emailController,
+    required TextEditingController phoneController,
+  }) {
+    return Container(
+      key: const ValueKey('profile_edit_form'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1F2937) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.green.shade100,
+        ),
+      ),
+      child: Column(
+        children: [
+          _profileTextField(
+            controller: nameController,
+            label: 'الاسم الكامل',
+            icon: Icons.person_rounded,
+            isDark: isDark,
+          ),
+          const SizedBox(height: 12),
+          _profileTextField(
+            controller: emailController,
+            label: 'البريد الإلكتروني',
+            icon: Icons.email_rounded,
+            isDark: isDark,
+          ),
+          const SizedBox(height: 12),
+          _profileTextField(
+            controller: phoneController,
+            label: 'رقم الهاتف',
+            icon: Icons.phone_rounded,
+            isDark: isDark,
+          ),
+        ],
+      ),
+    );
   }
 
   void _coming(String title) {
@@ -622,6 +1238,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                   selected: true,
                   onTap: () => Navigator.pop(context),
                 ),
+                _drawerTile(
+                  icon: Icons.person_outline,
+                  title: 'الملف الشخصي',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showProfileDialog();
+                  },
+                ),
                 ExpansionTile(
                   leading: Icon(
                     Icons.groups,
@@ -797,7 +1421,15 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                   ),
                   children: [
-                    _subTile('سجل العمليات', () => _coming('سجل العمليات')),
+                    _subTile('سجل العمليات', () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ActivityLogScreen(),
+                        ),
+                      );
+                    }),
                   ],
                 ),
                 _drawerTile(
@@ -996,7 +1628,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     showAboutDialog(
                       context: context,
                       applicationName: 'وكيل نت',
-                      applicationVersion: '3.6.0',
+                      applicationVersion: '3.8.0',
                       applicationLegalese: 'إدارة مشتركي الإنترنت',
                     );
                   },
@@ -1146,28 +1778,44 @@ class _DashboardScreenState extends State<DashboardScreen>
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        backgroundColor: const Color(0xFFF4F9F4),
         drawer: _mainDrawer(),
         appBar: AppBar(
-          backgroundColor: Theme.of(context).colorScheme.primary,
+          backgroundColor: const Color(0xFF2E7D32),
           foregroundColor: Colors.white,
           elevation: 3,
-          shadowColor: const Color(0x260F5D2A),
+          shadowColor: const Color(0x330F5D2A),
           toolbarHeight: 88,
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(18)),
           ),
-          flexibleSpace: Stack(
-            fit: StackFit.expand,
-            children: [
-              ColoredBox(color: Theme.of(context).colorScheme.primary),
-              Image.asset(
-                _referenceAssetPath(
-                  'assets/reference/NetAgent_Glossy_Green_3D.png',
-                ),
-                fit: BoxFit.cover,
+          flexibleSpace: DecoratedBox(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0xFF2E7D32),
+                  Color(0xFF1D5E2C),
+                ],
               ),
-            ],
+            ),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Positioned.fill(
+                  child: Opacity(
+                    opacity: 0.25,
+                    child: Image.asset(
+                      _referenceAssetPath(
+                        'assets/reference/NetAgent_Glossy_Green_3D.png',
+                      ),
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           title: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1505,17 +2153,17 @@ class _DashboardScreenState extends State<DashboardScreen>
         );
 
         return ClipRRect(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(24),
           child: Container(
             constraints: BoxConstraints(minHeight: isCompact ? 188 : 164),
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border.all(color: colors.outlineVariant),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
               boxShadow: [
                 BoxShadow(
-                  color: colors.shadow.withValues(alpha: 0.08),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+                  color: const Color(0xFF1B5E20).withValues(alpha: 0.12),
+                  blurRadius: 18,
+                  offset: const Offset(0, 10),
                 ),
               ],
             ),
@@ -1662,123 +2310,25 @@ class _DashboardScreenState extends State<DashboardScreen>
     required String assetName,
     required Color color,
   }) {
-    final colors = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
-      constraints: const BoxConstraints(minHeight: 128),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.green.shade100,
-          width: 1.2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: color.withValues(alpha: isDark ? 0.12 : 0.12),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            textDirection: TextDirection.ltr,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      color.withValues(alpha: 0.22),
-                      color.withValues(alpha: 0.08),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Image.asset(
-                  _referenceAssetPath(assetName),
-                  width: 64,
-                  height: 64,
-                  fit: BoxFit.contain,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    value,
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
-                      color: color,
-                      height: 1.1,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1F2937),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
-              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
+    return DashboardMetricCard(
+      title: title,
+      subtitle: subtitle,
+      value: value,
+      assetName: assetName,
+      color: color,
     );
   }
 
   String _referenceAssetPath(String path) =>
-      kIsWeb ? Uri.encodeFull(path) : path;
+      dashboardReferenceAssetPath(path);
 
   Widget _sectionTitle(String title, IconData icon) {
-    final colors = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        Icon(icon, color: const Color(0xFF2E7D32), size: 20),
-        const SizedBox(width: 7),
-        Text(
-          title,
-          style: TextStyle(
-            color: colors.onSurface,
-            fontSize: 16,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ],
-    );
+    return DashboardSectionTitle(title: title, icon: icon);
   }
 
   Widget _quickActionsGrid() {
     final colors = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final chatUnreadCount = AppStore.unreadChatCount;
     final actions = <(String, String, Color, VoidCallback)>[
       (
@@ -1851,9 +2401,23 @@ class _DashboardScreenState extends State<DashboardScreen>
                       vertical: 12,
                     ),
                     decoration: BoxDecoration(
-                      color: colors.surface,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: colors.outlineVariant),
+                      color: isDark
+                          ? const Color(0xFF1E293B)
+                          : const Color(0xFFFFFFFF),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : Colors.green.shade100,
+                        width: 1.1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
+                          blurRadius: 14,
+                          offset: const Offset(0, 7),
+                        ),
+                      ],
                     ),
                     child: Stack(
                       clipBehavior: Clip.none,
@@ -2468,7 +3032,30 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
     return double.tryParse(normalized);
   }
 
+  Future<void> _recordLedgerTransaction({
+    required Subscriber subscriber,
+    required FinancialTransactionType type,
+    required double amount,
+    required DateTime date,
+    required String referenceId,
+    required String note,
+  }) async {
+    try {
+      await SubscriberFinancialLedger().addTransaction(
+        subscriberId: subscriber.subscriberId,
+        date: date,
+        type: type,
+        amount: amount,
+        referenceId: referenceId,
+        note: note,
+      );
+    } catch (error) {
+      debugPrint('Financial ledger write failed: $error');
+    }
+  }
+
   Future<void> _editDebt(Subscriber s) async {
+    final oldPrice = s.price;
     final oldPaid = s.paid;
     final oldRemaining = s.remaining;
     final priceC = TextEditingController(text: s.price.toStringAsFixed(0));
@@ -2725,7 +3312,65 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
         paymentDate = '';
       }
       s.paymentDate = paymentDate;
+      if ((oldPrice - s.price).abs() > 0.0001 ||
+          (oldPaid - s.paid).abs() > 0.0001 ||
+          (oldRemaining - s.remaining).abs() > 0.0001) {
+        final operationDate = _date(now);
+        final editDetails = <String>[];
+        if (addedDebt > 0.0001) {
+          editDetails.add(
+            'بتاريخ $operationDate تم إضافة مبلغ دين ${addedDebt.toStringAsFixed(0)} د.ع',
+          );
+        }
+        if (delta > 0.0001) {
+          editDetails.add(
+            'بتاريخ $operationDate تم تسديد مبلغ ${delta.toStringAsFixed(0)} د.ع',
+          );
+        } else if (delta < -0.0001) {
+          editDetails.add(
+            'بتاريخ $operationDate تم تخفيض الواصل بمبلغ ${delta.abs().toStringAsFixed(0)} د.ع',
+          );
+        }
+        if (editDetails.isEmpty) {
+          editDetails.add(
+            'بتاريخ $operationDate تم تعديل مبلغ الاشتراك إلى ${s.price.toStringAsFixed(0)} د.ع',
+          );
+        }
+        await AppStore.addDailyTaskEvent(
+          DailyTaskEvent(
+            type: DailyTaskEvent.debtEditType,
+            subscriberUser: s.user,
+            subscriberName: s.name,
+            at: now,
+            amount: s.remaining - oldRemaining,
+            remainingAfter: s.remaining,
+            note: editDetails.join(' | '),
+          ),
+          persist: false,
+        );
+      }
       await AppStore.save();
+      if (delta > 0.0001) {
+        await _recordLedgerTransaction(
+          subscriber: s,
+          type: FinancialTransactionType.payment,
+          amount: delta,
+          date: now,
+          referenceId: 'payment-receipt:${invoice!.receiptNumber}',
+          note: invoice.note,
+        );
+      }
+      if (addedDebt > 0.0001) {
+        await _recordLedgerTransaction(
+          subscriber: s,
+          type: FinancialTransactionType.debt,
+          amount: addedDebt,
+          date: now,
+          referenceId:
+              'debt-edit:${s.subscriberId}:${now.toUtc().toIso8601String()}',
+          note: 'إضافة مبلغ من تعديل الديون',
+        );
+      }
       if (mounted) setState(() {});
       if (mounted) {
         final afterPaid = s.paid;
@@ -2822,6 +3467,15 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       persist: false,
     );
     await AppStore.save();
+    await _recordLedgerTransaction(
+      subscriber: s,
+      type: FinancialTransactionType.debt,
+      amount: amount,
+      date: now,
+      referenceId:
+          'debt-add:${s.subscriberId}:${now.toUtc().toIso8601String()}',
+      note: 'إضافة مبلغ من قائمة الديون',
+    );
     if (!mounted) return;
     setState(() {});
     final syncWarning = AppStore.lastSaveSyncError == null
@@ -2925,6 +3579,14 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
     );
     s.paymentDate = _date(now);
     await AppStore.save();
+    await _recordLedgerTransaction(
+      subscriber: s,
+      type: FinancialTransactionType.payment,
+      amount: applied,
+      date: now,
+      referenceId: 'payment-receipt:$receiptNumber',
+      note: s.remaining <= 0.0001 ? 'تسديد كامل' : 'تسديد جزئي',
+    );
     if (mounted) setState(() {});
     if (mounted && AppStore.lastSaveSyncError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3859,6 +4521,9 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                                     MaterialPageRoute(
                                       builder: (_) => SubscriberDetailsScreen(
                                         subscriber: subscriber,
+                                        onEditDebt: _editDebt,
+                                        onAddDebtAmount: _addDebtAmount,
+                                        onPartialDebtPayment: _partialPayment,
                                       ),
                                     ),
                                   );
@@ -3955,9 +4620,9 @@ class _DebtsDataSource extends DataTableSource {
 
   final List<Subscriber> data;
   final Future<void> Function(Subscriber) onNameTap;
-  final void Function(Subscriber) onEdit;
-  final void Function(Subscriber) onAddAmount;
-  final void Function(Subscriber) onPartialPayment;
+  final Future<void> Function(Subscriber) onEdit;
+  final Future<void> Function(Subscriber) onAddAmount;
+  final Future<void> Function(Subscriber) onPartialPayment;
   final void Function(Subscriber) onReminder;
   final void Function(Subscriber) onReceipt;
 
@@ -4050,68 +4715,11 @@ class _DebtsDataSource extends DataTableSource {
             runSpacing: 4,
             alignment: WrapAlignment.center,
             children: [
-              PopupMenuButton<String>(
-                tooltip: 'العمليات',
-                icon: const Icon(Icons.more_vert, color: Colors.blueGrey),
-                onSelected: (value) {
-                  switch (value) {
-                    case 'edit':
-                      onEdit(subscriber);
-                    case 'add_amount':
-                      onAddAmount(subscriber);
-                    case 'partial_payment':
-                      onPartialPayment(subscriber);
-                  }
-                },
-                itemBuilder: (context) => [
-                  PopupMenuItem<String>(
-                    enabled: false,
-                    child: Text(
-                      'مبلغ الاشتراك: ${subscriber.price.toStringAsFixed(0)} د.ع',
-                    ),
-                  ),
-                  PopupMenuItem<String>(
-                    enabled: false,
-                    child: Text(
-                      'الواصل: ${subscriber.paid.toStringAsFixed(0)} د.ع',
-                    ),
-                  ),
-                  PopupMenuItem<String>(
-                    enabled: false,
-                    child: Text(
-                      'المتبقي: ${subscriber.remaining.toStringAsFixed(0)} د.ع',
-                      style: const TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const PopupMenuDivider(),
-                  const PopupMenuItem<String>(
-                    value: 'edit',
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.edit_outlined),
-                      title: Text('تعديل المبالغ'),
-                    ),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'add_amount',
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.add_card_outlined),
-                      title: Text('إضافة مبلغ'),
-                    ),
-                  ),
-                  const PopupMenuItem<String>(
-                    value: 'partial_payment',
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(Icons.payments_outlined),
-                      title: Text('تسديد جزء من المبلغ'),
-                    ),
-                  ),
-                ],
+              DebtOperationsMenu(
+                subscriber: subscriber,
+                onEdit: onEdit,
+                onAddAmount: onAddAmount,
+                onPartialPayment: onPartialPayment,
               ),
               IconButton(
                 tooltip: 'تنبيه',

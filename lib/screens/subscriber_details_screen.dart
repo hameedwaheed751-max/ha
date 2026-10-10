@@ -5,12 +5,24 @@ import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models.dart';
+import '../services/subscriber_financial_ledger.dart';
 import 'add_subscriber_screen.dart';
+import 'dashboard_widgets.dart';
 import 'receipt_screen.dart';
 
 class SubscriberDetailsScreen extends StatefulWidget {
   final Subscriber subscriber;
-  const SubscriberDetailsScreen({super.key, required this.subscriber});
+  final Future<void> Function(Subscriber)? onEditDebt;
+  final Future<void> Function(Subscriber)? onAddDebtAmount;
+  final Future<void> Function(Subscriber)? onPartialDebtPayment;
+
+  const SubscriberDetailsScreen({
+    super.key,
+    required this.subscriber,
+    this.onEditDebt,
+    this.onAddDebtAmount,
+    this.onPartialDebtPayment,
+  });
 
   @override
   State<SubscriberDetailsScreen> createState() => _SubscriberDetailsScreenState();
@@ -20,8 +32,9 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     with SingleTickerProviderStateMixin {
   late final TabController tabs;
   Subscriber get s => widget.subscriber;
-  String _invoiceMonthFilter = 'all';
-  String _paymentMonthFilter = 'all';
+  String _recordsMonthFilter = 'all';
+  late DateTime _financialMonth;
+  late Future<SubscriberMonthlyLedger> _financialLedgerFuture;
 
   String f(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
@@ -61,18 +74,110 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     return list;
   }
 
-  List<String> _invoiceMonthOptions() {
-    final keys = s.invoices.map((e) => e.monthKey).toSet().toList()..sort((a, b) => b.compareTo(a));
-    return <String>['all', ...keys];
+  List<String> _recordsMonthOptions() {
+    final keys = <String>{
+      ...s.invoices.map((invoice) => invoice.monthKey),
+      ...s.payments.map((payment) => Subscriber.monthKeyOf(payment.at)),
+    }..removeWhere((key) => key.trim().isEmpty);
+    final sortedKeys = keys.toList()..sort((a, b) => b.compareTo(a));
+    return <String>['all', ...sortedKeys];
   }
 
-  List<String> _paymentMonthOptions() {
-    final keys = s.payments
-        .map((e) => Subscriber.monthKeyOf(e.at))
-        .toSet()
-        .toList()
-      ..sort((a, b) => b.compareTo(a));
-    return <String>['all', ...keys];
+  Widget _recordsMonthSelector({
+    required List<String> options,
+    required String selectedMonth,
+  }) {
+    return DropdownButtonFormField<String>(
+      initialValue: selectedMonth,
+      decoration: const InputDecoration(
+        labelText: 'الشهر',
+        border: OutlineInputBorder(),
+        isDense: true,
+      ),
+      items: options
+          .map(
+            (key) => DropdownMenuItem<String>(
+              value: key,
+              child: Text(key == 'all' ? 'كل الأشهر' : _monthLabel(key)),
+            ),
+          )
+          .toList(),
+      onChanged: (value) {
+        if (value != null) setState(() => _recordsMonthFilter = value);
+      },
+    );
+  }
+
+  Widget _paidAndDueSummary(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(
+          child: _balanceSummaryItem(
+            context,
+            label: 'إجمالي المدفوع',
+            amount: s.paid,
+            color: Colors.green,
+            icon: Icons.check_circle_outline_rounded,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _balanceSummaryItem(
+            context,
+            label: 'المتبقي المستحق',
+            amount: s.remaining,
+            color: s.remaining > 0 ? colors.error : Colors.green,
+            icon: s.remaining > 0
+                ? Icons.pending_actions_rounded
+                : Icons.task_alt_rounded,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _balanceSummaryItem(
+    BuildContext context, {
+    required String label,
+    required double amount,
+    required Color color,
+    required IconData icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${amount.toStringAsFixed(0)} د.ع',
+            style: TextStyle(
+              color: color,
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   String _csvCell(String value) {
@@ -181,7 +286,386 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
   void initState() {
     super.initState();
     tabs = TabController(length: 6, vsync: this);
+    final now = DateTime.now();
+    _financialMonth = DateTime(now.year, now.month);
+    _financialLedgerFuture = _readFinancialLedger();
   }
+
+  Future<SubscriberMonthlyLedger> _readFinancialLedger() =>
+      SubscriberFinancialLedger().getSubscriberLedger(
+        s.subscriberId,
+        _financialMonth,
+      );
+
+  List<String> _financialMonthOptions() {
+    final now = DateTime.now();
+    return List<String>.generate(
+      24,
+      (index) => Subscriber.monthKeyOf(DateTime(now.year, now.month - index)),
+    );
+  }
+
+  void _selectFinancialMonth(String monthKey) {
+    final parts = monthKey.split('-');
+    if (parts.length != 2) return;
+    final year = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    if (year == null || month == null || month < 1 || month > 12) return;
+    setState(() {
+      _financialMonth = DateTime(year, month);
+      _financialLedgerFuture = _readFinancialLedger();
+    });
+  }
+
+  List<DailyTaskEvent> _matchingSubscriberDebtEvents() {
+    final subscriberUser = s.user.trim().toLowerCase();
+    final subscriberName = s.name.trim().toLowerCase();
+    final operations = AppStore.dailyTaskEvents.where((event) {
+      if (event.type != 'debt_added' &&
+          event.type != 'debt_payment' &&
+          event.type != DailyTaskEvent.debtEntryCollectionType &&
+          event.type != DailyTaskEvent.debtEditType) {
+        return false;
+      }
+      final eventUser = event.subscriberUser.trim().toLowerCase();
+      if (subscriberUser.isNotEmpty && eventUser.isNotEmpty) {
+        return subscriberUser == eventUser;
+      }
+      return subscriberName.isNotEmpty &&
+          event.subscriberName.trim().toLowerCase() == subscriberName;
+    }).toList()..sort((a, b) => b.at.compareTo(a.at));
+    return operations;
+  }
+
+  List<DailyTaskEvent> _subscriberDebtOperations() {
+    final events = _matchingSubscriberDebtEvents();
+    final editTimestamps = events
+        .where((event) => event.type == DailyTaskEvent.debtEditType)
+        .map((event) => event.at.toUtc().microsecondsSinceEpoch)
+        .toSet();
+    return events.where((event) {
+      if (event.type == DailyTaskEvent.debtEditType) return true;
+      final isDebtMovement =
+          event.type == 'debt_added' ||
+          event.type == 'debt_payment' ||
+          event.type == DailyTaskEvent.debtEntryCollectionType;
+      return !isDebtMovement ||
+          !editTimestamps.contains(event.at.toUtc().microsecondsSinceEpoch);
+    }).toList(growable: false);
+  }
+
+  String _formatDebtEditNote(String note) => note
+      .split(' | ')
+      .map(
+        (detail) => detail
+            .replaceFirst(': ', ': قبل ')
+            .replaceFirst(' -> ', ' | بعد '),
+      )
+      .join('\n');
+
+  Future<void> _runDebtAction(
+    Future<void> Function(Subscriber)? action,
+    Subscriber subscriber,
+  ) async {
+    if (action == null) return;
+    await action(subscriber);
+    if (mounted) setState(() {});
+  }
+
+  Widget _debtOperationsTab() {
+    final operations = _subscriberDebtOperations();
+    final allEvents = _matchingSubscriberDebtEvents();
+
+    final totalAdded = allEvents
+        .where((event) => event.type == 'debt_added')
+        .fold<double>(0, (total, event) => total + event.amount);
+    final totalCollected = allEvents
+        .where(
+          (event) =>
+              event.type == 'debt_payment' ||
+              event.type == DailyTaskEvent.debtEntryCollectionType,
+        )
+        .fold<double>(0, (total, event) => total + event.amount);
+
+    return ListView(
+      padding: const EdgeInsets.all(14),
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _debtOperationTotal(
+                label: 'إجمالي الديون المضافة',
+                amount: totalAdded,
+                color: Colors.red,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _debtOperationTotal(
+                label: 'إجمالي التسديدات',
+                amount: totalCollected,
+                color: Colors.green,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerRight,
+          child: DebtOperationsMenu(
+            subscriber: s,
+            onEdit: widget.onEditDebt == null
+                ? null
+                : (subscriber) => _runDebtAction(widget.onEditDebt, subscriber),
+            onAddAmount: widget.onAddDebtAmount == null
+                ? null
+                : (subscriber) =>
+                      _runDebtAction(widget.onAddDebtAmount, subscriber),
+            onPartialPayment: widget.onPartialDebtPayment == null
+                ? null
+                : (subscriber) =>
+                      _runDebtAction(widget.onPartialDebtPayment, subscriber),
+            showLabel: true,
+          ),
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          'سجل العمليات',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        const SizedBox(height: 8),
+        if (operations.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 18),
+            child: Text('لا توجد عمليات سابقة مسجلة لهذا المشترك.'),
+          ),
+        ...operations.map((event) {
+          final isDebtAdded = event.type == 'debt_added';
+          final isDebtEdit = event.type == DailyTaskEvent.debtEditType;
+          final color = isDebtEdit
+            ? Colors.blue
+            : isDebtAdded
+            ? Colors.red
+            : Colors.green;
+          final title = isDebtEdit
+            ? 'تعديل مبالغ الاشتراك'
+            : isDebtAdded
+              ? 'إضافة دين'
+              : event.type == DailyTaskEvent.debtEntryCollectionType
+              ? 'تحصيل عند التفعيل'
+              : 'تسديد دين';
+          return Card(
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: color.withValues(alpha: 0.12),
+                child: Icon(
+                  isDebtEdit
+                      ? Icons.edit_note_rounded
+                      : isDebtAdded
+                      ? Icons.add_card_outlined
+                      : Icons.payments_outlined,
+                  color: color,
+                ),
+              ),
+              title: Text(title),
+              isThreeLine: isDebtEdit,
+              subtitle: isDebtEdit
+                  ? Text(
+                      '${f(event.at)}\n${_formatDebtEditNote(event.note)}',
+                      style: const TextStyle(height: 1.45),
+                    )
+                  : Text(
+                      '${f(event.at)}'
+                      '${event.remainingAfter > 0 ? ' • المتبقي ${event.remainingAfter.toStringAsFixed(0)} د.ع' : ''}'
+                      '${event.note.trim().isNotEmpty ? ' • ${event.note.trim()}' : ''}',
+                    ),
+              trailing: Text(
+                isDebtEdit ? 'تم التعديل' : '${event.amount.toStringAsFixed(0)} د.ع',
+                style: TextStyle(color: color, fontWeight: FontWeight.w800),
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _debtOperationTotal({
+    required String label,
+    required double amount,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.24)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Text(
+            '${amount.toStringAsFixed(0)} د.ع',
+            style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _financialTransactionLabel(FinancialTransactionType type) {
+    switch (type) {
+      case FinancialTransactionType.debt:
+        return 'دين/مطالبة';
+      case FinancialTransactionType.payment:
+        return 'تسديد';
+      case FinancialTransactionType.partialPayment:
+        return 'تسديد جزئي';
+      case FinancialTransactionType.openingBalance:
+        return 'رصيد افتتاحي';
+      case FinancialTransactionType.invoice:
+        return 'فاتورة';
+      case FinancialTransactionType.activation:
+        return 'تفعيل';
+      case FinancialTransactionType.credit:
+        return 'رصيد دائن';
+      case FinancialTransactionType.companyDeposit:
+        return 'إيداع للشركة';
+      case FinancialTransactionType.activationCost:
+        return 'كلفة تفعيل';
+      case FinancialTransactionType.expense:
+        return 'مصروف';
+      case FinancialTransactionType.adjustment:
+        return 'تسوية';
+    }
+  }
+
+  Widget _financialLedgerTab() {
+    final selectedMonthKey = Subscriber.monthKeyOf(_financialMonth);
+    final monthOptions = _financialMonthOptions();
+    return FutureBuilder<SubscriberMonthlyLedger>(
+      future: _financialLedgerFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Text('تعذر تحميل الحساب المالي: ${snapshot.error}'),
+          );
+        }
+        final ledger = snapshot.data;
+        if (ledger == null) {
+          return const Center(child: Text('لا توجد بيانات للحساب المالي'));
+        }
+
+        return ListView(
+          padding: const EdgeInsets.all(14),
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: monthOptions.contains(selectedMonthKey)
+                  ? selectedMonthKey
+                  : monthOptions.first,
+              decoration: const InputDecoration(
+                labelText: 'الشهر',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: monthOptions
+                  .map(
+                    (key) => DropdownMenuItem<String>(
+                      value: key,
+                      child: Text(_monthLabel(key)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) _selectFinancialMonth(value);
+              },
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'ملخص الشهر',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Theme.of(context).dividerColor),
+              ),
+              child: Column(
+                children: [
+                  _financialSummaryRow('الرصيد الافتتاحي', ledger.openingBalance),
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  _financialSummaryRow('إجمالي المطالبات/الديون', ledger.totalCharges),
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  _financialSummaryRow('إجمالي التسديدات', ledger.totalPayments),
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  _financialSummaryRow(
+                    'الرصيد الختامي',
+                    ledger.closingBalance,
+                    emphasized: true,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'حركات الشهر',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            if (ledger.transactions.isEmpty)
+              const Text('لا توجد حركات مالية لهذا الشهر')
+            else
+              ...ledger.transactions.map(
+                (transaction) => Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.account_balance_wallet_outlined),
+                    title: Text(_financialTransactionLabel(transaction.type)),
+                    subtitle: Text(
+                      '${f(transaction.date)}'
+                      '${transaction.note.trim().isEmpty ? '' : ' • ${transaction.note}'}',
+                    ),
+                    trailing: Text(
+                      '${transaction.amount.toStringAsFixed(0)} د.ع',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _financialSummaryRow(
+    String title,
+    double amount, {
+    bool emphasized = false,
+  }) =>
+      ListTile(
+        dense: true,
+        title: Text(
+          title,
+          style: TextStyle(
+            fontWeight: emphasized ? FontWeight.w800 : FontWeight.w500,
+          ),
+        ),
+        trailing: Text(
+          '${amount.toStringAsFixed(0)} د.ع',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: emphasized ? Theme.of(context).colorScheme.primary : null,
+          ),
+        ),
+      );
 
   @override
   void dispose() {
@@ -206,20 +690,6 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     final n = double.tryParse(raw);
     if (n == null) return raw;
     return n.toStringAsFixed(0);
-  }
-
-  String _bytes(dynamic value) {
-    if (value == null) return '—';
-    final n = double.tryParse(value.toString());
-    if (n == null) return value.toString();
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    var x = n;
-    var i = 0;
-    while (x >= 1024 && i < units.length - 1) {
-      x /= 1024;
-      i++;
-    }
-    return '${x.toStringAsFixed(i == 0 ? 0 : 2)} ${units[i]}';
   }
 
   Widget infoRow(String label, String value, IconData icon, {Color? valueColor, VoidCallback? onTap}) => Container(
@@ -294,18 +764,6 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
       'last_connection', 'last_seen', 'last_login', 'last_online',
       'last_auth', 'last_activity', 'last_connection_date'
     ]);
-    final download = _bytes(_pick([
-      'download', 'downloaded', 'total_download', 'download_bytes',
-      'acct_output_octets', 'output_octets'
-    ]));
-    final upload = _bytes(_pick([
-      'upload', 'uploaded', 'total_upload', 'upload_bytes',
-      'acct_input_octets', 'input_octets'
-    ]));
-    final remainingData = _bytes(_pick([
-      'remaining_data', 'data_remaining', 'remaining_traffic', 'traffic_left'
-    ]));
-
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
@@ -359,11 +817,11 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                 tabAlignment: TabAlignment.start,
                 tabs: const [
                   Tab(text: 'عام'),
-                  Tab(text: 'تعديل'),
-                  Tab(text: 'الاستهلاك'),
-                  Tab(text: 'الجلسات'),
+                  Tab(text: 'عمليات الديون'),
                   Tab(text: 'فواتير'),
                   Tab(text: 'مدفوعات'),
+                  Tab(text: 'الحساب المالي'),
+                  Tab(text: 'تعديل'),
                 ],
               ),
             ),
@@ -406,64 +864,14 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                       if (isSas) infoRow('آخر اتصال', lastConnection, Icons.history),
                     ],
                   ),
-                  Center(
-                    child: FilledButton.icon(
-                      onPressed: () async {
-                        final changed = await Navigator.push<bool>(
-                          context,
-                          MaterialPageRoute(builder: (_) => AddSubscriberScreen(subscriber: s)),
-                        );
-                        if (changed == true && mounted) setState(() {});
-                      },
-                      icon: const Icon(Icons.edit),
-                      label: const Text('تعديل بيانات المشترك'),
-                    ),
-                  ),
-                  ListView(
-                    padding: const EdgeInsets.all(14),
-                    children: [
-                      infoRow('الداونلود', download, Icons.download),
-                      infoRow('الأبلود', upload, Icons.upload),
-                      infoRow('كمية البيانات المتبقية', remainingData, Icons.data_usage),
-                      infoRow('آخر اتصال', lastConnection, Icons.schedule),
-                    ],
-                  ),
-                  isSas
-                      ? ListView(
-                          padding: const EdgeInsets.all(14),
-                          children: [
-                            infoRow('آخر اتصال', lastConnection, Icons.router_outlined),
-                            infoRow(
-                              'IP',
-                              s.ip,
-                              Icons.language,
-                              valueColor: Colors.blue,
-                              onTap: () async {
-                                final ip = s.ip.trim();
-                                if (ip.isEmpty) return;
-                                String url;
-                                if (ip.contains(':') && !ip.startsWith('[')) {
-                                  url = 'http://[$ip]';
-                                } else {
-                                  url = 'http://$ip';
-                                }
-                                final uri = Uri.parse(url);
-                                try {
-                                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                                } catch (_) {}
-                              },
-                            ),
-                            infoRow('NAS', _sas(['nas_name','nas','router_name']), Icons.dns_outlined),
-                            infoRow('MAC', _sas(['mac','mac_address','calling_station_id']), Icons.devices),
-                            infoRow('مدة الجلسة', _sas(['session_time','acct_session_time','online_time']), Icons.timer_outlined),
-                          ],
-                        )
-                      : emptyTab(Icons.router_outlined, 'الجلسات', 'لا توجد بيانات جلسات للمشترك المحلي.'),
+                  _debtOperationsTab(),
                   Builder(
                     builder: (_) {
                       final allInvoices = _sortedInvoices();
-                      final options = _invoiceMonthOptions();
-                      final effectiveFilter = options.contains(_invoiceMonthFilter) ? _invoiceMonthFilter : 'all';
+                        final options = _recordsMonthOptions();
+                        final effectiveFilter = options.contains(_recordsMonthFilter)
+                          ? _recordsMonthFilter
+                          : 'all';
                       final invoices = effectiveFilter == 'all'
                           ? allInvoices
                           : allInvoices.where((inv) => inv.monthKey == effectiveFilter).toList();
@@ -479,37 +887,17 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                         padding: const EdgeInsets.all(14),
                         children: [
                           infoRow('مبلغ الاشتراك', s.price.toStringAsFixed(0), Icons.receipt_long_outlined),
-                          infoRow('الواصل', s.paid.toStringAsFixed(0), Icons.payments_outlined),
-                          infoRow('المتبقي', s.remaining.toStringAsFixed(0), Icons.money_off_outlined),
+                          _paidAndDueSummary(context),
                           infoRow('تاريخ التفعيل', f(s.startDate), Icons.event_outlined),
-infoRow('تاريخ التسديد', s.paymentDate.isEmpty ? 'غير محدد' : s.paymentDate, Icons.event_available_outlined),
+                          infoRow('تاريخ التسديد', s.paymentDate.isEmpty ? 'غير محدد' : s.paymentDate, Icons.event_available_outlined),
                           if (isSas) infoRow('balance', _formatSasBalance(_sas(['balance','credit','user_balance'])), Icons.account_balance_wallet_outlined),
                           const SizedBox(height: 8),
                           Row(
                             children: [
-                              Expanded(
-                                child: DropdownButtonFormField<String>(
-                                  initialValue: effectiveFilter,
-                                  decoration: const InputDecoration(
-                                    labelText: 'فلتر الشهر',
-                                    border: OutlineInputBorder(),
-                                    isDense: true,
-                                  ),
-                                  items: options
-                                      .map(
-                                        (key) => DropdownMenuItem<String>(
-                                          value: key,
-                                          child: Text(key == 'all' ? 'الكل' : _monthLabel(key)),
-                                        ),
-                                      )
-                                      .toList(),
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _invoiceMonthFilter = value ?? 'all';
-                                    });
-                                  },
-                                ),
-                              ),
+                              Expanded(child: _recordsMonthSelector(
+                                options: options,
+                                selectedMonth: effectiveFilter,
+                              )),
                               const SizedBox(width: 10),
                               FilledButton.icon(
                                 onPressed: () => _exportInvoicesCsv(invoices, effectiveFilter),
@@ -568,8 +956,10 @@ infoRow('تاريخ التسديد', s.paymentDate.isEmpty ? 'غير محدد' :
                   Builder(
                     builder: (_) {
                       final allPayments = _sortedPayments();
-                      final options = _paymentMonthOptions();
-                      final effectiveFilter = options.contains(_paymentMonthFilter) ? _paymentMonthFilter : 'all';
+                        final options = _recordsMonthOptions();
+                        final effectiveFilter = options.contains(_recordsMonthFilter)
+                          ? _recordsMonthFilter
+                          : 'all';
                       final payments = effectiveFilter == 'all'
                           ? allPayments
                           : allPayments
@@ -587,35 +977,16 @@ infoRow('تاريخ التسديد', s.paymentDate.isEmpty ? 'غير محدد' :
                       return ListView(
                         padding: const EdgeInsets.all(14),
                         children: [
-                          infoRow('الواصل الإجمالي', s.paid.toStringAsFixed(0), Icons.price_check_outlined),
+                          _paidAndDueSummary(context),
                           infoRow('تاريخ التسديد', s.paymentDate.isEmpty ? 'غير محدد' : s.paymentDate, Icons.event_available_outlined),
                           if (isSas) infoRow('آخر دفعة SAS', _sas(['last_payment','last_payment_date','payment_date']), Icons.payments_outlined),
                           const SizedBox(height: 8),
                           Row(
                             children: [
-                              Expanded(
-                                child: DropdownButtonFormField<String>(
-                                  initialValue: effectiveFilter,
-                                  decoration: const InputDecoration(
-                                    labelText: 'فلتر الشهر',
-                                    border: OutlineInputBorder(),
-                                    isDense: true,
-                                  ),
-                                  items: options
-                                      .map(
-                                        (key) => DropdownMenuItem<String>(
-                                          value: key,
-                                          child: Text(key == 'all' ? 'الكل' : _monthLabel(key)),
-                                        ),
-                                      )
-                                      .toList(),
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _paymentMonthFilter = value ?? 'all';
-                                    });
-                                  },
-                                ),
-                              ),
+                              Expanded(child: _recordsMonthSelector(
+                                options: options,
+                                selectedMonth: effectiveFilter,
+                              )),
                               const SizedBox(width: 10),
                               FilledButton.icon(
                                 onPressed: () => _exportPaymentsCsv(payments, effectiveFilter),
@@ -657,6 +1028,20 @@ infoRow('تاريخ التسديد', s.paymentDate.isEmpty ? 'غير محدد' :
                         ],
                       );
                     },
+                  ),
+                  _financialLedgerTab(),
+                  Center(
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        final changed = await Navigator.push<bool>(
+                          context,
+                          MaterialPageRoute(builder: (_) => AddSubscriberScreen(subscriber: s)),
+                        );
+                        if (changed == true && mounted) setState(() {});
+                      },
+                      icon: const Icon(Icons.edit),
+                      label: const Text('تعديل بيانات المشترك'),
+                    ),
                   ),
                 ],
               ),

@@ -773,9 +773,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _governorateController = TextEditingController();
-  final _regionController = TextEditingController();
-  final _addressController = TextEditingController();
   bool _isLoading = false;
   late String _selectedPlan;
   late String _transferNumber;
@@ -793,9 +790,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (_fullNameController.text.trim().isEmpty ||
         _phoneController.text.trim().isEmpty ||
         _emailController.text.trim().isEmpty ||
-        _governorateController.text.trim().isEmpty ||
-        _regionController.text.trim().isEmpty ||
-        _addressController.text.trim().isEmpty ||
         _passwordController.text.isEmpty ||
         _confirmPasswordController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -820,9 +814,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         phone: _phoneController.text.trim(),
         email: _emailController.text.trim().toLowerCase(),
         agentName: _fullNameController.text.trim(),
-        governorate: _governorateController.text.trim(),
-        region: _regionController.text.trim(),
-        address: _addressController.text.trim(),
         selectedPlan: _selectedPlan,
         amount: PaymentPlanCatalog.amount(_selectedPlan),
         paymentMethod: 'Qi Card',
@@ -892,9 +883,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _governorateController.dispose();
-    _regionController.dispose();
-    _addressController.dispose();
     super.dispose();
   }
 
@@ -991,12 +979,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       child: Column(
                         children: [
                           _styledField(controller: _fullNameController, label: 'الاسم الكامل', icon: Icons.person),
-                          const SizedBox(height: 12),
-                          _styledField(controller: _governorateController, label: 'المحافظة', icon: Icons.location_city_outlined),
-                          const SizedBox(height: 12),
-                          _styledField(controller: _regionController, label: 'المنطقة', icon: Icons.map_outlined),
-                          const SizedBox(height: 12),
-                          _styledField(controller: _addressController, label: 'العنوان', icon: Icons.home_outlined),
                           const SizedBox(height: 12),
                           _styledField(
                             controller: _phoneController,
