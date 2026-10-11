@@ -1,15 +1,10 @@
-import 'dart:convert';
-
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-import '../firebase_options.dart';
 import '../models.dart';
+import 'subscription_request_service.dart';
 
 class PaymentPlanCatalog {
   static const String free15Days = 'free_15_days';
@@ -39,9 +34,11 @@ class PaymentPlanCatalog {
     }
   }
 
-  static String label(String value) => AppStore.subscriptionPlanLabelFor(normalize(value));
+  static String label(String value) =>
+      AppStore.subscriptionPlanLabelFor(normalize(value));
 
-  static int durationDays(String value) => AppStore.subscriptionDurationDaysFor(normalize(value));
+  static int durationDays(String value) =>
+      AppStore.subscriptionDurationDaysFor(normalize(value));
 
   static String amount(String value) {
     switch (normalize(value)) {
@@ -77,7 +74,6 @@ class PaymentRequestRecord {
     this.governorate = '',
     this.region = '',
     this.address = '',
-    this.password = '',
     this.approvedBy = '',
     this.approvedAt,
     this.rejectedBy = '',
@@ -85,6 +81,7 @@ class PaymentRequestRecord {
     this.rejectReason = '',
     this.isRenewal = false,
     this.renewalForUid = '',
+    this.collectionPath = SubscriptionRequestService.collectionName,
   });
 
   final String requestId;
@@ -103,7 +100,6 @@ class PaymentRequestRecord {
   final String governorate;
   final String region;
   final String address;
-  final String password;
   final String approvedBy;
   final int? approvedAt;
   final String rejectedBy;
@@ -111,59 +107,67 @@ class PaymentRequestRecord {
   final String rejectReason;
   final bool isRenewal;
   final String renewalForUid;
+  final String collectionPath;
 
   String get planLabel => PaymentPlanCatalog.label(selectedPlan);
 
   Map<String, dynamic> toMap() => {
-        'requestId': requestId,
-        'uid': uid,
-        'email': email,
-        'agentName': agentName,
-        'phone': phone,
-        'selectedPlan': selectedPlan,
-        'amount': amount,
-        'paymentMethod': paymentMethod,
-        'transferNumber': transferNumber,
-        'receiptImage': receiptImage,
-        'status': status,
-        'createdAt': createdAt,
-        'userType': userType,
-        'governorate': governorate,
-        'region': region,
-        'address': address,
-        if (approvedAt != null) 'approvedAt': approvedAt,
-        if (rejectedAt != null) 'rejectedAt': rejectedAt,
-        'rejectReason': rejectReason,
-        'isRenewal': isRenewal,
-        'renewalForUid': renewalForUid,
-      };
+    'requestId': requestId,
+    'uid': uid,
+    'email': email,
+    'agentName': agentName,
+    'phone': phone,
+    'selectedPlan': selectedPlan,
+    'amount': amount,
+    'paymentMethod': paymentMethod,
+    'transferNumber': transferNumber,
+    'receiptImageUrl': receiptImage,
+    'status': status,
+    'createdAt': createdAt,
+    'userType': userType,
+    'governorate': governorate,
+    'region': region,
+    'address': address,
+    'isRenewal': isRenewal,
+    'renewalForUid': renewalForUid,
+  };
 
   factory PaymentRequestRecord.fromMap(Map<String, dynamic> raw) {
+    final firstName = (raw['firstName'] ?? '').toString().trim();
+    final lastName = (raw['lastName'] ?? '').toString().trim();
+    final fullName = '$firstName $lastName'.trim();
     return PaymentRequestRecord(
       requestId: (raw['requestId'] ?? raw['id'] ?? '').toString(),
       uid: (raw['uid'] ?? '').toString(),
       email: (raw['email'] ?? '').toString(),
-      agentName: (raw['agentName'] ?? '').toString(),
+      agentName: (raw['agentName'] ?? fullName).toString(),
       phone: (raw['phone'] ?? '').toString(),
-      selectedPlan: PaymentPlanCatalog.normalize((raw['selectedPlan'] ?? '').toString()),
+      selectedPlan: PaymentPlanCatalog.normalize(
+        (raw['selectedPlan'] ?? '').toString(),
+      ),
       amount: (raw['amount'] ?? '').toString(),
       paymentMethod: (raw['paymentMethod'] ?? 'Qi Card').toString(),
       transferNumber: (raw['transferNumber'] ?? '').toString(),
-      receiptImage: (raw['receiptImage'] ?? raw['receiptImageUrl'] ?? '').toString(),
+      receiptImage: (raw['receiptImageUrl'] ?? raw['receiptImage'] ?? '')
+          .toString(),
       status: (raw['status'] ?? 'pending').toString(),
-      createdAt: _intValue(raw['createdAt']) ?? DateTime.now().millisecondsSinceEpoch,
+      createdAt:
+          _intValue(raw['createdAt']) ?? DateTime.now().millisecondsSinceEpoch,
       userType: (raw['userType'] ?? 'agent').toString(),
       governorate: (raw['governorate'] ?? '').toString(),
       region: (raw['region'] ?? '').toString(),
       address: (raw['address'] ?? '').toString(),
-      password: (raw['password'] ?? '').toString(),
       approvedBy: (raw['approvedBy'] ?? '').toString(),
       approvedAt: _intValue(raw['approvedAt']),
       rejectedBy: (raw['rejectedBy'] ?? '').toString(),
       rejectedAt: _intValue(raw['rejectedAt']),
-      rejectReason: (raw['rejectReason'] ?? raw['rejectionReason'] ?? '').toString(),
-      isRenewal: raw['isRenewal'] == true || raw['isRenewal'].toString().toLowerCase() == 'true',
+      rejectReason: (raw['rejectionReason'] ?? raw['rejectReason'] ?? '')
+          .toString(),
+      isRenewal: raw['isRenewal'] == true,
       renewalForUid: (raw['renewalForUid'] ?? '').toString(),
+      collectionPath:
+          (raw['collectionPath'] ?? SubscriptionRequestService.collectionName)
+              .toString(),
     );
   }
 
@@ -202,104 +206,92 @@ class RenewalRequestState {
 }
 
 class PaymentRequestService {
-  static const String adminRootNode = 'admin';
-  static const String paymentRequestsNode = 'paymentRequests';
-  static const String paymentHistoryNode = 'paymentHistory';
-  static const String subscriptionRequestsSnakeNode = 'subscription_requests';
-  static const String subscriptionRequestsCamelNode = 'subscriptionRequests';
-  static const String subscriptionNode = 'subscription';
+  static const String _requestsPath =
+      'admin/${SubscriptionRequestService.collectionName}';
 
   static DatabaseReference get _root => FirebaseDatabase.instance.ref();
-  static bool _legacyMigrationAttempted = false;
-
-  static String get _adminPaymentRequestsPath => '$adminRootNode/$paymentRequestsNode';
-  static String get _adminPaymentHistoryPath => '$adminRootNode/$paymentHistoryNode';
-  static String get _adminSubscriptionRequestsSnakePath => '$adminRootNode/$subscriptionRequestsSnakeNode';
-  static String get _adminSubscriptionRequestsCamelPath => '$adminRootNode/$subscriptionRequestsCamelNode';
-
-  static FirebaseFunctions get _functions =>
-      FirebaseFunctions.instanceFor(region: 'us-central1');
-
-  static String _requestTokenKey(String purpose, String uid) =>
-      'payment_request_${purpose}_$uid';
-
-  static int? _toInt(dynamic value) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value.trim());
-    return null;
-  }
-
-  static Future<void> _saveRequestCapabilities({
-    required String ownerKey,
-    required String requestId,
-    required String receiptToken,
-    required String statusToken,
-  }) async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_requestTokenKey('id', ownerKey), requestId);
-    await preferences.setString(_requestTokenKey('status', ownerKey), statusToken);
-    await preferences.setString(_requestTokenKey('receipt', requestId), receiptToken);
-  }
-
-  static Future<RenewalRequestState?> _getRenewalRequestStatus(String uid) async {
-    final preferences = await SharedPreferences.getInstance();
-    final requestId = preferences.getString(_requestTokenKey('id', uid)) ?? '';
-    final statusToken = preferences.getString(_requestTokenKey('status', uid)) ?? '';
-    if (requestId.isEmpty || statusToken.isEmpty) return null;
-    final result = await _functions.httpsCallable('getPaymentRequestStatus').call<Map<String, dynamic>>({
-      'requestId': requestId,
-      'statusToken': statusToken,
-    });
-    final raw = result.data['request'];
-    if (raw is! Map) return null;
-    final request = Map<String, dynamic>.from(raw);
-    return RenewalRequestState(
-      requestId: (request['requestId'] ?? requestId).toString(),
-      status: (request['status'] ?? '').toString(),
-      createdAt: _toInt(request['createdAt']) ?? 0,
-      rejectionReason: (request['rejectionReason'] ?? '').toString(),
-      selectedPlan: (request['selectedPlan'] ?? '').toString(),
-    );
-  }
 
   static Future<RenewalRequestState?> findLatestRenewalRequestForAccount({
     required String uid,
     required String email,
-  }) => _getRenewalRequestStatus(uid.trim());
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || !_matchesAccount(user, uid, email)) return null;
+    final snapshot = await _requestsForUid(user.uid).get();
+    return _latestRenewalRequest(snapshot.value, user.uid);
+  }
 
   static Stream<RenewalRequestState?> watchLatestRenewalRequestForAccount({
     required String uid,
     required String email,
   }) async* {
-    while (true) {
-      yield await _getRenewalRequestStatus(uid.trim());
-      await Future<void>.delayed(const Duration(seconds: 5));
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || !_matchesAccount(user, uid, email)) {
+      yield null;
+      return;
     }
+    yield* _requestsForUid(user.uid).onValue.map(
+      (event) => _latestRenewalRequest(event.snapshot.value, user.uid),
+    );
   }
 
-  static Stream<List<PaymentRequestRecord>> watchRequests({String? status}) async* {
-    while (true) {
-      final result = await _functions.httpsCallable('listPaymentRequests').call<Map<String, dynamic>>({
-        'status': status ?? 'pending',
-      });
-      final rawRequests = result.data['requests'];
-      final records = rawRequests is List
-          ? rawRequests.whereType<Map>().map((raw) => PaymentRequestRecord.fromMap(
-                Map<String, dynamic>.from(raw),
-              )).toList()
-          : <PaymentRequestRecord>[];
-      yield records;
-      await Future<void>.delayed(const Duration(seconds: 5));
+  static bool _matchesAccount(User user, String uid, String email) =>
+      user.uid == uid.trim() &&
+      user.email?.trim().toLowerCase() == email.trim().toLowerCase();
+
+  static Query _requestsForUid(String uid) =>
+      _root.child(_requestsPath).orderByChild('uid').equalTo(uid);
+
+  static RenewalRequestState? _latestRenewalRequest(Object? value, String uid) {
+    if (value is! Map) return null;
+    RenewalRequestState? latest;
+    for (final entry in value.entries) {
+      if (entry.value is! Map) continue;
+      final request = Map<String, dynamic>.from(entry.value as Map);
+      if (request['uid'] != uid || request['isRenewal'] != true) continue;
+      final requestId = entry.key.toString();
+      final candidate = _renewalState(requestId, request);
+      if (latest == null || candidate.createdAt > latest.createdAt) {
+        latest = candidate;
+      }
     }
+    return latest;
+  }
+
+  static RenewalRequestState _renewalState(
+    String requestId,
+    Map<String, dynamic> request,
+  ) {
+    return RenewalRequestState(
+      requestId: (request['requestId'] ?? requestId).toString(),
+      status: (request['status'] ?? '').toString(),
+      createdAt: PaymentRequestRecord._intValue(request['createdAt']) ?? 0,
+      rejectionReason:
+          (request['rejectionReason'] ?? request['rejectReason'] ?? '')
+              .toString(),
+      reviewedAt: PaymentRequestRecord._intValue(request['reviewedAt']),
+      selectedPlan: (request['selectedPlan'] ?? '').toString(),
+    );
+  }
+
+  static Stream<List<PaymentRequestRecord>> watchRequests({String? status}) {
+    return SubscriptionRequestService.watchRequests(status: status).map(
+      (requests) => requests
+          .map(
+            (request) => PaymentRequestRecord.fromMap({
+              ...request.toMap(),
+              'collectionPath': request.collectionPath,
+            }),
+          )
+          .toList(),
+    );
   }
 
   static Stream<List<PaymentRequestRecord>> watchPendingRequests() =>
-      watchRequests(status: 'pending');
+      watchRequests(status: SubscriptionRequestService.pendingStatus);
 
   static Future<String> createRequest({
     String uid = '',
-    String userType = 'agent',
     required String email,
     required String agentName,
     required String phone,
@@ -311,46 +303,70 @@ class PaymentRequestService {
     required String paymentMethod,
     required String transferNumber,
     String receiptImage = '',
-    String password = '',
     bool isRenewal = false,
     String renewalForUid = '',
   }) async {
-    final result = await _functions.httpsCallable('createPaymentRequest').call<Map<String, dynamic>>({
-      'uid': uid,
-      'email': email.trim().toLowerCase(),
-      'agentName': agentName,
-      'phone': phone,
-      'governorate': governorate,
-      'region': region,
-      'address': address,
-      'selectedPlan': PaymentPlanCatalog.normalize(selectedPlan),
-      'amount': amount,
-      'paymentMethod': paymentMethod,
-      'transferNumber': transferNumber,
-      'password': password,
-      'isRenewal': isRenewal,
-      'renewalForUid': renewalForUid,
-    });
-    final requestId = (result.data['requestId'] ?? '').toString();
-    if (requestId.isEmpty) throw StateError('Backend did not return requestId');
-    final receiptToken = (result.data['receiptToken'] ?? '').toString();
-    final statusToken = (result.data['statusToken'] ?? '').toString();
-    if (receiptToken.isNotEmpty && statusToken.isNotEmpty) {
-      await _saveRequestCapabilities(
-        ownerKey: uid.trim().isNotEmpty ? uid.trim() : email.trim().toLowerCase(),
-        requestId: requestId,
-        receiptToken: receiptToken,
-        statusToken: statusToken,
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw StateError('Sign in before creating a request.');
+    if (user.uid == SubscriptionRequestService.trustedAdminUid) {
+      throw StateError(
+        'The administrator account cannot submit an agent subscription request.',
       );
     }
+    if (uid.trim().isNotEmpty && uid.trim() != user.uid) {
+      throw StateError(
+        'A request can only be created for the signed-in account.',
+      );
+    }
+    if (isRenewal && renewalForUid.trim() != user.uid) {
+      throw StateError(
+        'A renewal request can only target the signed-in account.',
+      );
+    }
+
+    final normalizedPlan = PaymentPlanCatalog.normalize(selectedPlan);
+    if (!PaymentPlanCatalog.supportedPlans.contains(normalizedPlan)) {
+      throw ArgumentError.value(
+        selectedPlan,
+        'selectedPlan',
+        'Unsupported subscription plan.',
+      );
+    }
+    final expectedAmount = PaymentPlanCatalog.amount(normalizedPlan);
+    if (amount.trim() != expectedAmount) {
+      throw ArgumentError.value(
+        amount,
+        'amount',
+        'Amount does not match the selected plan.',
+      );
+    }
+    final nameParts = agentName.trim().split(RegExp(r'\s+'));
+    final requestId = await SubscriptionRequestService.createRequest(
+      uid: user.uid,
+      firstName: nameParts.isEmpty ? '' : nameParts.first,
+      lastName: nameParts.length < 2 ? '' : nameParts.skip(1).join(' '),
+      agentName: agentName,
+      phone: phone,
+      email: user.email ?? email.trim().toLowerCase(),
+      governorate: governorate,
+      region: region,
+      address: address,
+      selectedPlan: normalizedPlan,
+      amount: PaymentPlanCatalog.amount(normalizedPlan),
+      paymentMethod: paymentMethod,
+      transferNumber: transferNumber,
+      receiptImageUrl: receiptImage,
+      isRenewal: isRenewal,
+    );
     return requestId;
   }
 
-  static Future<String?> uploadReceiptImage({required String requestId, required XFile file}) async {
-    final bytes = await file.readAsBytes();
-    final preferences = await SharedPreferences.getInstance();
-    final token = preferences.getString(_requestTokenKey('receipt', requestId)) ?? '';
-    if (token.isEmpty) throw StateError('Receipt upload capability is missing or expired');
+  static Future<String?> uploadReceiptImage({
+    required String requestId,
+    required XFile file,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw StateError('Sign in before uploading a receipt.');
     final extension = file.name.split('.').last.toLowerCase();
     final contentType = switch (extension) {
       'png' => 'image/png',
@@ -358,54 +374,46 @@ class PaymentRequestService {
       'pdf' => 'application/pdf',
       _ => 'image/jpeg',
     };
-    final result = await _functions.httpsCallable('uploadPaymentReceipt').call<Map<String, dynamic>>({
-      'requestId': requestId,
-      'receiptToken': token,
-      'contentType': contentType,
-      'base64': base64Encode(bytes),
-    });
-    return result.data['receiptImage']?.toString();
+    final storageRef = FirebaseStorage.instance.ref(
+      'admin/subscriptionRequests/$requestId/${file.name}',
+    );
+    final task = await storageRef.putData(
+      await file.readAsBytes(),
+      SettableMetadata(contentType: contentType),
+    );
+    return task.ref.getDownloadURL();
   }
 
   static Future<void> markRequestAsPendingReview({
     required String requestId,
     required Map<String, dynamic> patch,
-  }) async {
-    final result = await _functions.httpsCallable('getPaymentRequestStatus').call<Map<String, dynamic>>({
-      'requestId': requestId,
-      'statusToken': patch['statusToken'] ?? '',
-    });
-    if (result.data['request'] is Map) {
-      return;
-    }
-  }
-
-  static Future<void> addHistoryEntry(String requestId, Map<String, dynamic> history) async {
-    return;
+  }) {
+    return SubscriptionRequestService.markRequestAsPendingReview(
+      requestId: requestId,
+      patch: patch,
+    );
   }
 
   static Future<Map<String, dynamic>> approveRequest({
     required PaymentRequestRecord request,
-    required String approvedBy,
   }) async {
-    final result = await _functions.httpsCallable('approvePaymentRequest').call<Map<String, dynamic>>({
-      'requestId': request.requestId,
-      'approvedBy': approvedBy,
-    });
-    final data = result.data;
-    return Map<String, dynamic>.from(data);
+    final result = await SubscriptionRequestService.approveRequestById(
+      requestId: request.requestId,
+      requestData: request.toMap(),
+      collectionPath: request.collectionPath,
+    );
+    return result;
   }
 
   static Future<void> rejectRequest({
     required PaymentRequestRecord request,
-    required String rejectedBy,
     required String rejectReason,
-  }) async {
-    await _functions.httpsCallable('rejectPaymentRequest').call<Map<String, dynamic>>({
-      'requestId': request.requestId,
-      'rejectedBy': rejectedBy,
-      'rejectReason': rejectReason,
-    });
+  }) {
+    return SubscriptionRequestService.rejectRequest(
+      requestId: request.requestId,
+      reason: rejectReason,
+      collectionPath: request.collectionPath,
+    );
   }
 
   static String subscriptionStatusText(String status) {

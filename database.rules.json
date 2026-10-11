@@ -2,16 +2,119 @@
   "rules": {
     ".read": false,
     ".write": false,
-    "global_chat": {
-      "chat": {
-        ".read": "auth != null",
-        ".write": "auth != null && (root.child('agents').child(auth.uid).child('profile').child('role').val() === 'admin' || (newData.exists() && newData.child('senderUid').val() === auth.uid))"
+    "admin": {
+      "subscription_requests": {
+        ".read": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'",
+        ".write": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'"
+      },
+      "subscriptionRequests": {
+        ".read": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (query.orderByChild === 'uid' && query.equalTo === auth.uid))",
+        ".write": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'",
+        ".indexOn": ["uid"],
+        "$requestId": {
+          ".read": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || data.child('uid').val() === auth.uid)",
+          ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (!data.exists() && newData.child('uid').val() === auth.uid && newData.child('email').val() === auth.token.email && newData.child('status').val() === 'pending' && newData.child('password').val() === null && ((newData.child('isRenewal').val() === true && root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent') || (newData.child('isRenewal').val() !== true && !root.child('agents').child(auth.uid).child('profile').child('role').exists()))))",
+          ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (newData.hasChildren(['requestId', 'uid', 'email', 'firstName', 'lastName', 'phone', 'selectedPlan', 'amount', 'paymentMethod', 'transferNumber', 'status', 'createdAt']) && newData.child('uid').val() === auth.uid && newData.child('email').val() === auth.token.email && newData.child('status').val() === 'pending' && newData.child('password').val() === null && ((newData.child('isRenewal').val() === true && root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent') || (newData.child('isRenewal').val() !== true && !root.child('agents').child(auth.uid).child('profile').child('role').exists())) && ((newData.child('selectedPlan').val() === 'free_15_days' && newData.child('amount').val() === 'مجاني') || (newData.child('selectedPlan').val() === 'three_months' && newData.child('amount').val() === '40000') || (newData.child('selectedPlan').val() === 'six_months' && newData.child('amount').val() === '50000') || (newData.child('selectedPlan').val() === 'one_year' && newData.child('amount').val() === '70000'))))",
+          "requestId": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "uid": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "email": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "firstName": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "lastName": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "phone": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "selectedPlan": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "amount": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "paymentMethod": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "transferNumber": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "status": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.val() === 'pending')"
+          },
+          "createdAt": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isNumber())"
+          },
+          "receiptImageUrl": {
+            ".write": "auth != null && data.parent().child('status').val() === 'pending' && data.parent().child('uid').val() === auth.uid",
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "rejectionReason": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "source": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "reviewedAt": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "isRenewal": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isBoolean())"
+          },
+          "agentName": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "governorate": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "region": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "address": {
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
+          },
+          "reviewerUid": {
+            ".validate": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'"
+          },
+          "$other": {
+            ".validate": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'"
+          }
+        }
+      },
+      "paymentHistory": {
+        ".read": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'",
+        ".write": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'"
       }
     },
     "agents": {
+      ".read": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'",
+      ".write": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'",
       "$agentId": {
-        ".read": "auth != null && ($agentId === auth.uid || $agentId.matches('^' + auth.uid + '_.+$') || root.child('agents').child(auth.uid).child('profile').child('currentAgentId').val() === $agentId)",
-        ".write": "auth != null && ($agentId === auth.uid || $agentId.matches('^' + auth.uid + '_.+$') || root.child('agents').child(auth.uid).child('profile').child('currentAgentId').val() === $agentId)"
+        ".read": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || $agentId === auth.uid || root.child('agents').child(auth.uid).child('profile').child('currentAgentId').val() === $agentId)",
+        "$dataPath": {
+          ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (($agentId === auth.uid || root.child('agents').child(auth.uid).child('profile').child('currentAgentId').val() === $agentId) && $dataPath !== 'profile' && $dataPath !== 'subscription'))"
+        },
+        "profile": {
+          ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (($agentId === auth.uid || root.child('agents').child(auth.uid).child('profile').child('currentAgentId').val() === $agentId) && newData.child('role').val() === data.child('role').val() && newData.child('status').val() === data.child('status').val() && newData.child('approvedAt').val() === data.child('approvedAt').val() && newData.child('approvalRequestId').val() === data.child('approvalRequestId').val() && newData.child('admin').val() === data.child('admin').val() && (newData.child('currentAgentId').val() === data.child('currentAgentId').val() || newData.child('currentAgentId').val() === auth.uid)))",
+          ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (newData.child('role').val() === data.child('role').val() && newData.child('status').val() === data.child('status').val() && newData.child('approvedAt').val() === data.child('approvedAt').val() && newData.child('approvalRequestId').val() === data.child('approvalRequestId').val() && newData.child('admin').val() === data.child('admin').val() && (newData.child('currentAgentId').val() === data.child('currentAgentId').val() || newData.child('currentAgentId').val() === auth.uid)))"
+        },
+        "subscription": {
+          ".write": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'"
+        }
+      }
+    },
+    "global_chat": {
+      "chat": {
+        ".read": "auth != null",
+        "$messageId": {
+          ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (newData.exists() && newData.child('senderUid').val() === auth.uid))"
+        }
       }
     }
   }

@@ -5,10 +5,12 @@ class SubscriptionRequestsAdminScreen extends StatefulWidget {
   const SubscriptionRequestsAdminScreen({super.key});
 
   @override
-  State<SubscriptionRequestsAdminScreen> createState() => _SubscriptionRequestsAdminScreenState();
+  State<SubscriptionRequestsAdminScreen> createState() =>
+      _SubscriptionRequestsAdminScreenState();
 }
 
-class _SubscriptionRequestsAdminScreenState extends State<SubscriptionRequestsAdminScreen> {
+class _SubscriptionRequestsAdminScreenState
+    extends State<SubscriptionRequestsAdminScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -18,25 +20,40 @@ class _SubscriptionRequestsAdminScreenState extends State<SubscriptionRequestsAd
     super.dispose();
   }
 
-  Future<void> _approve(String requestId, Map<String, dynamic> data) async {
+  Future<void> _approve(SubscriptionRequestModel request) async {
     try {
-      await SubscriptionRequestService.approveRequestById(requestId: requestId, requestData: data);
+      await SubscriptionRequestService.approveRequestById(
+        requestId: request.requestId,
+        requestData: request.toMap(),
+        collectionPath: request.collectionPath,
+      );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم قبول الطلب بنجاح')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم قبول الطلب بنجاح')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('فشل قبول الطلب: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('فشل قبول الطلب: $e')));
     }
   }
 
-  Future<void> _reject(String requestId) async {
+  Future<void> _reject(SubscriptionRequestModel request) async {
     try {
-      await SubscriptionRequestService.rejectRequest(requestId: requestId);
+      await SubscriptionRequestService.rejectRequest(
+        requestId: request.requestId,
+        collectionPath: request.collectionPath,
+      );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم رفض الطلب')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم رفض الطلب')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('فشل رفض الطلب: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('فشل رفض الطلب: $e')));
     }
   }
 
@@ -47,12 +64,19 @@ class _SubscriptionRequestsAdminScreenState extends State<SubscriptionRequestsAd
         textDirection: TextDirection.rtl,
         child: AlertDialog(
           title: const Text('حذف البطاقة'),
-          content: Text('هل تريد حذف بطاقة الطلب الخاصة بـ ${request.firstName} ${request.lastName}؟'),
+          content: Text(
+            'هل تريد حذف بطاقة الطلب الخاصة بـ ${request.firstName} ${request.lastName}؟',
+          ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('إلغاء')),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('إلغاء'),
+            ),
             FilledButton(
               onPressed: () => Navigator.of(ctx).pop(true),
-              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC62828)),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFC62828),
+              ),
               child: const Text('حذف'),
             ),
           ],
@@ -63,12 +87,19 @@ class _SubscriptionRequestsAdminScreenState extends State<SubscriptionRequestsAd
     if (confirm != true) return;
 
     try {
-      await SubscriptionRequestService.deleteRequest(requestId: request.requestId);
+      await SubscriptionRequestService.deleteRequest(
+        requestId: request.requestId,
+        collectionPath: request.collectionPath,
+      );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حذف البطاقة')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم حذف البطاقة')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('فشل حذف البطاقة: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('فشل حذف البطاقة: $e')));
     }
   }
 
@@ -77,10 +108,7 @@ class _SubscriptionRequestsAdminScreenState extends State<SubscriptionRequestsAd
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('طلبات الاشتراك'),
-          centerTitle: true,
-        ),
+        appBar: AppBar(title: const Text('طلبات الاشتراك'), centerTitle: true),
         body: StreamBuilder<List<SubscriptionRequestModel>>(
           stream: SubscriptionRequestService.watchRequests(),
           builder: (context, snapshot) {
@@ -91,13 +119,18 @@ class _SubscriptionRequestsAdminScreenState extends State<SubscriptionRequestsAd
               return Center(child: Text('خطأ: ${snapshot.error}'));
             }
 
-            final requests = snapshot.data ?? const <SubscriptionRequestModel>[];
+            final requests =
+                snapshot.data ?? const <SubscriptionRequestModel>[];
             final q = _searchQuery.trim().toLowerCase();
             final filtered = q.isEmpty
                 ? requests
                 : requests.where((request) {
-                    final fullName = '${request.firstName} ${request.lastName}'.trim().toLowerCase();
-                    final plan = SubscriptionRequestService.planLabelFor(request.selectedPlan).toLowerCase();
+                    final fullName = '${request.firstName} ${request.lastName}'
+                        .trim()
+                        .toLowerCase();
+                    final plan = SubscriptionRequestService.planLabelFor(
+                      request.selectedPlan,
+                    ).toLowerCase();
                     final haystack = <String>[
                       fullName,
                       request.phone.toLowerCase(),
@@ -133,7 +166,9 @@ class _SubscriptionRequestsAdminScreenState extends State<SubscriptionRequestsAd
                               },
                               icon: const Icon(Icons.clear),
                             ),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
                   ),
                 ),
@@ -146,9 +181,18 @@ class _SubscriptionRequestsAdminScreenState extends State<SubscriptionRequestsAd
                           itemBuilder: (context, index) {
                             final request = filtered[index];
                             final status = request.status;
-                            final planLabel = SubscriptionRequestService.planLabelFor(request.selectedPlan);
+                            final planLabel =
+                                SubscriptionRequestService.planLabelFor(
+                                  request.selectedPlan,
+                                );
                             final createdAt = request.createdAt;
-                            final createdText = createdAt == null ? '—' : createdAt.toLocal().toString().split('.').first;
+                            final createdText = createdAt == null
+                                ? '—'
+                                : createdAt
+                                      .toLocal()
+                                      .toString()
+                                      .split('.')
+                                      .first;
 
                             return Card(
                               margin: const EdgeInsets.only(bottom: 12),
@@ -162,68 +206,127 @@ class _SubscriptionRequestsAdminScreenState extends State<SubscriptionRequestsAd
                                         Expanded(
                                           child: Text(
                                             '${request.firstName} ${request.lastName}',
-                                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w800,
+                                            ),
                                           ),
                                         ),
                                         Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 6,
+                                          ),
                                           decoration: BoxDecoration(
                                             color: _statusColor(status),
-                                            borderRadius: BorderRadius.circular(999),
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
                                           ),
-                                          child: Text(status, style: const TextStyle(color: Colors.white, fontSize: 12)),
+                                          child: Text(
+                                            status,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                            ),
+                                          ),
                                         ),
                                         const SizedBox(width: 6),
-                                        IconButton(
-                                          tooltip: 'حذف البطاقة',
-                                          onPressed: () => _deleteRequest(request),
-                                          icon: const Icon(Icons.delete_outline, color: Color(0xFFC62828)),
-                                        ),
+                                        if (request.collectionPath ==
+                                            SubscriptionRequestService
+                                                .collectionName)
+                                          IconButton(
+                                            tooltip: 'حذف البطاقة',
+                                            onPressed: () =>
+                                                _deleteRequest(request),
+                                            icon: const Icon(
+                                              Icons.delete_outline,
+                                              color: Color(0xFFC62828),
+                                            ),
+                                          ),
                                       ],
                                     ),
                                     const SizedBox(height: 8),
-                                    if (request.source.trim().toLowerCase() == 'paymentrequests') ...[
+                                    if (request.source.trim().toLowerCase() ==
+                                        'paymentrequests') ...[
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 6,
+                                        ),
                                         decoration: BoxDecoration(
                                           color: const Color(0xFFE3F2FD),
-                                          borderRadius: BorderRadius.circular(999),
-                                          border: Border.all(color: const Color(0xFF90CAF9)),
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                          border: Border.all(
+                                            color: const Color(0xFF90CAF9),
+                                          ),
                                         ),
                                         child: const Text(
                                           'المصدر: طلبات الدفع',
-                                          style: TextStyle(fontSize: 12, color: Color(0xFF1565C0), fontWeight: FontWeight.w700),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Color(0xFF1565C0),
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                         ),
                                       ),
                                       const SizedBox(height: 8),
                                     ],
                                     Text('الباقة: $planLabel'),
-                                    Text('السعر: ${request.amount.isEmpty ? '—' : request.amount}'),
-                                    Text('الهاتف: ${request.phone.isEmpty ? '—' : request.phone}'),
-                                    Text('البريد: ${request.email.isEmpty ? '—' : request.email}'),
-                                    Text('رقم التحويل: ${request.transferNumber.isEmpty ? '—' : request.transferNumber}'),
+                                    Text(
+                                      'السعر: ${request.amount.isEmpty ? '—' : request.amount}',
+                                    ),
+                                    Text(
+                                      'الهاتف: ${request.phone.isEmpty ? '—' : request.phone}',
+                                    ),
+                                    Text(
+                                      'البريد: ${request.email.isEmpty ? '—' : request.email}',
+                                    ),
+                                    Text(
+                                      'رقم التحويل: ${request.transferNumber.isEmpty ? '—' : request.transferNumber}',
+                                    ),
                                     Text('تاريخ الإرسال: $createdText'),
                                     const SizedBox(height: 10),
                                     if (request.receiptImageUrl.isNotEmpty)
                                       Padding(
-                                        padding: const EdgeInsets.only(bottom: 10),
-                                        child: Text('صورة الإيصال: ${request.receiptImageUrl}'),
+                                        padding: const EdgeInsets.only(
+                                          bottom: 10,
+                                        ),
+                                        child: Text(
+                                          'صورة الإيصال: ${request.receiptImageUrl}',
+                                        ),
                                       ),
                                     Row(
                                       children: [
                                         Expanded(
                                           child: ElevatedButton.icon(
-                                            onPressed: status == 'approved' || status == 'rejected' ? null : () => _approve(request.requestId, request.toMap()),
-                                            icon: const Icon(Icons.check_circle_outline),
+                                            onPressed:
+                                                status == 'pending' &&
+                                                    request.uid.isNotEmpty
+                                                ? () => _approve(request)
+                                                : null,
+                                            icon: const Icon(
+                                              Icons.check_circle_outline,
+                                            ),
                                             label: const Text('قبول'),
-                                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: const Color(
+                                                0xFF2E7D32,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                         const SizedBox(width: 8),
                                         Expanded(
                                           child: OutlinedButton.icon(
-                                            onPressed: status == 'approved' || status == 'rejected' ? null : () => _reject(request.requestId),
-                                            icon: const Icon(Icons.cancel_outlined),
+                                            onPressed: status == 'pending'
+                                                ? () => _reject(request)
+                                                : null,
+                                            icon: const Icon(
+                                              Icons.cancel_outlined,
+                                            ),
                                             label: const Text('رفض'),
                                           ),
                                         ),

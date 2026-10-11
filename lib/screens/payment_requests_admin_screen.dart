@@ -1,4 +1,3 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../models.dart';
@@ -9,20 +8,19 @@ class PaymentRequestsAdminScreen extends StatefulWidget {
   const PaymentRequestsAdminScreen({super.key});
 
   @override
-  State<PaymentRequestsAdminScreen> createState() => _PaymentRequestsAdminScreenState();
+  State<PaymentRequestsAdminScreen> createState() =>
+      _PaymentRequestsAdminScreenState();
 }
 
-class _PaymentRequestsAdminScreenState extends State<PaymentRequestsAdminScreen> {
+class _PaymentRequestsAdminScreenState
+    extends State<PaymentRequestsAdminScreen> {
   bool _busy = false;
 
   Future<void> _approve(PaymentRequestRecord request) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final data = await PaymentRequestService.approveRequest(
-        request: request,
-        approvedBy: FirebaseAuth.instance.currentUser?.email ?? AppStore.agentEmail,
-      );
+      final data = await PaymentRequestService.approveRequest(request: request);
 
       final phone = request.phone;
       final planLabel = (data['planLabel'] ?? request.planLabel).toString();
@@ -40,14 +38,19 @@ class _PaymentRequestsAdminScreenState extends State<PaymentRequestsAdminScreen>
 
       await RenderWhatsAppService.sendSingleMessage(
         to: phone,
-        message: 'مرحباً ${request.agentName}،\n✅ تم قبول طلب الاشتراك بنجاح.\n📦 الباقة: $planLabel\n📅 ينتهي الاشتراك: ${endDate.isNotEmpty ? endDate : '—'}\n\nشكراً لاختياركم خدمتنا.',
+        message:
+            'مرحباً ${request.agentName}،\n✅ تم قبول طلب الاشتراك بنجاح.\n📦 الباقة: $planLabel\n📅 ينتهي الاشتراك: ${endDate.isNotEmpty ? endDate : '—'}\n\nشكراً لاختياركم خدمتنا.',
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم قبول الطلب بنجاح')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم قبول الطلب بنجاح')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('فشل قبول الطلب: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('فشل قبول الطلب: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -71,7 +74,10 @@ class _PaymentRequestsAdminScreenState extends State<PaymentRequestsAdminScreen>
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, reasonController.text.trim()),
               child: const Text('تأكيد'),
@@ -87,7 +93,6 @@ class _PaymentRequestsAdminScreenState extends State<PaymentRequestsAdminScreen>
     try {
       await PaymentRequestService.rejectRequest(
         request: request,
-        rejectedBy: FirebaseAuth.instance.currentUser?.email ?? AppStore.agentEmail,
         rejectReason: reason,
       );
 
@@ -105,14 +110,19 @@ class _PaymentRequestsAdminScreenState extends State<PaymentRequestsAdminScreen>
 
       await RenderWhatsAppService.sendSingleMessage(
         to: phone,
-        message: 'مرحباً ${request.agentName}،\n❌ تم رفض طلب الاشتراك.\nالسبب: $reason\n\nللاستفسار يرجى التواصل مع:\n🏢 ${AppStore.effectiveAgentName}\n\nشكراً لكم.',
+        message:
+            'مرحباً ${request.agentName}،\n❌ تم رفض طلب الاشتراك.\nالسبب: $reason\n\nللاستفسار يرجى التواصل مع:\n🏢 ${AppStore.effectiveAgentName}\n\nشكراً لكم.',
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم رفض الطلب')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم رفض الطلب')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('فشل رفض الطلب: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('فشل رفض الطلب: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -128,9 +138,16 @@ class _PaymentRequestsAdminScreenState extends State<PaymentRequestsAdminScreen>
           title: const Text('صورة الإيصال'),
           content: SizedBox(
             width: 360,
-            child: InteractiveViewer(child: Image.network(url, fit: BoxFit.contain)),
+            child: InteractiveViewer(
+              child: Image.network(url, fit: BoxFit.contain),
+            ),
           ),
-          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق'))],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إغلاق'),
+            ),
+          ],
         ),
       ),
     );
@@ -141,10 +158,7 @@ class _PaymentRequestsAdminScreenState extends State<PaymentRequestsAdminScreen>
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('طلبات الدفع'),
-          centerTitle: true,
-        ),
+        appBar: AppBar(title: const Text('طلبات الدفع'), centerTitle: true),
         body: StreamBuilder<List<PaymentRequestRecord>>(
           stream: PaymentRequestService.watchPendingRequests(),
           builder: (context, snapshot) {
@@ -166,12 +180,17 @@ class _PaymentRequestsAdminScreenState extends State<PaymentRequestsAdminScreen>
               separatorBuilder: (_, _) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 final request = requests[index];
-                final created = DateTime.fromMillisecondsSinceEpoch(request.createdAt).toLocal();
-                final createdText = '${created.day.toString().padLeft(2, '0')}/${created.month.toString().padLeft(2, '0')}/${created.year} ${created.hour.toString().padLeft(2, '0')}:${created.minute.toString().padLeft(2, '0')}';
+                final created = DateTime.fromMillisecondsSinceEpoch(
+                  request.createdAt,
+                ).toLocal();
+                final createdText =
+                    '${created.day.toString().padLeft(2, '0')}/${created.month.toString().padLeft(2, '0')}/${created.year} ${created.hour.toString().padLeft(2, '0')}:${created.minute.toString().padLeft(2, '0')}';
 
                 return Card(
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Column(
@@ -181,17 +200,31 @@ class _PaymentRequestsAdminScreenState extends State<PaymentRequestsAdminScreen>
                           children: [
                             Expanded(
                               child: Text(
-                                request.agentName.isNotEmpty ? request.agentName : 'وكيل بدون اسم',
-                                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                                request.agentName.isNotEmpty
+                                    ? request.agentName
+                                    : 'وكيل بدون اسم',
+                                style: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                             ),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.orange.shade700,
                                 borderRadius: BorderRadius.circular(999),
                               ),
-                              child: const Text('pending', style: TextStyle(color: Colors.white, fontSize: 12)),
+                              child: const Text(
+                                'pending',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -200,7 +233,9 @@ class _PaymentRequestsAdminScreenState extends State<PaymentRequestsAdminScreen>
                         Text('رقم الهاتف: ${request.phone}'),
                         Text('نوع الاشتراك: ${request.planLabel}'),
                         Text('المبلغ: ${request.amount}'),
-                        Text('رقم التحويل: ${request.transferNumber.isEmpty ? '—' : request.transferNumber}'),
+                        Text(
+                          'رقم التحويل: ${request.transferNumber.isEmpty ? '—' : request.transferNumber}',
+                        ),
                         Text('تاريخ الطلب: $createdText'),
                         if (request.receiptImage.isNotEmpty) ...[
                           const SizedBox(height: 10),
@@ -217,23 +252,33 @@ class _PaymentRequestsAdminScreenState extends State<PaymentRequestsAdminScreen>
                             ),
                           ),
                           const SizedBox(height: 6),
-                          const Text('اضغط على الصورة لعرضها بحجم أكبر', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          const Text(
+                            'اضغط على الصورة لعرضها بحجم أكبر',
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
                         ],
                         const SizedBox(height: 14),
                         Row(
                           children: [
                             Expanded(
                               child: FilledButton.icon(
-                                onPressed: _busy ? null : () => _approve(request),
+                                onPressed: _busy
+                                    ? null
+                                    : () => _approve(request),
                                 icon: const Icon(Icons.check_circle_outline),
                                 label: const Text('قبول'),
-                                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2E7D32),
+                                  foregroundColor: Colors.white,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: OutlinedButton.icon(
-                                onPressed: _busy ? null : () => _reject(request),
+                                onPressed: _busy
+                                    ? null
+                                    : () => _reject(request),
                                 icon: const Icon(Icons.cancel_outlined),
                                 label: const Text('رفض'),
                               ),

@@ -21,7 +21,9 @@ String _normalizeSubscriberId(String? value) {
   final bytes = List<int>.generate(16, (_) => random.nextInt(256));
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  final hex = bytes.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+  final hex = bytes
+      .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+      .join();
   return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
       '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
       '${hex.substring(20)}';
@@ -165,8 +167,7 @@ class DailyTaskEvent {
     bool addRemainingDebtEvent = true,
     bool isReactivation = false,
   }) {
-    final safeCollected =
-        !isReactivation && collected.isFinite && collected > 0
+    final safeCollected = !isReactivation && collected.isFinite && collected > 0
         ? collected
         : 0.0;
     final safeRemaining = remaining.isFinite && remaining > 0 ? remaining : 0.0;
@@ -478,12 +479,12 @@ class Subscriber {
     Map<String, dynamic>? sasData,
     List<PaymentRecord>? payments,
     List<InvoiceRecord>? invoices,
-    }) : subscriberId = _normalizeSubscriberId(subscriberId),
-      payments = payments ?? <PaymentRecord>[],
+  }) : subscriberId = _normalizeSubscriberId(subscriberId),
+       payments = payments ?? <PaymentRecord>[],
        invoices = invoices ?? <InvoiceRecord>[],
        sasData = sasData ?? <String, dynamic>{};
 
-    final String subscriberId;
+  final String subscriberId;
   String user;
   String name;
   String phone;
@@ -1011,7 +1012,6 @@ class AppStore {
   static const int dailyTaskRetentionDays = 400;
   static const int maxDailyTaskEvents = 12000;
   static const String accountingActivationsKey = 'accountingActivations';
-  static const String subscriptionNodeKey = 'subscription';
   static String? _loadedUid;
   static const String activationTemplate =
       'مرحباً {{customer_name}}،\n✅ تم تفعيل اشتراك الإنترنت بنجاح.\n📦 الباقة: {{package_name}}\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المبلغ المتبقي: {{remaining_amount}} دينار عراقي\n📅 يبدأ الاشتراك: {{subscription_start}}\n📅 ينتهي الاشتراك: {{subscription_end}}\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
@@ -1536,8 +1536,8 @@ class AppStore {
     bool persistMissingIdsToFirebase = false,
   }) async {
     final primaryRaw = p.getString('subscribers');
-    final storageKey = preDecoded != null ||
-            (primaryRaw != null && primaryRaw.isNotEmpty)
+    final storageKey =
+        preDecoded != null || (primaryRaw != null && primaryRaw.isNotEmpty)
         ? 'subscribers'
         : 'subscribers_backup';
     final raw = preDecoded != null
@@ -1642,9 +1642,9 @@ class AppStore {
     await preferences.setString(storageKey, jsonEncode(decoded));
     if (persistToFirebase && _isLoggedIn && firebaseUpdates.isNotEmpty) {
       try {
-        await _agentRef.update(firebaseUpdates).timeout(
-          const Duration(seconds: 10),
-        );
+        await _agentRef
+            .update(firebaseUpdates)
+            .timeout(const Duration(seconds: 10));
       } catch (e) {
         debugPrint('Subscriber id Firebase update failed: $e');
       }
@@ -1895,16 +1895,6 @@ class AppStore {
         return const Duration(days: 0);
     }
   }
-
-  static Map<String, dynamic> _subscriptionMap() => {
-    'plan': subscriptionPlan.isNotEmpty ? subscriptionPlan : 'free',
-    'status': subscriptionStatus,
-    'durationDays': subscriptionDurationDays,
-    'startDate': subscriptionStartedAt?.toIso8601String(),
-    'endDate': subscriptionEndsAt?.toIso8601String(),
-    'autoExpire': subscriptionAutoExpire,
-    'lastPaymentId': subscriptionLastPaymentId,
-  };
 
   static void _applySubscriptionMap(Map<String, dynamic> source) {
     final planValue = (source['plan'] ?? '').toString().trim();
@@ -2333,8 +2323,12 @@ class AppStore {
       if (currentPassword.isEmpty) {
         throw StateError('أدخل كلمة المرور الحالية لتأكيد التغيير.');
       }
-      if (!user.providerData.any((provider) => provider.providerId == 'password')) {
-        throw StateError('تغيير البريد أو كلمة المرور غير متاح لهذا النوع من الحسابات.');
+      if (!user.providerData.any(
+        (provider) => provider.providerId == 'password',
+      )) {
+        throw StateError(
+          'تغيير البريد أو كلمة المرور غير متاح لهذا النوع من الحسابات.',
+        );
       }
 
       final credential = EmailAuthProvider.credential(
@@ -2460,11 +2454,8 @@ class AppStore {
         if (agentName.isNotEmpty) 'name': agentName,
         if (officePhone.trim().isNotEmpty) 'phone': officePhone.trim(),
         if (sasUsername.trim().isNotEmpty) 'sasUsername': sasUsername.trim(),
-        'status': sasUsername.trim().isNotEmpty ? 'active' : 'pending_sas',
         'updatedAt': ServerValue.timestamp,
       });
-
-      await ref.child(subscriptionNodeKey).set(_subscriptionMap());
 
       final packagesMap = _packagesMapPayload();
       final packagesList = _packagesListPayload();
@@ -2707,11 +2698,13 @@ class AppStore {
     try {
       if (_isLoggedIn) {
         final debtsPayload = buildDebtsPayload();
-        await _agentRef.update({
-          'settings/$subscribersRevisionKey': subscribersRevision,
-          'subscribers': subscribers.map((item) => item.toJson()).toList(),
-          'debts': debtsPayload.isEmpty ? null : debtsPayload,
-        }).timeout(const Duration(seconds: 10));
+        await _agentRef
+            .update({
+              'settings/$subscribersRevisionKey': subscribersRevision,
+              'subscribers': subscribers.map((item) => item.toJson()).toList(),
+              'debts': debtsPayload.isEmpty ? null : debtsPayload,
+            })
+            .timeout(const Duration(seconds: 10));
       }
       await save();
     } catch (error) {
@@ -2755,7 +2748,7 @@ class AppStore {
       if (event.subscriberUser.trim().toLowerCase() != user ||
           (event.type != 'activation' &&
               event.type != 'debt_added' &&
-            event.type != 'debt_payment' &&
+              event.type != 'debt_payment' &&
               event.type != DailyTaskEvent.debtEntryCollectionType)) {
         continue;
       }
@@ -2766,9 +2759,9 @@ class AppStore {
     }
 
     return (latestFinancialEvent?.type == 'debt_added' ||
-          latestFinancialEvent?.type == 'debt_payment' ||
-          latestFinancialEvent?.type ==
-            DailyTaskEvent.debtEntryCollectionType) &&
+            latestFinancialEvent?.type == 'debt_payment' ||
+            latestFinancialEvent?.type ==
+                DailyTaskEvent.debtEntryCollectionType) &&
         (latestFinancialEvent!.remainingAfter - subscriber.remaining).abs() <=
             0.0001;
   }

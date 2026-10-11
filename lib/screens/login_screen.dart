@@ -69,7 +69,9 @@ class _LoginScreenState extends State<LoginScreen> {
         email: widget.expiredEmail.trim().toLowerCase(),
         name: widget.expiredName.trim(),
         phone: widget.expiredPhone.trim(),
-        role: widget.expiredRole.trim().isEmpty ? 'agent' : widget.expiredRole.trim(),
+        role: widget.expiredRole.trim().isEmpty
+            ? 'agent'
+            : widget.expiredRole.trim(),
         governorate: widget.expiredGovernorate.trim(),
         region: widget.expiredRegion.trim(),
         address: widget.expiredAddress.trim(),
@@ -112,7 +114,9 @@ class _LoginScreenState extends State<LoginScreen> {
     final savedPassword = prefs.getString(_savedPasswordKey) ?? '';
     final lastSignedInEmail = prefs.getString(_lastSignedInEmailKey) ?? '';
 
-    final preferredEmail = savedEmail.isNotEmpty ? savedEmail : lastSignedInEmail;
+    final preferredEmail = savedEmail.isNotEmpty
+        ? savedEmail
+        : lastSignedInEmail;
     if (preferredEmail.isNotEmpty) {
       _usernameController.text = preferredEmail;
     }
@@ -145,7 +149,8 @@ class _LoginScreenState extends State<LoginScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final role = await UserRoleService.resolveRole(uid: uid);
     AppStore.refreshSubscriptionStatus();
-    if (role == UserRoleService.agentRole && AppStore.subscriptionStatus == 'expired') {
+    if (role == UserRoleService.agentRole &&
+        AppStore.subscriptionStatus == 'expired') {
       await _enforceExpiredAccessForCurrentSession();
       return;
     }
@@ -153,39 +158,41 @@ class _LoginScreenState extends State<LoginScreen> {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (context) => DashboardScreen(isAgentMode: role == UserRoleService.agentRole),
+        builder: (context) =>
+            DashboardScreen(isAgentMode: role == UserRoleService.agentRole),
       ),
     );
   }
 
-/// تحميل بيانات الوكيل من Firebase وبدء المزامنة
-Future<void> _loadAgentData() async {
-  try {
-    // إعادة تحميل البيانات من Firebase (إذا المستخدم مسجل)
-    await AppStore.load().timeout(const Duration(seconds: 8));
-    
-    // بدء المزامنة اللحظية
-    AppStore.startRealtimeSync();
-    AppStore.startChatSync();
-    
-    // مزامنة SAS بالخلفية
-    Future<void>(() async {
-      try {
-        final settings = await SasSettings.load();
-        if (settings.username.trim().isNotEmpty && settings.password.isNotEmpty) {
-          final api = SasApiService(settings);
-          await SasSyncService.sync(api).timeout(const Duration(seconds: 25));
-          AppStore.lastSasSync = DateTime.now();
-          await AppStore.save();
+  /// تحميل بيانات الوكيل من Firebase وبدء المزامنة
+  Future<void> _loadAgentData() async {
+    try {
+      // إعادة تحميل البيانات من Firebase (إذا المستخدم مسجل)
+      await AppStore.load().timeout(const Duration(seconds: 8));
+
+      // بدء المزامنة اللحظية
+      AppStore.startRealtimeSync();
+      AppStore.startChatSync();
+
+      // مزامنة SAS بالخلفية
+      Future<void>(() async {
+        try {
+          final settings = await SasSettings.load();
+          if (settings.username.trim().isNotEmpty &&
+              settings.password.isNotEmpty) {
+            final api = SasApiService(settings);
+            await SasSyncService.sync(api).timeout(const Duration(seconds: 25));
+            AppStore.lastSasSync = DateTime.now();
+            await AppStore.save();
+          }
+        } catch (_) {
+          // فشل المزامنة لا يمنع فتح التطبيق
         }
-      } catch (_) {
-        // فشل المزامنة لا يمنع فتح التطبيق
-      }
-    });
-  } catch (e) {
-    debugPrint('Agent data load error: $e');
+      });
+    } catch (e) {
+      debugPrint('Agent data load error: $e');
+    }
   }
-}
 
   @override
   void dispose() {
@@ -200,50 +207,56 @@ Future<void> _loadAgentData() async {
     final normalized = email.trim().toLowerCase();
     if (normalized.isEmpty) return null;
 
-    final snapshot = await FirebaseDatabase.instance.ref('agents').get();
-    final root = snapshot.value;
-    if (root is! Map) return null;
-
-    for (final entry in root.entries) {
-      if (entry.value is! Map) continue;
-      final node = Map<String, dynamic>.from(entry.value as Map);
-      final profile = node['profile'] is Map
-          ? Map<String, dynamic>.from(node['profile'] as Map)
-          : <String, dynamic>{};
-
-      final emailValue = (profile['email'] ?? '').toString().trim().toLowerCase();
-      if (emailValue != normalized) continue;
-
-      final subscription = node['subscription'] is Map
-          ? Map<String, dynamic>.from(node['subscription'] as Map)
-          : <String, dynamic>{};
-      final status = (subscription['status'] ?? '').toString().trim().toLowerCase();
-      final endDateRaw = (subscription['endDate'] ?? '').toString().trim();
-      final endDate = endDateRaw.isNotEmpty ? DateTime.tryParse(endDateRaw)?.toUtc() : null;
-      final now = DateTime.now().toUtc();
-      final isExpired = status == 'expired' || (endDate != null && !endDate.isAfter(now));
-      if (!isExpired) return null;
-
-      return ExpiredAccountData(
-        uid: entry.key.toString(),
-        email: emailValue,
-        name: (profile['name'] ?? '').toString().trim(),
-        phone: (profile['phone'] ?? '').toString().trim(),
-        role: (profile['role'] ?? 'agent').toString().trim(),
-        governorate: (profile['governorate'] ?? '').toString().trim(),
-        region: (profile['region'] ?? '').toString().trim(),
-        address: (profile['address'] ?? '').toString().trim(),
-      );
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null ||
+        user.email?.trim().toLowerCase() != normalized ||
+        user.uid == UserRoleService.trustedAdminUid) {
+      return null;
     }
-    return null;
+
+    final snapshot = await FirebaseDatabase.instance
+        .ref('agents/${user.uid}')
+        .get();
+    if (snapshot.value is! Map) return null;
+    final node = Map<String, dynamic>.from(snapshot.value as Map);
+    final profile = node['profile'] is Map
+        ? Map<String, dynamic>.from(node['profile'] as Map)
+        : <String, dynamic>{};
+    final subscription = node['subscription'] is Map
+        ? Map<String, dynamic>.from(node['subscription'] as Map)
+        : <String, dynamic>{};
+    final status = (subscription['status'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final endDateRaw = (subscription['endDate'] ?? '').toString().trim();
+    final endDate = endDateRaw.isNotEmpty
+        ? DateTime.tryParse(endDateRaw)?.toUtc()
+        : null;
+    final now = DateTime.now().toUtc();
+    final isExpired =
+        status == 'expired' || (endDate != null && !endDate.isAfter(now));
+    if (!isExpired) return null;
+
+    return ExpiredAccountData(
+      uid: user.uid,
+      email: normalized,
+      name: (profile['name'] ?? '').toString().trim(),
+      phone: (profile['phone'] ?? '').toString().trim(),
+      role: (profile['role'] ?? 'agent').toString().trim(),
+      governorate: (profile['governorate'] ?? '').toString().trim(),
+      region: (profile['region'] ?? '').toString().trim(),
+      address: (profile['address'] ?? '').toString().trim(),
+    );
   }
 
   Future<void> _enforceExpiredAccessForCurrentSession() async {
     final user = FirebaseAuth.instance.currentUser;
     final fallbackEmail = _usernameController.text.trim().toLowerCase();
-    final expired = await _findExpiredAccountByEmail((user?.email ?? fallbackEmail).trim().toLowerCase());
+    final expired = await _findExpiredAccountByEmail(
+      (user?.email ?? fallbackEmail).trim().toLowerCase(),
+    );
     await AppStore.clearForAccountSwitch(clearStorage: false);
-    await FirebaseAuth.instance.signOut();
     if (!mounted) return;
     setState(() {
       _isLoading = false;
@@ -260,18 +273,22 @@ Future<void> _loadAgentData() async {
     }
   }
 
-  Future<void> _openPendingRenewalIfExists({required ExpiredAccountData account}) async {
+  Future<void> _openPendingRenewalIfExists({
+    required ExpiredAccountData account,
+  }) async {
     if (!mounted || _pendingScreenOpening) return;
     _pendingScreenOpening = true;
     try {
-      final latest = await PaymentRequestService.findLatestRenewalRequestForAccount(
-        uid: account.uid,
-        email: account.email,
-      );
+      final latest =
+          await PaymentRequestService.findLatestRenewalRequestForAccount(
+            uid: account.uid,
+            email: account.email,
+          );
       if (!mounted || latest == null || !latest.isPending) return;
       _navigateToRenewalStatusScreen(
         account: account,
-        successNotice: 'تم إرسال طلب تجديد الاشتراك بنجاح.\nيرجى انتظار موافقة الإدارة.',
+        successNotice:
+            'تم إرسال طلب تجديد الاشتراك بنجاح.\nيرجى انتظار موافقة الإدارة.',
       );
     } finally {
       _pendingScreenOpening = false;
@@ -300,21 +317,23 @@ Future<void> _loadAgentData() async {
     required String transferNumber,
     required XFile? receiptFile,
   }) async {
-    final pending = await PaymentRequestService.findLatestRenewalRequestForAccount(
-      uid: account.uid,
-      email: account.email,
-    );
+    if (!await _ensureRenewalAccountAuthenticated(context, account)) return;
+    final pending =
+        await PaymentRequestService.findLatestRenewalRequestForAccount(
+          uid: account.uid,
+          email: account.email,
+        );
     if (pending != null && pending.isPending) {
       _navigateToRenewalStatusScreen(
         account: account,
-        successNotice: 'طلب التجديد الحالي قيد المراجعة.\nيرجى انتظار موافقة الإدارة.',
+        successNotice:
+            'طلب التجديد الحالي قيد المراجعة.\nيرجى انتظار موافقة الإدارة.',
       );
       return;
     }
 
     final requestId = await PaymentRequestService.createRequest(
       uid: account.uid,
-      userType: account.role.isEmpty ? 'agent' : account.role,
       phone: account.phone,
       email: account.email,
       agentName: account.name,
@@ -325,32 +344,31 @@ Future<void> _loadAgentData() async {
       amount: PaymentPlanCatalog.amount(selectedPlan),
       paymentMethod: 'Qi Card',
       transferNumber: transferNumber,
-      password: '',
       isRenewal: true,
       renewalForUid: account.uid,
     );
 
     if (receiptFile != null) {
-      final receipt = receiptFile;
-      unawaited(() async {
-        try {
-          final imageUrl = await PaymentRequestService.uploadReceiptImage(
-            requestId: requestId,
-            file: receipt,
-          ).timeout(const Duration(seconds: 30));
-          await PaymentRequestService.markRequestAsPendingReview(
-            requestId: requestId,
-            patch: {'receiptImage': imageUrl ?? ''},
-          ).timeout(const Duration(seconds: 15));
-        } catch (e) {
-          debugPrint('Renewal receipt upload/update failed for request $requestId: $e');
-        }
-      }());
+      try {
+        final imageUrl = await PaymentRequestService.uploadReceiptImage(
+          requestId: requestId,
+          file: receiptFile,
+        ).timeout(const Duration(seconds: 30));
+        await PaymentRequestService.markRequestAsPendingReview(
+          requestId: requestId,
+          patch: {'receiptImageUrl': imageUrl ?? ''},
+        ).timeout(const Duration(seconds: 15));
+      } catch (e) {
+        debugPrint(
+          'Renewal receipt upload/update failed for request $requestId: $e',
+        );
+      }
     }
 
     _navigateToRenewalStatusScreen(
       account: account,
-      successNotice: 'تم إرسال طلب تجديد الاشتراك بنجاح.\nيرجى انتظار موافقة الإدارة.',
+      successNotice:
+          'تم إرسال طلب تجديد الاشتراك بنجاح.\nيرجى انتظار موافقة الإدارة.',
     );
   }
 
@@ -371,14 +389,16 @@ Future<void> _loadAgentData() async {
       return;
     }
 
-    final pending = await PaymentRequestService.findLatestRenewalRequestForAccount(
-      uid: account.uid,
-      email: account.email,
-    );
+    final pending =
+        await PaymentRequestService.findLatestRenewalRequestForAccount(
+          uid: account.uid,
+          email: account.email,
+        );
     if (pending != null && pending.isPending) {
       _navigateToRenewalStatusScreen(
         account: account,
-        successNotice: 'طلب التجديد الحالي قيد المراجعة.\nيرجى انتظار موافقة الإدارة.',
+        successNotice:
+            'طلب التجديد الحالي قيد المراجعة.\nيرجى انتظار موافقة الإدارة.',
       );
       return;
     }
@@ -409,66 +429,92 @@ Future<void> _loadAgentData() async {
 
     setState(() => _isLoading = true);
 
-try {
-  final email = _usernameController.text.trim();
-  final password = _passwordController.text;
+    try {
+      final email = _usernameController.text.trim();
+      final password = _passwordController.text;
 
-  final expired = await _findExpiredAccountByEmail(email);
-  if (expired != null) {
-    if (mounted) {
-      setState(() {
-        _expiredAccount = expired;
-        _isLoading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('انتهى اشتراكك، يرجى تجديد الاشتراك.')),
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
       );
+      final signedInUser = credential.user;
+      if (signedInUser == null) {
+        throw StateError(
+          'Firebase Authentication did not return a signed-in user.',
+        );
+      }
+
+      if (signedInUser.uid != UserRoleService.trustedAdminUid) {
+        final profileSnapshot = await FirebaseDatabase.instance
+            .ref('agents/${signedInUser.uid}/profile')
+            .get();
+        final profile = profileSnapshot.value is Map
+            ? Map<String, dynamic>.from(profileSnapshot.value as Map)
+            : <String, dynamic>{};
+        if ((profile['role'] ?? '').toString() != UserRoleService.agentRole) {
+          await FirebaseAuth.instance.signOut();
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('حسابك بانتظار موافقة الإدارة قبل تسجيل الدخول.'),
+            ),
+          );
+          return;
+        }
+      }
+
+      final expired = await _findExpiredAccountByEmail(email);
+      if (expired != null) {
+        if (mounted) {
+          setState(() => _expiredAccount = expired);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('انتهى اشتراكك، يرجى تجديد الاشتراك.'),
+            ),
+          );
+          await _enforceExpiredAccessForCurrentSession();
+        }
+        return;
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      if (_rememberMe) {
+        await prefs.setBool(_rememberMeKey, true);
+        await prefs.setString(_savedEmailKey, email);
+        await prefs.setString(_savedPasswordKey, password);
+      } else {
+        await prefs.setBool(_rememberMeKey, false);
+        await prefs.remove(_savedEmailKey);
+        await prefs.remove(_savedPasswordKey);
+      }
+      await prefs.setString(_lastSignedInEmailKey, email);
+
+      // تحميل بيانات الوكيل بعد تسجيل الدخول
+      await _loadAgentData();
+
+      if (!mounted) return;
+      await _openHomeForCurrentUser();
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+
+      String message = 'فشل تسجيل الدخول';
+
+      if (e.code == 'invalid-credential' ||
+          e.code == 'user-not-found' ||
+          e.code == 'wrong-password') {
+        message = 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
+      } else if (e.code == 'invalid-email') {
+        message = 'صيغة البريد الإلكتروني غير صحيحة';
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
-    return;
-  }
-
-  await FirebaseAuth.instance.signInWithEmailAndPassword(
-    email: email,
-    password: password,
-  );
-  final prefs = await SharedPreferences.getInstance();
-  if (_rememberMe) {
-    await prefs.setBool(_rememberMeKey, true);
-    await prefs.setString(_savedEmailKey, email);
-    await prefs.setString(_savedPasswordKey, password);
-  } else {
-    await prefs.setBool(_rememberMeKey, false);
-    await prefs.remove(_savedEmailKey);
-    await prefs.remove(_savedPasswordKey);
-  }
-  await prefs.setString(_lastSignedInEmailKey, email);
-
-  // تحميل بيانات الوكيل بعد تسجيل الدخول
-  await _loadAgentData();
-
-  if (!mounted) return;
-  await _openHomeForCurrentUser();
-} on FirebaseAuthException catch (e) {
-  if (!mounted) return;
-
-  String message = 'فشل تسجيل الدخول';
-
-  if (e.code == 'invalid-credential' ||
-      e.code == 'user-not-found' ||
-      e.code == 'wrong-password') {
-    message = 'البريد الإلكتروني أو كلمة المرور غير صحيحة';
-  } else if (e.code == 'invalid-email') {
-    message = 'صيغة البريد الإلكتروني غير صحيحة';
-  }
-
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text(message)),
-  );
-} finally {
-  if (mounted) {
-    setState(() => _isLoading = false);
-  }
-}
   }
 
   @override
@@ -493,7 +539,10 @@ try {
           child: SafeArea(
             child: Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 24,
+                ),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 430),
                   child: Card(
@@ -546,19 +595,28 @@ try {
                               decoration: InputDecoration(
                                 labelText: 'اسم المستخدم',
                                 hintText: 'أدخل اسم المستخدم',
-                                prefixIcon: const Icon(Icons.person_outline, color: Color(0xFF2E7D32)),
+                                prefixIcon: const Icon(
+                                  Icons.person_outline,
+                                  color: Color(0xFF2E7D32),
+                                ),
                                 filled: true,
-                                fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                                fillColor: colorScheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.45),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: Colors.green.shade200),
+                                  borderSide: BorderSide(
+                                    color: Colors.green.shade200,
+                                  ),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
-                                  borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 1.8),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFF2E7D32),
+                                    width: 1.8,
+                                  ),
                                 ),
                               ),
                               validator: (value) {
@@ -577,26 +635,39 @@ try {
                               decoration: InputDecoration(
                                 labelText: 'كلمة المرور',
                                 hintText: 'أدخل كلمة المرور',
-                                prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFF2E7D32)),
+                                prefixIcon: const Icon(
+                                  Icons.lock_outline,
+                                  color: Color(0xFF2E7D32),
+                                ),
                                 suffixIcon: IconButton(
-                                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                                  onPressed: () => setState(
+                                    () => _obscurePassword = !_obscurePassword,
+                                  ),
                                   icon: Icon(
-                                    _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                                    _obscurePassword
+                                        ? Icons.visibility_outlined
+                                        : Icons.visibility_off_outlined,
                                     color: const Color(0xFF2E7D32),
                                   ),
                                 ),
                                 filled: true,
-                                fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                                fillColor: colorScheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.45),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
-                                  borderSide: BorderSide(color: Colors.green.shade200),
+                                  borderSide: BorderSide(
+                                    color: Colors.green.shade200,
+                                  ),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
-                                  borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 1.8),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFF2E7D32),
+                                    width: 1.8,
+                                  ),
                                 ),
                               ),
                               validator: (value) {
@@ -621,10 +692,17 @@ try {
                                           () => _rememberMe = value ?? false,
                                         );
                                         if (!(_rememberMe)) {
-                                          SharedPreferences.getInstance().then((prefs) async {
-                                            await prefs.setBool(_rememberMeKey, false);
+                                          SharedPreferences.getInstance().then((
+                                            prefs,
+                                          ) async {
+                                            await prefs.setBool(
+                                              _rememberMeKey,
+                                              false,
+                                            );
                                             await prefs.remove(_savedEmailKey);
-                                            await prefs.remove(_savedPasswordKey);
+                                            await prefs.remove(
+                                              _savedPasswordKey,
+                                            );
                                           });
                                         }
                                       },
@@ -652,12 +730,17 @@ try {
                                 decoration: BoxDecoration(
                                   color: const Color(0xFFFFEBEE),
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: const Color(0xFFEF9A9A)),
+                                  border: Border.all(
+                                    color: const Color(0xFFEF9A9A),
+                                  ),
                                 ),
                                 child: const Text(
                                   'انتهى اشتراكك، يرجى تجديد الاشتراك.',
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(color: Color(0xFFC62828), fontWeight: FontWeight.w700),
+                                  style: TextStyle(
+                                    color: Color(0xFFC62828),
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 10),
@@ -668,11 +751,17 @@ try {
                                   onPressed: _isRenewActionBusy
                                       ? null
                                       : () async {
-                                          setState(() => _isRenewActionBusy = true);
+                                          setState(
+                                            () => _isRenewActionBusy = true,
+                                          );
                                           try {
                                             await _openRenewSubscriptionFlow();
                                           } finally {
-                                            if (mounted) setState(() => _isRenewActionBusy = false);
+                                            if (mounted)
+                                              setState(
+                                                () =>
+                                                    _isRenewActionBusy = false,
+                                              );
                                           }
                                         },
                                   style: FilledButton.styleFrom(
@@ -686,12 +775,20 @@ try {
                                       ? const SizedBox(
                                           width: 18,
                                           height: 18,
-                                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
                                         )
                                       : const Icon(Icons.restart_alt),
                                   label: Text(
-                                    _isRenewActionBusy ? 'يرجى الانتظار...' : 'تجديد الاشتراك',
-                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                    _isRenewActionBusy
+                                        ? 'يرجى الانتظار...'
+                                        : 'تجديد الاشتراك',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -719,17 +816,21 @@ try {
                                         )
                                       : const Text(
                                           'دخول',
-                                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                         ),
                                 ),
                               ),
                             const SizedBox(height: 10),
-TextButton(
+                            TextButton(
                               onPressed: () {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => const SubscriptionPlansScreen(),
+                                    builder: (context) =>
+                                        const SubscriptionPlansScreen(),
                                   ),
                                 );
                               },
@@ -737,7 +838,7 @@ TextButton(
                                 foregroundColor: const Color(0xFF2E7D32),
                               ),
                               child: const Text('الاشتراك وإنشاء الحساب'),
-),
+                            ),
                           ],
                         ),
                       ),
@@ -752,6 +853,7 @@ TextButton(
     );
   }
 }
+
 class RegisterScreen extends StatefulWidget {
   final String selectedPlan;
   final String transferNumber;
@@ -786,6 +888,48 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _receiptFile = widget.receiptFile;
   }
 
+  Future<User> _getRegistrationUser({
+    required String email,
+    required String password,
+  }) async {
+    final auth = FirebaseAuth.instance;
+    final currentUser = auth.currentUser;
+    if (currentUser != null) {
+      if (currentUser.email?.trim().toLowerCase() != email) {
+        throw StateError(
+          'The signed-in account does not match the registration email.',
+        );
+      }
+      return currentUser;
+    }
+
+    try {
+      final credential = await auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      final user = credential.user;
+      if (user == null) {
+        throw StateError('Firebase Authentication did not return a user.');
+      }
+      return user;
+    } on FirebaseAuthException catch (error) {
+      if (error.code != 'email-already-in-use') rethrow;
+      final credential = await auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      final user = credential.user;
+      if (user == null || user.email?.trim().toLowerCase() != email) {
+        await auth.signOut();
+        throw StateError(
+          'The existing account could not be verified for this registration.',
+        );
+      }
+      return user;
+    }
+  }
+
   Future<void> _submitPaidSubscriptionRequest() async {
     if (_fullNameController.text.trim().isEmpty ||
         _phoneController.text.trim().isEmpty ||
@@ -808,47 +952,49 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = true);
 
     try {
+      final email = _emailController.text.trim().toLowerCase();
+      final user = await _getRegistrationUser(
+        email: email,
+        password: _passwordController.text,
+      );
+
       final requestId = await PaymentRequestService.createRequest(
-        uid: '',
-        userType: 'agent',
+        uid: user.uid,
         phone: _phoneController.text.trim(),
-        email: _emailController.text.trim().toLowerCase(),
+        email: email,
         agentName: _fullNameController.text.trim(),
         selectedPlan: _selectedPlan,
         amount: PaymentPlanCatalog.amount(_selectedPlan),
         paymentMethod: 'Qi Card',
         transferNumber: _transferNumber,
-        password: _passwordController.text,
       );
 
-      if (!mounted) return;
-      setState(() => _isLoading = false);
-
       if (_receiptFile != null) {
-        final receipt = _receiptFile!;
-        unawaited(() async {
-          try {
-            final imageUrl = await PaymentRequestService.uploadReceiptImage(
-              requestId: requestId,
-              file: receipt,
-            ).timeout(const Duration(seconds: 30));
-            await PaymentRequestService.markRequestAsPendingReview(
-              requestId: requestId,
-              patch: {'receiptImage': imageUrl ?? ''},
-            ).timeout(const Duration(seconds: 15));
-          } catch (e) {
-            debugPrint('Receipt upload/update failed for request $requestId: $e');
-          }
-        }());
+        try {
+          final imageUrl = await PaymentRequestService.uploadReceiptImage(
+            requestId: requestId,
+            file: _receiptFile!,
+          ).timeout(const Duration(seconds: 30));
+          await PaymentRequestService.markRequestAsPendingReview(
+            requestId: requestId,
+            patch: {'receiptImageUrl': imageUrl ?? ''},
+          ).timeout(const Duration(seconds: 15));
+        } catch (e) {
+          debugPrint('Receipt upload/update failed for request $requestId: $e');
+        }
       }
+      await FirebaseAuth.instance.signOut();
 
+      if (!mounted) return;
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => Directionality(
           textDirection: TextDirection.rtl,
           child: AlertDialog(
-            content: const Text('تم إرسال طلب الاشتراك بنجاح، وهو الآن بانتظار موافقة الإدارة.'),
+            content: const Text(
+              'تم إرسال طلب الاشتراك بنجاح، وهو الآن بانتظار موافقة الإدارة.',
+            ),
             actions: [
               FilledButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -866,9 +1012,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('فشل إرسال الطلب: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('فشل إرسال الطلب: $e')));
     } finally {
       if (mounted && _isLoading) {
         setState(() => _isLoading = false);
@@ -936,7 +1082,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(24),
                         gradient: LinearGradient(
-                          colors: [const Color(0xFF1E88E5), const Color(0xFF43A047)],
+                          colors: [
+                            const Color(0xFF1E88E5),
+                            const Color(0xFF43A047),
+                          ],
                           begin: Alignment.topRight,
                           end: Alignment.bottomLeft,
                         ),
@@ -950,7 +1099,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               color: Colors.white.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(14),
                             ),
-                            child: const Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 24),
+                            child: const Icon(
+                              Icons.person_add_alt_1_rounded,
+                              color: Colors.white,
+                              size: 24,
+                            ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -959,12 +1112,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               children: [
                                 const Text(
                                   'إنشاء حساب الاشتراك',
-                                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Colors.white),
+                                  style: TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
                                   'بعد اختيار الباقة، أدخل بياناتك ثم أرسل طلب الاشتراك للمراجعة.',
-                                  style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13),
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.9),
+                                    fontSize: 13,
+                                  ),
                                 ),
                               ],
                             ),
@@ -978,7 +1138,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       icon: Icons.person_outline,
                       child: Column(
                         children: [
-                          _styledField(controller: _fullNameController, label: 'الاسم الكامل', icon: Icons.person),
+                          _styledField(
+                            controller: _fullNameController,
+                            label: 'الاسم الكامل',
+                            icon: Icons.person,
+                          ),
                           const SizedBox(height: 12),
                           _styledField(
                             controller: _phoneController,
@@ -994,9 +1158,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             keyboardType: TextInputType.emailAddress,
                           ),
                           const SizedBox(height: 12),
-                          _styledField(controller: _passwordController, label: 'كلمة المرور', icon: Icons.lock_outline, obscureText: true),
+                          _styledField(
+                            controller: _passwordController,
+                            label: 'كلمة المرور',
+                            icon: Icons.lock_outline,
+                            obscureText: true,
+                          ),
                           const SizedBox(height: 12),
-                          _styledField(controller: _confirmPasswordController, label: 'تأكيد كلمة المرور', icon: Icons.lock_reset_outlined, obscureText: true),
+                          _styledField(
+                            controller: _confirmPasswordController,
+                            label: 'تأكيد كلمة المرور',
+                            icon: Icons.lock_reset_outlined,
+                            obscureText: true,
+                          ),
                         ],
                       ),
                     ),
@@ -1011,12 +1185,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.payment_rounded, color: Color(0xFF2E7D32)),
+                          const Icon(
+                            Icons.payment_rounded,
+                            color: Color(0xFF2E7D32),
+                          ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               'الباقة المختارة: ${_planLabel(_selectedPlan)}',
-                              style: TextStyle(color: colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600),
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ],
@@ -1027,7 +1207,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       onPressed: () {
                         Navigator.pushReplacement(
                           context,
-                          MaterialPageRoute(builder: (_) => const SubscriptionPlansScreen()),
+                          MaterialPageRoute(
+                            builder: (_) => const SubscriptionPlansScreen(),
+                          ),
                         );
                       },
                       child: const Text('تغيير الباقة'),
@@ -1037,20 +1219,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       width: double.infinity,
                       height: 56,
                       child: FilledButton.icon(
-                        onPressed: _isLoading ? null : _submitPaidSubscriptionRequest,
+                        onPressed: _isLoading
+                            ? null
+                            : _submitPaidSubscriptionRequest,
                         icon: _isLoading
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white))
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  color: Colors.white,
+                                ),
+                              )
                             : const Icon(Icons.send_outlined),
                         label: Text(
-                          _isLoading
-                              ? 'جاري الإرسال...'
-                              : 'إرسال طلب الاشتراك',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                          _isLoading ? 'جاري الإرسال...' : 'إرسال طلب الاشتراك',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                         style: FilledButton.styleFrom(
                           backgroundColor: const Color(0xFF2E7D32),
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                         ),
                       ),
                     ),
@@ -1064,7 +1258,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Widget _sectionCard({required String title, required IconData icon, required Widget child}) {
+  Widget _sectionCard({
+    required String title,
+    required IconData icon,
+    required Widget child,
+  }) {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
@@ -1072,7 +1270,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 12, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1089,7 +1293,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 child: Icon(icon, color: colorScheme.primary, size: 20),
               ),
               const SizedBox(width: 10),
-              Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: colorScheme.onSurface)),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: colorScheme.onSurface,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -1152,6 +1363,77 @@ class ExpiredAccountData {
   final String address;
 }
 
+Future<bool> _ensureRenewalAccountAuthenticated(
+  BuildContext context,
+  ExpiredAccountData account,
+) async {
+  final currentUser = FirebaseAuth.instance.currentUser;
+  if (currentUser?.uid == account.uid) return true;
+  if (currentUser != null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('سجّل الخروج من الحساب الحالي قبل طلب تجديد حساب آخر.'),
+      ),
+    );
+    return false;
+  }
+
+  final passwordController = TextEditingController();
+  final password = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: const Text('تأكيد ملكية الحساب'),
+        content: TextField(
+          controller: passwordController,
+          obscureText: true,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'كلمة مرور الحساب',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(passwordController.text),
+            child: const Text('متابعة'),
+          ),
+        ],
+      ),
+    ),
+  );
+  passwordController.dispose();
+  if (password == null || password.isEmpty) return false;
+
+  try {
+    final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+      email: account.email,
+      password: password,
+    );
+    if (credential.user?.uid == account.uid) return true;
+    await FirebaseAuth.instance.signOut();
+    throw StateError('Signed-in account does not match the renewal account.');
+  } on FirebaseAuthException catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'تعذر التحقق من الحساب: ${error.message ?? error.code}',
+          ),
+        ),
+      );
+    }
+    return false;
+  }
+}
+
 class RenewalRequestStatusScreen extends StatefulWidget {
   const RenewalRequestStatusScreen({
     super.key,
@@ -1163,10 +1445,12 @@ class RenewalRequestStatusScreen extends StatefulWidget {
   final String? successNotice;
 
   @override
-  State<RenewalRequestStatusScreen> createState() => _RenewalRequestStatusScreenState();
+  State<RenewalRequestStatusScreen> createState() =>
+      _RenewalRequestStatusScreenState();
 }
 
-class _RenewalRequestStatusScreenState extends State<RenewalRequestStatusScreen> {
+class _RenewalRequestStatusScreenState
+    extends State<RenewalRequestStatusScreen> {
   bool _navigatedAfterApproval = false;
   bool _isSubmittingNew = false;
 
@@ -1175,10 +1459,14 @@ class _RenewalRequestStatusScreenState extends State<RenewalRequestStatusScreen>
     required String transferNumber,
     required XFile? receiptFile,
   }) async {
-    final pending = await PaymentRequestService.findLatestRenewalRequestForAccount(
-      uid: widget.account.uid,
-      email: widget.account.email,
-    );
+    if (!await _ensureRenewalAccountAuthenticated(context, widget.account)) {
+      return;
+    }
+    final pending =
+        await PaymentRequestService.findLatestRenewalRequestForAccount(
+          uid: widget.account.uid,
+          email: widget.account.email,
+        );
     if (pending != null && pending.isPending) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1189,7 +1477,6 @@ class _RenewalRequestStatusScreenState extends State<RenewalRequestStatusScreen>
 
     final requestId = await PaymentRequestService.createRequest(
       uid: widget.account.uid,
-      userType: widget.account.role.isEmpty ? 'agent' : widget.account.role,
       phone: widget.account.phone,
       email: widget.account.email,
       agentName: widget.account.name,
@@ -1200,32 +1487,34 @@ class _RenewalRequestStatusScreenState extends State<RenewalRequestStatusScreen>
       amount: PaymentPlanCatalog.amount(selectedPlan),
       paymentMethod: 'Qi Card',
       transferNumber: transferNumber,
-      password: '',
       isRenewal: true,
       renewalForUid: widget.account.uid,
     );
 
     if (receiptFile != null) {
-      final receipt = receiptFile;
-      unawaited(() async {
-        try {
-          final imageUrl = await PaymentRequestService.uploadReceiptImage(
-            requestId: requestId,
-            file: receipt,
-          ).timeout(const Duration(seconds: 30));
-          await PaymentRequestService.markRequestAsPendingReview(
-            requestId: requestId,
-            patch: {'receiptImage': imageUrl ?? ''},
-          ).timeout(const Duration(seconds: 15));
-        } catch (e) {
-          debugPrint('Renewal receipt upload/update failed for request $requestId: $e');
-        }
-      }());
+      try {
+        final imageUrl = await PaymentRequestService.uploadReceiptImage(
+          requestId: requestId,
+          file: receiptFile,
+        ).timeout(const Duration(seconds: 30));
+        await PaymentRequestService.markRequestAsPendingReview(
+          requestId: requestId,
+          patch: {'receiptImageUrl': imageUrl ?? ''},
+        ).timeout(const Duration(seconds: 15));
+      } catch (e) {
+        debugPrint(
+          'Renewal receipt upload/update failed for request $requestId: $e',
+        );
+      }
     }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تم إرسال طلب تجديد الاشتراك بنجاح. يرجى انتظار موافقة الإدارة.')),
+      const SnackBar(
+        content: Text(
+          'تم إرسال طلب تجديد الاشتراك بنجاح. يرجى انتظار موافقة الإدارة.',
+        ),
+      ),
     );
     setState(() {});
   }
@@ -1257,7 +1546,11 @@ class _RenewalRequestStatusScreenState extends State<RenewalRequestStatusScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تمت الموافقة على تجديد اشتراكك. يمكنك تسجيل الدخول الآن.')),
+        const SnackBar(
+          content: Text(
+            'تمت الموافقة على تجديد اشتراكك. يمكنك تسجيل الدخول الآن.',
+          ),
+        ),
       );
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -1300,48 +1593,75 @@ class _RenewalRequestStatusScreenState extends State<RenewalRequestStatusScreen>
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 520),
                   child: Card(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(22),
+                    ),
                     child: Padding(
                       padding: const EdgeInsets.all(20),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Icon(
-                            isPending ? Icons.hourglass_top_rounded : (isRejected ? Icons.cancel_rounded : Icons.info_outline),
+                            isPending
+                                ? Icons.hourglass_top_rounded
+                                : (isRejected
+                                      ? Icons.cancel_rounded
+                                      : Icons.info_outline),
                             size: 58,
-                            color: isPending ? const Color(0xFF1565C0) : (isRejected ? const Color(0xFFC62828) : colorScheme.primary),
+                            color: isPending
+                                ? const Color(0xFF1565C0)
+                                : (isRejected
+                                      ? const Color(0xFFC62828)
+                                      : colorScheme.primary),
                           ),
                           const SizedBox(height: 14),
                           Text(
                             isPending
                                 ? 'تم إرسال طلب تجديد الاشتراك بنجاح.'
-                                : (isRejected ? 'تم رفض طلب التجديد.' : 'لا يوجد طلب تجديد قيد المراجعة حالياً.'),
+                                : (isRejected
+                                      ? 'تم رفض طلب التجديد.'
+                                      : 'لا يوجد طلب تجديد قيد المراجعة حالياً.'),
                             textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                           const SizedBox(height: 8),
                           Text(
                             isPending
                                 ? 'يرجى انتظار موافقة الإدارة.'
                                 : (isRejected
-                                    ? (rejectedReason.isEmpty ? 'يمكنك إرسال طلب جديد.' : 'سبب الرفض: $rejectedReason')
-                                    : 'يمكنك إرسال طلب تجديد جديد.'),
+                                      ? (rejectedReason.isEmpty
+                                            ? 'يمكنك إرسال طلب جديد.'
+                                            : 'سبب الرفض: $rejectedReason')
+                                      : 'يمكنك إرسال طلب تجديد جديد.'),
                             textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 14, color: colorScheme.onSurfaceVariant),
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                           ),
-                          if (widget.successNotice != null && widget.successNotice!.trim().isNotEmpty && isPending) ...[
+                          if (widget.successNotice != null &&
+                              widget.successNotice!.trim().isNotEmpty &&
+                              isPending) ...[
                             const SizedBox(height: 10),
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFE8F5E9),
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: const Color(0xFFA5D6A7)),
+                                border: Border.all(
+                                  color: const Color(0xFFA5D6A7),
+                                ),
                               ),
                               child: Text(
                                 widget.successNotice!,
                                 textAlign: TextAlign.center,
-                                style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF2E7D32)),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF2E7D32),
+                                ),
                               ),
                             ),
                           ],
@@ -1354,17 +1674,25 @@ class _RenewalRequestStatusScreenState extends State<RenewalRequestStatusScreen>
                                     try {
                                       _openNewRenewalFlow();
                                     } finally {
-                                      if (mounted) setState(() => _isSubmittingNew = false);
+                                      if (mounted)
+                                        setState(
+                                          () => _isSubmittingNew = false,
+                                        );
                                     }
                                   },
                             icon: _isSubmittingNew
                                 ? const SizedBox(
                                     width: 18,
                                     height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
                                   )
                                 : const Icon(Icons.restart_alt),
-                            label: Text(isPending ? 'بانتظار الموافقة' : 'إرسال طلب جديد'),
+                            label: Text(
+                              isPending ? 'بانتظار الموافقة' : 'إرسال طلب جديد',
+                            ),
                           ),
                           const SizedBox(height: 8),
                           OutlinedButton(
@@ -1378,7 +1706,8 @@ class _RenewalRequestStatusScreenState extends State<RenewalRequestStatusScreen>
                                     expiredName: widget.account.name,
                                     expiredPhone: widget.account.phone,
                                     expiredRole: widget.account.role,
-                                    expiredGovernorate: widget.account.governorate,
+                                    expiredGovernorate:
+                                        widget.account.governorate,
                                     expiredRegion: widget.account.region,
                                     expiredAddress: widget.account.address,
                                   ),
@@ -1404,7 +1733,12 @@ class _RenewalRequestStatusScreenState extends State<RenewalRequestStatusScreen>
 
 class SubscriptionPlansScreen extends StatelessWidget {
   final ExpiredAccountData? renewalAccount;
-  final Future<void> Function(String plan, String transferNumber, XFile? receiptFile)? onRenewSubmit;
+  final Future<void> Function(
+    String plan,
+    String transferNumber,
+    XFile? receiptFile,
+  )?
+  onRenewSubmit;
 
   const SubscriptionPlansScreen({
     super.key,
@@ -1440,28 +1774,36 @@ class SubscriptionPlansScreen extends StatelessWidget {
         builder: (_) => MasterAccountScreen(
           planLabel: _planLabel(plan),
           planPrice: _planPrice(plan),
-          onContinue: ({required String transferNumber, XFile? receiptFile}) async {
-            if (renewalAccount != null && onRenewSubmit != null) {
-              await onRenewSubmit!(plan, transferNumber, receiptFile);
-              return;
-            }
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => RegisterScreen(
-                  selectedPlan: plan,
-                  transferNumber: transferNumber,
-                  receiptFile: receiptFile,
-                ),
-              ),
-            );
-          },
+          onContinue:
+              ({required String transferNumber, XFile? receiptFile}) async {
+                if (renewalAccount != null && onRenewSubmit != null) {
+                  await onRenewSubmit!(plan, transferNumber, receiptFile);
+                  return;
+                }
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => RegisterScreen(
+                      selectedPlan: plan,
+                      transferNumber: transferNumber,
+                      receiptFile: receiptFile,
+                    ),
+                  ),
+                );
+              },
         ),
       ),
     );
   }
 
-  Widget _planTile(BuildContext context, {required String plan, required String title, required String subtitle, required String price, required Color accent}) {
+  Widget _planTile(
+    BuildContext context, {
+    required String plan,
+    required String title,
+    required String subtitle,
+    required String price,
+    required Color accent,
+  }) {
     return InkWell(
       onTap: () => _openRegistration(context, plan),
       child: Container(
@@ -1471,7 +1813,13 @@ class SubscriptionPlansScreen extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: accent.withValues(alpha: 0.25)),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Row(
           children: [
@@ -1489,14 +1837,33 @@ class SubscriptionPlansScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text(subtitle, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
                 ],
               ),
             ),
             const SizedBox(width: 10),
-            Text(price, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: accent)),
+            Text(
+              price,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: accent,
+              ),
+            ),
           ],
         ),
       ),
@@ -1539,17 +1906,58 @@ class SubscriptionPlansScreen extends StatelessWidget {
                       child: const Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('اختر الباقة المناسبة', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)),
+                          Text(
+                            'اختر الباقة المناسبة',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                            ),
+                          ),
                           SizedBox(height: 4),
-                          Text('بعد اختيار الباقة تنتقل مباشرة إلى صفحة إنشاء الحساب.', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          Text(
+                            'بعد اختيار الباقة تنتقل مباشرة إلى صفحة إنشاء الحساب.',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                            ),
+                          ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 18),
-                    _planTile(context, plan: PaymentPlanCatalog.free15Days, title: 'مجاني 15 يوم', subtitle: 'تجربة أولية', price: 'مجاني', accent: const Color(0xFF2E7D32)),
-                    _planTile(context, plan: PaymentPlanCatalog.threeMonths, title: '3 أشهر', subtitle: 'اشتراك مدفوع', price: '20,000 دينار', accent: const Color(0xFF1565C0)),
-                    _planTile(context, plan: PaymentPlanCatalog.sixMonths, title: '6 أشهر', subtitle: 'اشتراك مدفوع', price: '30,000 دينار', accent: const Color(0xFF00897B)),
-                    _planTile(context, plan: PaymentPlanCatalog.oneYear, title: 'سنة', subtitle: 'اشتراك مدفوع', price: '45,000 دينار', accent: const Color(0xFF8E24AA)),
+                    _planTile(
+                      context,
+                      plan: PaymentPlanCatalog.free15Days,
+                      title: 'مجاني 15 يوم',
+                      subtitle: 'تجربة أولية',
+                      price: 'مجاني',
+                      accent: const Color(0xFF2E7D32),
+                    ),
+                    _planTile(
+                      context,
+                      plan: PaymentPlanCatalog.threeMonths,
+                      title: '3 أشهر',
+                      subtitle: 'اشتراك مدفوع',
+                      price: '20,000 دينار',
+                      accent: const Color(0xFF1565C0),
+                    ),
+                    _planTile(
+                      context,
+                      plan: PaymentPlanCatalog.sixMonths,
+                      title: '6 أشهر',
+                      subtitle: 'اشتراك مدفوع',
+                      price: '30,000 دينار',
+                      accent: const Color(0xFF00897B),
+                    ),
+                    _planTile(
+                      context,
+                      plan: PaymentPlanCatalog.oneYear,
+                      title: 'سنة',
+                      subtitle: 'اشتراك مدفوع',
+                      price: '45,000 دينار',
+                      accent: const Color(0xFF8E24AA),
+                    ),
                   ],
                 ),
               ),
@@ -1564,7 +1972,11 @@ class SubscriptionPlansScreen extends StatelessWidget {
 class MasterAccountScreen extends StatefulWidget {
   final String planLabel;
   final String planPrice;
-  final Future<void> Function({required String transferNumber, XFile? receiptFile}) onContinue;
+  final Future<void> Function({
+    required String transferNumber,
+    XFile? receiptFile,
+  })
+  onContinue;
 
   const MasterAccountScreen({
     super.key,
@@ -1598,17 +2010,24 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
 
   Future<void> _handleContinue() async {
     if (_transferController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يرجى إدخال رقم التحويل')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('يرجى إدخال رقم التحويل')));
       return;
     }
     if (_receiptFile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يرجى إرفاق صورة وصل الدفع')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('يرجى إرفاق صورة وصل الدفع')),
+      );
       return;
     }
 
     setState(() => _isSubmitting = true);
     try {
-      await widget.onContinue(transferNumber: _transferController.text.trim(), receiptFile: _receiptFile);
+      await widget.onContinue(
+        transferNumber: _transferController.text.trim(),
+        receiptFile: _receiptFile,
+      );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -1642,11 +2061,20 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(24),
                         gradient: LinearGradient(
-                          colors: [const Color(0xFF1565C0), const Color(0xFF2E7D32)],
+                          colors: [
+                            const Color(0xFF1565C0),
+                            const Color(0xFF2E7D32),
+                          ],
                           begin: Alignment.topRight,
                           end: Alignment.bottomLeft,
                         ),
-                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 14, offset: const Offset(0, 8))],
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.08),
+                            blurRadius: 14,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1660,7 +2088,11 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                                   color: Colors.white.withValues(alpha: 0.2),
                                   borderRadius: BorderRadius.circular(15),
                                 ),
-                                child: const Icon(Icons.account_balance_wallet_outlined, color: Colors.white, size: 25),
+                                child: const Icon(
+                                  Icons.account_balance_wallet_outlined,
+                                  color: Colors.white,
+                                  size: 25,
+                                ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
@@ -1669,12 +2101,21 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                                   children: [
                                     const Text(
                                       'إكمال الاشتراك المدفوع',
-                                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white),
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white,
+                                      ),
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
                                       'إرسال بيانات الدفع لمراجعة الإدارة',
-                                      style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 12),
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.9,
+                                        ),
+                                        fontSize: 12,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -1683,19 +2124,31 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                           ),
                           const SizedBox(height: 14),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(14),
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.security_outlined, color: Colors.white, size: 18),
+                                const Icon(
+                                  Icons.security_outlined,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     'لن يتم إنشاء الحساب أو تفعيل الاشتراك إلا بعد موافقة المدير.',
-                                    style: TextStyle(color: Colors.white.withValues(alpha: 0.94), fontSize: 12),
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.94,
+                                      ),
+                                      fontSize: 12,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -1710,12 +2163,25 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                       decoration: BoxDecoration(
                         color: colorScheme.surface,
                         borderRadius: BorderRadius.circular(20),
-                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4))],
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.04),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('تفاصيل الباقة', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: colorScheme.onSurface)),
+                          Text(
+                            'تفاصيل الباقة',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
                           const SizedBox(height: 12),
                           _infoRow(title: 'الباقة', value: widget.planLabel),
                           _infoRow(title: 'السعر', value: widget.planPrice),
@@ -1725,24 +2191,55 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                             decoration: BoxDecoration(
                               color: colorScheme.surfaceContainerHighest,
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: colorScheme.outlineVariant),
+                              border: Border.all(
+                                color: colorScheme.outlineVariant,
+                              ),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(
                                   children: [
-                                    const Icon(Icons.account_balance_wallet_rounded, color: Color(0xFF1565C0), size: 18),
+                                    const Icon(
+                                      Icons.account_balance_wallet_rounded,
+                                      color: Color(0xFF1565C0),
+                                      size: 18,
+                                    ),
                                     const SizedBox(width: 8),
-                                    Text('معلومات الدفع للماستر', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: colorScheme.onSurface)),
+                                    Text(
+                                      'معلومات الدفع للماستر',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w800,
+                                        color: colorScheme.onSurface,
+                                      ),
+                                    ),
                                   ],
                                 ),
                                 const SizedBox(height: 8),
-                                Text('الطريقة: تحويل/ماستر', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                                Text(
+                                  'الطريقة: تحويل/ماستر',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
                                 const SizedBox(height: 4),
-                                Text('المبلغ المستحق: ${widget.planPrice}', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                                Text(
+                                  'المبلغ المستحق: ${widget.planPrice}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
                                 const SizedBox(height: 4),
-                                Text('الحالة: pending حتى موافقة المدير', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                                Text(
+                                  'الحالة: pending حتى موافقة المدير',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -1750,17 +2247,26 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: colorScheme.primaryContainer.withValues(alpha: 0.35),
+                              color: colorScheme.primaryContainer.withValues(
+                                alpha: 0.35,
+                              ),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.info_outline, color: Color(0xFF2E7D32), size: 18),
+                                const Icon(
+                                  Icons.info_outline,
+                                  color: Color(0xFF2E7D32),
+                                  size: 18,
+                                ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     'سيتم إنشاء الحساب لأول مرة عند الموافقة فقط.',
-                                    style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
+                                    style: TextStyle(
+                                      color: colorScheme.onSurfaceVariant,
+                                      fontSize: 12,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -1780,7 +2286,14 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('معلومات الدفع', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: colorScheme.onSurface)),
+                          Text(
+                            'معلومات الدفع',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
                           const SizedBox(height: 10),
                           TextField(
                             controller: _transferController,
@@ -1788,14 +2301,20 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                             decoration: const InputDecoration(
                               labelText: 'رقم التحويل',
                               border: OutlineInputBorder(),
-                              prefixIcon: Icon(Icons.account_balance_wallet_outlined),
+                              prefixIcon: Icon(
+                                Icons.account_balance_wallet_outlined,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 10),
                           OutlinedButton.icon(
                             onPressed: _pickReceipt,
                             icon: const Icon(Icons.attach_file_rounded),
-                            label: Text(_receiptFile == null ? 'إرفاق إيصال' : 'تم اختيار إيصال'),
+                            label: Text(
+                              _receiptFile == null
+                                  ? 'إرفاق إيصال'
+                                  : 'تم اختيار إيصال',
+                            ),
                           ),
                         ],
                       ),
@@ -1810,7 +2329,9 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                             label: const Text('رجوع'),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
                             ),
                           ),
                         ),
@@ -1819,14 +2340,27 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                           child: FilledButton.icon(
                             onPressed: _isSubmitting ? null : _handleContinue,
                             icon: _isSubmitting
-                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                : const Icon(Icons.check_circle_outline_rounded),
-                            label: Text(_isSubmitting ? 'جاري الإرسال...' : 'تأكيد الدفع'),
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.check_circle_outline_rounded,
+                                  ),
+                            label: Text(
+                              _isSubmitting ? 'جاري الإرسال...' : 'تأكيد الدفع',
+                            ),
                             style: FilledButton.styleFrom(
                               backgroundColor: const Color(0xFF2E7D32),
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
                             ),
                           ),
                         ),
@@ -1849,7 +2383,13 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-          Text(value, style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w700)),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF2E7D32),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ],
       ),
     );

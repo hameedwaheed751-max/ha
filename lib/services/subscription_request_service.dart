@@ -1,6 +1,8 @@
+import 'dart:async';
+
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 
 DateTime? _parseDateTime(dynamic value) {
@@ -32,10 +34,11 @@ class SubscriptionRequestModel {
     this.receiptImageUrl = '',
     this.status = 'pending',
     this.createdAt,
-    this.password = '',
     this.rejectionReason = '',
     this.source = '',
     this.reviewedAt,
+    this.isRenewal = false,
+    this.collectionPath = 'subscriptionRequests',
   });
 
   final String requestId;
@@ -50,31 +53,34 @@ class SubscriptionRequestModel {
   final String transferNumber;
   final String receiptImageUrl;
   final String status;
-  final String password;
   final String rejectionReason;
   final String source;
   final DateTime? createdAt;
   final DateTime? reviewedAt;
+  final bool isRenewal;
+  final String collectionPath;
 
   Map<String, dynamic> toMap() => {
-        'requestId': requestId,
-        'uid': uid,
-        'firstName': firstName,
-        'lastName': lastName,
-        'phone': phone,
-        'email': email,
-        'selectedPlan': selectedPlan,
-        'amount': amount,
-        'paymentMethod': paymentMethod,
-        'transferNumber': transferNumber,
-        'receiptImageUrl': receiptImageUrl,
-        'status': status,
-        'password': password,
-        'rejectionReason': rejectionReason,
-        'source': source,
-        'createdAt': createdAt?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch,
-        'reviewedAt': reviewedAt?.toUtc().toIso8601String(),
-      };
+    'requestId': requestId,
+    'uid': uid,
+    'firstName': firstName,
+    'lastName': lastName,
+    'phone': phone,
+    'email': email,
+    'selectedPlan': selectedPlan,
+    'amount': amount,
+    'paymentMethod': paymentMethod,
+    'transferNumber': transferNumber,
+    'receiptImageUrl': receiptImageUrl,
+    'status': status,
+    'rejectionReason': rejectionReason,
+    'source': source,
+    'isRenewal': isRenewal,
+    'createdAt':
+        createdAt?.millisecondsSinceEpoch ??
+        DateTime.now().millisecondsSinceEpoch,
+    'reviewedAt': reviewedAt?.toUtc().toIso8601String(),
+  };
 
   factory SubscriptionRequestModel.fromMap(Map<String, dynamic> data) {
     return SubscriptionRequestModel(
@@ -88,98 +94,58 @@ class SubscriptionRequestModel {
       amount: (data['amount'] ?? '').toString(),
       paymentMethod: (data['paymentMethod'] ?? 'Qi Card').toString(),
       transferNumber: (data['transferNumber'] ?? '').toString(),
-      receiptImageUrl: (data['receiptImageUrl'] ?? data['receiptImage'] ?? '').toString(),
+      receiptImageUrl: (data['receiptImageUrl'] ?? data['receiptImage'] ?? '')
+          .toString(),
       status: (data['status'] ?? 'pending').toString(),
-      password: (data['password'] ?? '').toString(),
       rejectionReason: (data['rejectionReason'] ?? '').toString(),
       source: (data['source'] ?? '').toString(),
       createdAt: _parseDateTime(data['createdAt']),
       reviewedAt: _parseDateTime(data['reviewedAt']),
+      isRenewal: data['isRenewal'] == true,
+      collectionPath: (data['collectionPath'] ?? 'subscriptionRequests')
+          .toString(),
     );
   }
 }
 
 class SubscriptionRequestService {
   static const String adminRootNode = 'admin';
-  static const String collectionName = 'subscription_requests';
-  static const String collectionCompatName = 'subscriptionRequests';
+  static const String collectionName = 'subscriptionRequests';
+  static const String legacyCollectionName = 'subscription_requests';
   static const String pendingStatus = 'pending';
   static const String approvedStatus = 'approved';
   static const String rejectedStatus = 'rejected';
+  static const String trustedAdminUid = 'wE10WciDVudIOJziBurjhBxpDfO2';
 
   static DatabaseReference get _root => FirebaseDatabase.instance.ref();
-  static bool _legacyMigrationAttempted = false;
 
   static String get _adminCollectionPath => '$adminRootNode/$collectionName';
-  static String get _adminCompatCollectionPath => '$adminRootNode/$collectionCompatName';
 
-  static Map<String, dynamic> _mapOf(dynamic value) {
-    if (value is Map) return Map<String, dynamic>.from(value);
-    return <String, dynamic>{};
-  }
+  static bool get _isTrustedAdmin =>
+      FirebaseAuth.instance.currentUser?.uid == trustedAdminUid;
 
-  static Future<void> _migrateLegacyNodesIfNeeded() async {
-    if (_legacyMigrationAttempted) return;
-    _legacyMigrationAttempted = true;
-
-    try {
-      final rootSnap = await _root.get();
-      final rootMap = _mapOf(rootSnap.value);
-      final adminMap = _mapOf(rootMap[adminRootNode]);
-      final updates = <String, dynamic>{};
-
-      void migrateNode({required String legacyNode, required String adminPath, required String adminNodeName}) {
-        final legacyData = _mapOf(rootMap[legacyNode]);
-        if (legacyData.isEmpty) return;
-
-        final adminData = _mapOf(adminMap[adminNodeName]);
-        if (adminData.isEmpty) {
-          updates[adminPath] = legacyData;
-        } else {
-          for (final entry in legacyData.entries) {
-            if (!adminData.containsKey(entry.key)) {
-              updates['$adminPath/${entry.key}'] = entry.value;
-            }
-          }
-        }
-
-        updates[legacyNode] = null;
-      }
-
-      migrateNode(
-        legacyNode: collectionName,
-        adminPath: _adminCollectionPath,
-        adminNodeName: collectionName,
+  static void _requireTrustedAdmin() {
+    if (!_isTrustedAdmin) {
+      throw StateError(
+        'Only the trusted administrator may review subscription requests.',
       );
-      migrateNode(
-        legacyNode: collectionCompatName,
-        adminPath: _adminCompatCollectionPath,
-        adminNodeName: collectionCompatName,
-      );
-
-      if (updates.isNotEmpty) {
-        await _root.update(updates);
-      }
-    } catch (_) {
-      // Keep app behavior stable if migration cannot run now.
     }
   }
 
-  static Future<DatabaseReference> _resolveRequestRef(String requestId) async {
-    final candidatePaths = <String>[
-      '$_adminCollectionPath/$requestId',
-      '$_adminCompatCollectionPath/$requestId',
-      '$collectionName/$requestId',
-      '$collectionCompatName/$requestId',
-    ];
-    for (final path in candidatePaths) {
-      final snap = await _root.child(path).get();
-      if (snap.exists) return _root.child(path);
+  static DatabaseReference requestRef(
+    String requestId, {
+    String collectionPath = collectionName,
+  }) {
+    if (collectionPath != collectionName &&
+        collectionPath != legacyCollectionName) {
+      throw ArgumentError.value(
+        collectionPath,
+        'collectionPath',
+        'Unsupported subscription request collection.',
+      );
     }
-    return _root.child('$_adminCollectionPath/$requestId');
+    return _root.child('$adminRootNode/$collectionPath/$requestId');
   }
-
-  static DatabaseReference requestRef(String requestId) => _root.child('$_adminCollectionPath/$requestId');
 
   static String planLabel(String value) {
     switch (value.trim()) {
@@ -221,7 +187,8 @@ class SubscriptionRequestService {
 
   static String planLabelFor(String? value) => planLabel(value ?? 'trial');
 
-  static bool isTrialPlan(String plan) => plan == 'trial' || plan == 'free_15_days';
+  static bool isTrialPlan(String plan) =>
+      plan == 'trial' || plan == 'free_15_days';
 
   static DateTime startDateForPlan({DateTime? now}) => now ?? DateTime.now();
 
@@ -275,44 +242,54 @@ class SubscriptionRequestService {
     }
   }
 
-  static Stream<List<SubscriptionRequestModel>> watchRequests({String? status}) {
-    return _root.onValue.asyncMap((event) async {
-      await _migrateLegacyNodesIfNeeded();
-      final rootValue = event.snapshot.value;
-      if (rootValue is! Map) return const <SubscriptionRequestModel>[];
+  static Stream<List<SubscriptionRequestModel>> watchRequests({
+    String? status,
+  }) {
+    _requireTrustedAdmin();
+    final paths = [collectionName, legacyCollectionName];
+    final snapshots = <String, Object?>{};
+    final controller = StreamController<List<SubscriptionRequestModel>>();
+    final subscriptions = <StreamSubscription<DatabaseEvent>>[];
 
-      final rootMap = _mapOf(rootValue);
-      final adminMap = _mapOf(rootMap[adminRootNode]);
-      final adminSnake = _mapOf(adminMap[collectionName]);
-      final adminCamel = _mapOf(adminMap[collectionCompatName]);
-      final legacySnake = _mapOf(rootMap[collectionName]);
-      final legacyCamel = _mapOf(rootMap[collectionCompatName]);
-      final merged = <String, dynamic>{
-        ...legacySnake,
-        ...legacyCamel,
-        ...adminCamel,
-        ...adminSnake,
-      };
-
+    void emit() {
+      if (snapshots.length != paths.length) return;
       final records = <SubscriptionRequestModel>[];
-      for (final entry in merged.entries) {
-        if (entry.value is! Map) continue;
-        final raw = Map<String, dynamic>.from(entry.value as Map);
-        raw.putIfAbsent('requestId', () => entry.key.toString());
-        final record = SubscriptionRequestModel.fromMap(raw);
-        if (status == null || status.isEmpty || record.status == status) {
-          records.add(record);
+      for (final path in paths) {
+        final value = snapshots[path];
+        if (value is! Map) continue;
+        for (final entry in value.entries) {
+          if (entry.value is! Map) continue;
+          final raw = Map<String, dynamic>.from(entry.value as Map)
+            ..putIfAbsent('requestId', () => entry.key.toString())
+            ..['collectionPath'] = path;
+          final record = SubscriptionRequestModel.fromMap(raw);
+          if (status == null || status.isEmpty || record.status == status) {
+            records.add(record);
+          }
         }
       }
-
       records.sort((a, b) {
         final aTs = a.createdAt?.millisecondsSinceEpoch ?? 0;
         final bTs = b.createdAt?.millisecondsSinceEpoch ?? 0;
         return bTs.compareTo(aTs);
       });
+      controller.add(records);
+    }
 
-      return records;
-    });
+    for (final path in paths) {
+      subscriptions.add(
+        _root.child('$adminRootNode/$path').onValue.listen((event) {
+          snapshots[path] = event.snapshot.value;
+          emit();
+        }, onError: controller.addError),
+      );
+    }
+    controller.onCancel = () async {
+      for (final subscription in subscriptions) {
+        await subscription.cancel();
+      }
+    };
+    return controller.stream;
   }
 
   static Future<String> createRequest({
@@ -324,70 +301,160 @@ class SubscriptionRequestService {
     required String amount,
     required String paymentMethod,
     required String transferNumber,
+    required String uid,
+    String agentName = '',
+    String governorate = '',
+    String region = '',
+    String address = '',
     String? receiptImageUrl,
-    required String password,
+    bool isRenewal = false,
   }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || uid.trim().isEmpty || user.uid != uid.trim()) {
+      throw StateError(
+        'A signed-in account matching the request UID is required.',
+      );
+    }
+    if (isRenewal &&
+        user.email?.trim().toLowerCase() != email.trim().toLowerCase()) {
+      throw StateError(
+        'The renewal request email must match the signed-in account.',
+      );
+    }
     final nodeRef = _root.child(_adminCollectionPath).push();
-    final requestId = nodeRef.key ?? DateTime.now().millisecondsSinceEpoch.toString();
+    final requestId = nodeRef.key;
+    if (requestId == null) {
+      throw StateError('Could not allocate a subscription request ID.');
+    }
+    final names = agentName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
     final model = SubscriptionRequestModel(
       requestId: requestId,
-      firstName: firstName,
-      lastName: lastName,
+      uid: user.uid,
+      firstName: firstName.isNotEmpty
+          ? firstName
+          : (names.isEmpty ? '' : names.first),
+      lastName: lastName.isNotEmpty
+          ? lastName
+          : (names.length < 2 ? '' : names.skip(1).join(' ')),
       phone: phone,
-      email: email,
+      email: user.email ?? email,
       selectedPlan: selectedPlan,
       amount: amount,
       paymentMethod: paymentMethod,
       transferNumber: transferNumber,
       receiptImageUrl: receiptImageUrl ?? '',
-      password: password,
+      isRenewal: isRenewal,
+      source: isRenewal ? 'renewal' : 'registration',
       createdAt: DateTime.now(),
     );
-
-    await requestRef(requestId).set(model.toMap());
+    final payload = <String, dynamic>{
+      ...model.toMap(),
+      'agentName': agentName.trim().isNotEmpty
+          ? agentName.trim()
+          : names.join(' '),
+      'governorate': governorate,
+      'region': region,
+      'address': address,
+    };
+    await nodeRef.set(payload);
     return requestId;
   }
 
-  static Future<String?> uploadReceiptImage({required String requestId, required XFile file}) async {
-    final storageRef = FirebaseStorage.instance.ref('admin/subscription_requests/$requestId/${file.name}');
+  static Future<String?> uploadReceiptImage({
+    required String requestId,
+    required XFile file,
+  }) async {
+    final storageRef = FirebaseStorage.instance.ref(
+      '$_adminCollectionPath/$requestId/${file.name}',
+    );
     final bytes = await file.readAsBytes();
-    final task = await storageRef.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
+    final task = await storageRef.putData(
+      bytes,
+      SettableMetadata(contentType: 'image/jpeg'),
+    );
     return task.ref.getDownloadURL();
   }
 
-  static Future<void> rejectRequest({required String requestId, String? reason}) async {
-    final ref = await _resolveRequestRef(requestId);
-    await ref.update({
-      'status': rejectedStatus,
-      'rejectionReason': reason ?? '',
-      'reviewedAt': DateTime.now().toUtc().toIso8601String(),
-    });
+  static Future<void> rejectRequest({
+    required String requestId,
+    String? reason,
+    String collectionPath = collectionName,
+  }) async {
+    _requireTrustedAdmin();
+    final reviewedAt = DateTime.now().toUtc().toIso8601String();
+    final result = await requestRef(requestId, collectionPath: collectionPath)
+        .runTransaction((value) {
+          if (value is! Map) return Transaction.abort();
+          final current = Map<String, dynamic>.from(value);
+          if (current['status'] != pendingStatus) return Transaction.abort();
+          current
+            ..['status'] = rejectedStatus
+            ..['rejectionReason'] = reason ?? ''
+            ..['reviewerUid'] = trustedAdminUid
+            ..['reviewedAt'] = reviewedAt;
+          return Transaction.success(current);
+        }, applyLocally: false);
+    if (!result.committed) {
+      throw StateError('Only pending subscription requests can be rejected.');
+    }
   }
 
-  static Future<void> markRequestAsPendingReview({required String requestId, required Map<String, dynamic> patch}) async {
-    final ref = await _resolveRequestRef(requestId);
-    await ref.update(patch);
+  static Future<void> markRequestAsPendingReview({
+    required String requestId,
+    required Map<String, dynamic> patch,
+  }) async {
+    final imageUrl = (patch['receiptImageUrl'] ?? patch['receiptImage'] ?? '')
+        .toString();
+    await requestRef(requestId).child('receiptImageUrl').set(imageUrl);
   }
 
-  static Future<void> deleteRequest({required String requestId}) async {
+  static Future<void> deleteRequest({
+    required String requestId,
+    String collectionPath = collectionName,
+  }) async {
+    _requireTrustedAdmin();
     final id = requestId.trim();
     if (id.isEmpty) return;
-
-    await _migrateLegacyNodesIfNeeded();
-    final updates = <String, dynamic>{
-      '$_adminCollectionPath/$id': null,
-      '$_adminCompatCollectionPath/$id': null,
-      '$collectionName/$id': null,
-      '$collectionCompatName/$id': null,
-    };
-    await _root.update(updates);
+    final ref = requestRef(id, collectionPath: collectionPath);
+    final result = await ref.runTransaction((value) {
+      if (value is! Map) return Transaction.abort();
+      final current = Map<String, dynamic>.from(value);
+      if (current['status'] == 'reviewing') return Transaction.abort();
+      return Transaction.success(null);
+    }, applyLocally: false);
+    if (!result.committed) {
+      throw StateError(
+        'The request could not be deleted in its current state.',
+      );
+    }
   }
 
-  static Future<void> approveRequestById({required String requestId, required Map<String, dynamic> requestData}) async {
+  static Future<Map<String, dynamic>> approveRequestById({
+    required String requestId,
+    required Map<String, dynamic> requestData,
+    String collectionPath = collectionName,
+  }) async {
+    _requireTrustedAdmin();
+    final fullName = (requestData['agentName'] ?? '').toString().trim();
+    final nameParts = fullName
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
     final request = SubscriptionRequestModel(
       requestId: requestId,
-      firstName: (requestData['firstName'] ?? '').toString(),
-      lastName: (requestData['lastName'] ?? '').toString(),
+      uid: (requestData['uid'] ?? '').toString(),
+      firstName:
+          (requestData['firstName'] ??
+                  (nameParts.isEmpty ? '' : nameParts.first))
+              .toString(),
+      lastName:
+          (requestData['lastName'] ??
+                  (nameParts.length < 2 ? '' : nameParts.skip(1).join(' ')))
+              .toString(),
       phone: (requestData['phone'] ?? '').toString(),
       email: (requestData['email'] ?? '').toString(),
       selectedPlan: (requestData['selectedPlan'] ?? '').toString(),
@@ -395,53 +462,109 @@ class SubscriptionRequestService {
       paymentMethod: (requestData['paymentMethod'] ?? 'Qi Card').toString(),
       transferNumber: (requestData['transferNumber'] ?? '').toString(),
       receiptImageUrl: (requestData['receiptImageUrl'] ?? '').toString(),
-      password: (requestData['password'] ?? '').toString(),
       status: (requestData['status'] ?? pendingStatus).toString(),
       source: (requestData['source'] ?? '').toString(),
       createdAt: _parseDateTime(requestData['createdAt']),
       reviewedAt: _parseDateTime(requestData['reviewedAt']),
+      isRenewal: requestData['isRenewal'] == true,
+      collectionPath: collectionPath,
     );
-    await approveRequest(request: request);
+    return approveRequest(request: request);
   }
 
-  static Future<void> approveRequest({required SubscriptionRequestModel request}) async {
-    final reqRef = await _resolveRequestRef(request.requestId);
-
-    final email = request.email.trim().toLowerCase();
-    final password = request.password.trim();
-
-    if (email.isEmpty || password.isEmpty) {
-      throw Exception('Missing credentials for subscription request approval');
+  static Future<Map<String, dynamic>> approveRequest({
+    required SubscriptionRequestModel request,
+  }) async {
+    _requireTrustedAdmin();
+    final requestId = request.requestId.trim();
+    final reqRef = requestRef(
+      requestId,
+      collectionPath: request.collectionPath,
+    );
+    final reviewedAtDate = DateTime.now().toUtc();
+    final claimResult = await reqRef.runTransaction((value) {
+      if (value is! Map) return Transaction.abort();
+      final current = Map<String, dynamic>.from(value);
+      if (current['status'] != pendingStatus ||
+          (current['uid'] ?? '').toString().trim().isEmpty) {
+        return Transaction.abort();
+      }
+      current
+        ..['status'] = 'reviewing'
+        ..['reviewDecision'] = approvedStatus
+        ..['reviewerUid'] = trustedAdminUid
+        ..['reviewedAt'] = reviewedAtDate.toIso8601String();
+      return Transaction.success(current);
+    }, applyLocally: false);
+    if (!claimResult.committed || claimResult.snapshot.value is! Map) {
+      throw StateError('Only pending subscription requests can be approved.');
     }
-
-    try {
-      final callable = FirebaseFunctions.instanceFor(region: 'us-central1').httpsCallable('approveSubscriptionRequest');
-      final result = await callable.call<Map<String, dynamic>>({
-        'requestId': request.requestId,
-        'email': email,
-        'password': password,
-        'firstName': request.firstName,
-        'lastName': request.lastName,
-        'phone': request.phone,
-        'selectedPlan': request.selectedPlan,
-        'planLabel': planLabel(request.selectedPlan),
-        'amount': request.amount,
-        'paymentMethod': request.paymentMethod,
-      });
-
-      final uid = (result.data['uid'] ?? '').toString();
-      await reqRef.update({
-        'uid': uid,
-        'status': approvedStatus,
-        'reviewedAt': DateTime.now().toUtc().toIso8601String(),
-      });
-    } catch (e) {
-      await reqRef.update({
-        'status': rejectedStatus,
-        'rejectionReason': 'فشل في إنشاء الحساب: $e',
-        'reviewedAt': DateTime.now().toUtc().toIso8601String(),
-      });
-      rethrow;
+    final current = Map<String, dynamic>.from(
+      claimResult.snapshot.value as Map,
+    );
+    final uid = (current['uid'] ?? '').toString().trim();
+    if (uid.isEmpty) {
+      throw StateError('The request has no linked Firebase Auth UID.');
     }
+    final plan = current['selectedPlan']?.toString() ?? request.selectedPlan;
+    var startDate = reviewedAtDate;
+    if (current['isRenewal'] == true) {
+      final subscriptionSnapshot = await _root
+          .child('agents/$uid/subscription')
+          .get();
+      if (subscriptionSnapshot.value is Map) {
+        final existing = Map<String, dynamic>.from(
+          subscriptionSnapshot.value as Map,
+        );
+        final existingEnd = _parseDateTime(existing['endDate'])?.toUtc();
+        if (existing['status'] == 'active' &&
+            existingEnd != null &&
+            existingEnd.isAfter(startDate)) {
+          startDate = existingEnd;
+        }
+      }
+    }
+    final endDate = endDateForPlan(plan, from: startDate);
+    final reviewedAt = reviewedAtDate.toIso8601String();
+    final profilePath = 'agents/$uid/profile';
+    final profilePatch = <String, dynamic>{
+      '$profilePath/email': (current['email'] ?? request.email).toString(),
+      '$profilePath/name':
+          (current['agentName'] ?? '${request.firstName} ${request.lastName}')
+              .toString()
+              .trim(),
+      '$profilePath/firstName': request.firstName,
+      '$profilePath/lastName': request.lastName,
+      '$profilePath/phone': request.phone,
+      '$profilePath/role': 'agent',
+      '$profilePath/status': 'active',
+      '$profilePath/approvedAt': reviewedAtDate.millisecondsSinceEpoch,
+      '$profilePath/approvalRequestId': requestId,
+    };
+    final subscription = <String, dynamic>{
+      'plan': plan,
+      'status': 'active',
+      'durationDays': endDate.difference(startDate).inDays,
+      'startDate': startDate.toIso8601String(),
+      'endDate': endDate.toIso8601String(),
+      'autoExpire': true,
+      'lastPaymentId': requestId,
+      'updatedAt': reviewedAt,
+    };
+    await _root.update({
+      '${reqRef.path}/status': approvedStatus,
+      '${reqRef.path}/reviewDecision': null,
+      '${reqRef.path}/reviewerUid': trustedAdminUid,
+      '${reqRef.path}/reviewedAt': reviewedAt,
+      ...profilePatch,
+      'agents/$uid/subscription': subscription,
+    });
+    return {
+      'uid': uid,
+      'plan': plan,
+      'planLabel': planLabel(plan),
+      'startDate': startDate.toIso8601String(),
+      'endDate': endDate.toIso8601String(),
+    };
   }
 }

@@ -260,7 +260,6 @@ class SasSettings {
               'sasUsername': normalizedSasUser,
               'agentKey': agentKey,
               'currentAgentId': _uid,
-              'status': 'active',
             })
             .timeout(const Duration(seconds: 5));
 
@@ -397,8 +396,7 @@ class SasApiService {
   // hard-coded to localhost.
   static const String _webProxyBaseRaw = String.fromEnvironment(
     'SAS_WEB_PROXY_URL',
-    defaultValue:
-        'https://netagent-sas-proxy.wakeel-net-hamwdy.workers.dev',
+    defaultValue: 'https://netagent-sas-proxy.wakeel-net-hamwdy.workers.dev',
   );
   static String get _runtimeWebProxyBaseRaw {
     return readRuntimeAppConfig('sasWebProxyUrl') ?? _webProxyBaseRaw;
@@ -430,7 +428,6 @@ class SasApiService {
   static final FlutterSecureStorage _secureStorage =
       const FlutterSecureStorage();
   final http.Client _httpClient = createSasHttpClient();
-  
 
   SasApiService(this.settings) {
     _debugLog(
@@ -438,7 +435,7 @@ class SasApiService {
       'platform=${kIsWeb ? "web" : "native"}',
     );
   }
-  
+
   /// Initialize a custom HTTP client specifically for SAS connections
   /// This allows handling self-signed certificates only for SAS without
   /// affecting other HTTP connections in the app
@@ -737,7 +734,11 @@ class SasApiService {
         _addProxyTarget(headers);
         _debugLog('[SAS DEBUG][LOGIN] endpoint=$uri method=POST');
         return _httpClient
-            .post(uri, headers: headers, body: jsonEncode({'payload': encrypted}))
+            .post(
+              uri,
+              headers: headers,
+              body: jsonEncode({'payload': encrypted}),
+            )
             .timeout(const Duration(seconds: 45));
       }
 
@@ -2032,16 +2033,20 @@ class SasApiService {
     try {
       if (!_proxyFallback) _debugLog('SAS Direct: attempting connection');
       debugPrint('GET URL: $uri');
-      res = await _httpClient.get(uri, headers: headers).timeout(const Duration(seconds: 45));
+      res = await _httpClient
+          .get(uri, headers: headers)
+          .timeout(const Duration(seconds: 45));
       if (!_proxyFallback) _debugLog('SAS Direct: connected');
       debugPrint('GET STATUS: ${res.statusCode}');
-      
+
       if (res.statusCode == 401) {
         // try to refresh token once
         try {
           await login();
           if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await _httpClient.get(uri, headers: headers).timeout(const Duration(seconds: 45));
+          res = await _httpClient
+              .get(uri, headers: headers)
+              .timeout(const Duration(seconds: 45));
         } catch (_) {
           // fallthrough to error handling below
         }
@@ -2055,7 +2060,10 @@ class SasApiService {
       throw SasApiException('تعذر جلب بيانات SAS: $e');
     }
 
-    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
+    if (res.statusCode == 401 &&
+        kIsWeb &&
+        !useDirectConnection &&
+        !_directFallback) {
       final body = res.body.trim();
       throw SasApiException(
         'رفض التوثيق من البروكسي (401) أثناء GET. '
@@ -2092,34 +2100,40 @@ class SasApiService {
     http.Response res;
     try {
       if (!_proxyFallback) _debugLog('SAS Direct: attempting connection');
-      res = await _httpClient.put(
-        uri,
-        headers: headers,
-        body: jsonEncode({
-          'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
-        }),
-      ).timeout(const Duration(seconds: 45));
-      if (!_proxyFallback) _debugLog('SAS Direct: connected');
-      
-      if (res.statusCode == 502) {
-        final connectionMode = useDirectConnection ? 'الاتصال المباشر' : 'البروكسي';
-        throw SasApiException(
-          'خطأ 502 من SAS عبر $connectionMode.\n'
-          'تأكد من صحة رابط SAS وأن السيرفر متاح من هذا الجهاز/المتصفح.'
-        );
-      }
-      
-      if (res.statusCode == 401) {
-        try {
-          await login();
-          if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await _httpClient.put(
+      res = await _httpClient
+          .put(
             uri,
             headers: headers,
             body: jsonEncode({
               'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
             }),
-          ).timeout(const Duration(seconds: 45));
+          )
+          .timeout(const Duration(seconds: 45));
+      if (!_proxyFallback) _debugLog('SAS Direct: connected');
+
+      if (res.statusCode == 502) {
+        final connectionMode = useDirectConnection
+            ? 'الاتصال المباشر'
+            : 'البروكسي';
+        throw SasApiException(
+          'خطأ 502 من SAS عبر $connectionMode.\n'
+          'تأكد من صحة رابط SAS وأن السيرفر متاح من هذا الجهاز/المتصفح.',
+        );
+      }
+
+      if (res.statusCode == 401) {
+        try {
+          await login();
+          if (_token != null) headers['authorization'] = 'Bearer $_token';
+          res = await _httpClient
+              .put(
+                uri,
+                headers: headers,
+                body: jsonEncode({
+                  'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
+                }),
+              )
+              .timeout(const Duration(seconds: 45));
         } catch (_) {}
       }
     } catch (e) {
@@ -2131,7 +2145,10 @@ class SasApiService {
       throw SasApiException('تعذر تعديل المشترك في SAS: $e');
     }
 
-    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
+    if (res.statusCode == 401 &&
+        kIsWeb &&
+        !useDirectConnection &&
+        !_directFallback) {
       final body = res.body.trim();
       throw SasApiException(
         'رفض التوثيق من البروكسي (401) أثناء PUT. '
@@ -2165,7 +2182,6 @@ class SasApiService {
     }
   }
 
-
   Future<dynamic> _post(
     String route,
     Map<String, dynamic> payload, {
@@ -2183,19 +2199,36 @@ class SasApiService {
     if (extraHeaders != null && extraHeaders.isNotEmpty) {
       headers.addAll(extraHeaders);
     }
-    if (authenticated && _token != null) headers['authorization'] = 'Bearer $_token';
+    if (authenticated && _token != null)
+      headers['authorization'] = 'Bearer $_token';
     http.Response res;
     try {
       if (!_proxyFallback) _debugLog('SAS Direct: attempting connection');
-      res = await _httpClient.post(uri, headers: headers, body: jsonEncode({'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase)})).timeout(const Duration(seconds: 45));
+      res = await _httpClient
+          .post(
+            uri,
+            headers: headers,
+            body: jsonEncode({
+              'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
+            }),
+          )
+          .timeout(const Duration(seconds: 45));
       if (!_proxyFallback) _debugLog('SAS Direct: connected');
-      
+
       if (authenticated && res.statusCode == 401) {
         // attempt to refresh token once then retry
         try {
           await login();
           if (_token != null) headers['authorization'] = 'Bearer $_token';
-          res = await _httpClient.post(uri, headers: headers, body: jsonEncode({'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase)})).timeout(const Duration(seconds: 45));
+          res = await _httpClient
+              .post(
+                uri,
+                headers: headers,
+                body: jsonEncode({
+                  'payload': _cryptoJsEncrypt(jsonEncode(payload), _passphrase),
+                }),
+              )
+              .timeout(const Duration(seconds: 45));
         } catch (_) {}
       }
     } catch (e) {
@@ -2211,7 +2244,10 @@ class SasApiService {
       }
       throw SasApiException('تعذر الاتصال بخادم SAS: $e');
     }
-    if (res.statusCode == 401 && kIsWeb && !useDirectConnection && !_directFallback) {
+    if (res.statusCode == 401 &&
+        kIsWeb &&
+        !useDirectConnection &&
+        !_directFallback) {
       final body = res.body.trim();
       throw SasApiException(
         'رفض التوثيق من البروكسي (401) أثناء POST. '
@@ -2230,7 +2266,9 @@ class SasApiService {
     try {
       return jsonDecode(res.body);
     } catch (_) {
-      throw SasApiException('رد SAS غير مفهوم: ${res.body.length > 120 ? res.body.substring(0, 120) : res.body}');
+      throw SasApiException(
+        'رد SAS غير مفهوم: ${res.body.length > 120 ? res.body.substring(0, 120) : res.body}',
+      );
     }
   }
 
