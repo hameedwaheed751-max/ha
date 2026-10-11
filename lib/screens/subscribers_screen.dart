@@ -323,27 +323,59 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   }
 
   Future<double?> _confirmActivation(Subscriber subscriber) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: AlertDialog(
-          title: const Text('تأكيد تفعيل المشترك'),
-          content: Text('هل تريد تفعيل اشتراك ${subscriber.name}؟'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('إلغاء'),
+    final amountController = TextEditingController(text: '0');
+    try {
+      return await showDialog<double>(
+        context: context,
+        builder: (dialogContext) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            title: const Text('تأكيد تفعيل المشترك'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('هل تريد تفعيل اشتراك ${subscriber.name}؟'),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: amountController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'المبلغ الواصل من التفعيل',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
             ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('تفعيل'),
-            ),
-          ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final amount = _parseAmount(amountController.text);
+                  if (amount == null || amount < 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('أدخل مبلغاً صحيحاً أو صفراً.'),
+                      ),
+                    );
+                    return;
+                  }
+                  Navigator.pop(dialogContext, amount);
+                },
+                child: const Text('تفعيل'),
+              ),
+            ],
+          ),
         ),
-      ),
-    );
-    return confirmed == true ? 0.0 : null;
+      );
+    } finally {
+      amountController.dispose();
+    }
   }
 
   double? _parseAmount(String raw) {
@@ -727,7 +759,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       return;
     }
 
-    final hadActivationHistory = AppStore.hasRecordedActivation(s);
     final confirmedSaleAmount = await _confirmActivation(s);
     if (confirmedSaleAmount == null) return;
     try {
@@ -821,11 +852,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         subscriberUser: s.user,
         subscriberName: s.name,
         at: recordedAt,
-        collected: s.paid,
+        collected: confirmedSaleAmount,
         remaining: s.remaining,
         note: 'تفعيل من قائمة المشتركين',
         addRemainingDebtEvent: !debtAlreadyRecorded,
-        isReactivation: hadActivationHistory,
       )) {
         await AppStore.addDailyTaskEvent(event, persist: false);
       }

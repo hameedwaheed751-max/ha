@@ -5,7 +5,7 @@
     "global_chat": {
       "chat": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        ".write": "auth != null && (root.child('agents').child(auth.uid).child('profile').child('role').val() === 'admin' || (newData.exists() && newData.child('senderUid').val() === auth.uid))"
       }
     },
     "agents": {

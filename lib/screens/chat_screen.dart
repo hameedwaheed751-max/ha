@@ -326,12 +326,15 @@ class _ChatScreenState extends State<ChatScreen> {
                               children: [
                                 Text(
                                   msg.senderName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     color: isMe
                                         ? Colors.white
-                                        : const Color(0xFFA5B4FC),
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 12,
+                                        : const Color(0xFF7C3AED),
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 13,
+                                    letterSpacing: 0.2,
                                   ),
                                 ),
                                 if (isDeleted) ...[

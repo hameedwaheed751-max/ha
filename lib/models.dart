@@ -3058,10 +3058,10 @@ class AppStore {
   static Future<void> deleteAllChat() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    final role = await UserRoleService.resolveRole(uid: user.uid);
+    if (role != UserRoleService.adminRole) return;
     final ref = _chatRef;
     try {
-      final token = await user.getIdTokenResult(true);
-      if (token.claims?['admin'] != true) return;
       final snapshot = await ref.get().timeout(const Duration(seconds: 10));
       for (final child in snapshot.children) {
         final key = child.key;
