@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 
-enum _DailyTaskFilter { all, activation, payment, debtAdded }
+enum _DailyTaskFilter { all, activation, payment, debtAdded, debtRemoved }
 
 class TodayTasksScreen extends StatefulWidget {
   const TodayTasksScreen({super.key});
@@ -47,6 +47,8 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
               event.amount > 0,
         _DailyTaskFilter.debtAdded =>
           event.type == 'debt_added' && event.amount > 0,
+        _DailyTaskFilter.debtRemoved =>
+          event.type == DailyTaskEvent.debtRemovedType && event.amount > 0,
       };
     }).toList();
 
@@ -224,6 +226,12 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
         Icons.account_balance_wallet_outlined,
         Colors.orange,
       ),
+      (
+        'تخفيض الدين',
+        _money(summary.debtReducedTotal),
+        Icons.remove_circle_outline,
+        Colors.blueGrey,
+      ),
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -346,6 +354,10 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
                 value: _DailyTaskFilter.debtAdded,
                 label: Text('إضافة دين'),
               ),
+              ButtonSegment(
+                value: _DailyTaskFilter.debtRemoved,
+                label: Text('تخفيض دين'),
+              ),
             ],
             selected: {_filter},
             onSelectionChanged: (value) =>
@@ -361,25 +373,38 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
     final isActivation = event.type == 'activation';
     final isEntryCollection =
         event.type == DailyTaskEvent.debtEntryCollectionType;
+    final isDebtRemoved = event.type == DailyTaskEvent.debtRemovedType;
     final isPayment = event.type == 'debt_payment' || isEntryCollection;
     final color = isActivation
         ? const Color(0xFF087F5B)
+        : isDebtRemoved
+        ? Colors.blueGrey
         : isPayment
         ? const Color(0xFF1769AA)
         : const Color(0xFFC2413B);
     final icon = isActivation
         ? Icons.bolt_outlined
+        : isDebtRemoved
+        ? Icons.remove_circle_outline
         : isPayment
         ? Icons.payments_outlined
         : Icons.add_card_outlined;
     final label = isActivation
         ? 'تفعيل'
+        : isDebtRemoved
+        ? 'تخفيض دين'
         : isPayment
-      ? isEntryCollection
-          ? 'واصل الاشتراك'
-          : 'تسديد دين'
+        ? isEntryCollection
+              ? 'واصل الاشتراك'
+              : 'تسديد دين'
         : 'إضافة دين';
-    final amountLabel = isActivation ? null : isPayment ? 'الواصل' : 'المضاف';
+    final amountLabel = isActivation
+        ? 'الواصل'
+        : isDebtRemoved
+        ? 'المخفض'
+        : isPayment
+        ? 'الواصل'
+        : 'المضاف';
     final amount = event.amount;
 
     return Padding(

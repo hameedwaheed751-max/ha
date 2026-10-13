@@ -335,7 +335,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('هل تريد تفعيل اشتراك ${subscriber.name}؟'),
+                Text(
+                  'مبلغ الاشتراك: ${subscriber.price.toStringAsFixed(0)} د.ع'
+                  '\nالمتبقي قبل التفعيل: ${subscriber.remaining.toStringAsFixed(0)} د.ع'
+                  '\nهل تريد تفعيل اشتراك ${subscriber.name}؟',
+                ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: amountController,
@@ -357,10 +361,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               FilledButton(
                 onPressed: () {
                   final amount = _parseAmount(amountController.text);
-                  if (amount == null || amount < 0) {
+                  if (amount == null ||
+                      !amount.isFinite ||
+                      amount < 0 ||
+                      amount > subscriber.remaining) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('أدخل مبلغاً صحيحاً أو صفراً.'),
+                      SnackBar(
+                        content: Text(
+                          'المبلغ يجب أن يكون بين صفر والمتبقي '
+                          '(${subscriber.remaining.toStringAsFixed(0)} د.ع).',
+                        ),
                       ),
                     );
                     return;
@@ -481,9 +491,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
     if (!mounted) return;
     if (result.success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم الإرسال بنجاح')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم الإرسال بنجاح')));
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -493,13 +503,17 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
   }
 
-  Future<void> _sendActivationWhatsApp(Subscriber s) async {
+  Future<void> _sendActivationWhatsApp(
+    Subscriber s, {
+    double? paidAmount,
+  }) async {
     final activationTemplate =
         AppStore.messageTemplates['activation'] ??
         'مرحباً {name}، تم تفعيل اشتراكك لدى {office}. الباقة: {package} وتنتهي بتاريخ {endDate}.';
     final result = await RenderWhatsAppService.notifySubscriptionActivated(
       s,
       template: activationTemplate,
+      paidAmount: paidAmount,
     );
     if (!result.success) {
       debugPrint(
@@ -652,13 +666,17 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         throw Exception('معرّف اشتراك FTTH غير موجود في بيانات المشترك');
       }
 
-      final customerId = (s.sasData['customer_id'] ?? s.sasData['customerId'] ?? '')
-          .toString()
-          .trim();
-      final rawSubscription = s.sasData['rawSubscription'];
-      final bundleId = (rawSubscription is Map && rawSubscription['bundle'] is Map)
-          ? ((rawSubscription['bundle']['id'] ?? rawSubscription['bundle']['code']) ?? 'FTTH_BASIC')
+      final customerId =
+          (s.sasData['customer_id'] ?? s.sasData['customerId'] ?? '')
               .toString()
+              .trim();
+      final rawSubscription = s.sasData['rawSubscription'];
+      final bundleId =
+          (rawSubscription is Map && rawSubscription['bundle'] is Map)
+          ? ((rawSubscription['bundle']['id'] ??
+                        rawSubscription['bundle']['code']) ??
+                    'FTTH_BASIC')
+                .toString()
           : 'FTTH_BASIC';
       final services = [
         {'value': 'BASIC', 'type': 'Base'},
@@ -689,9 +707,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       final paymentUrl = ((result['paymentUrl'] ?? result['payment_url']) ?? '')
           .toString()
           .trim();
-      final orderNumber = ((result['orderNumber'] ?? result['order_number']) ?? '')
-          .toString()
-          .trim();
+      final orderNumber =
+          ((result['orderNumber'] ?? result['order_number']) ?? '')
+              .toString()
+              .trim();
 
       if (!mounted) return;
 
@@ -759,8 +778,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       return;
     }
 
-    final confirmedSaleAmount = await _confirmActivation(s);
-    if (confirmedSaleAmount == null) return;
+    final activationCollectedAmount = await _confirmActivation(s);
+    if (activationCollectedAmount == null) return;
     try {
       final settings = await SasSettings.load();
       if (settings.username.trim().isEmpty || settings.password.isEmpty) {
@@ -823,7 +842,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           SasSyncService.activationDateFromSas(userData) ??
           SasSyncService.activationDateFromSas(activationResponse) ??
           DateTime.now();
-        final recordedAt = DateTime.now();
+      final recordedAt = DateTime.now();
       _setStartDateAsActivationDay(s, at: activatedAt);
 
       // استخراج تاريخ الانتهاء من userData إذا توفر
@@ -836,28 +855,60 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         }
       }
 
+      final debtAlreadyRecorded = AppStore.hasRecordedCurrentDebt(s);
+      final paymentAllocation = s.applyPayment(
+        activationCollectedAmount,
+        at: recordedAt,
+        note: 'واصل عند التفعيل',
+      );
+      final collected = paymentAllocation.totalApplied;
+      InvoiceRecord? activationInvoice;
+      if (collected > 0.0001) {
+        final receiptNumber = await AppStore.issueReceiptNumber(persist: false);
+        activationInvoice = s.registerInvoiceFromPayment(
+          receiptNumber: receiptNumber,
+          amount: collected,
+          at: recordedAt,
+          note: 'فاتورة واصل عند التفعيل',
+        );
+        s.paymentDate = fmt(recordedAt);
+      }
       await AppStore.addAccountingActivation(
         AccountingActivationRecord(
           subscriberUser: s.user,
           subscriberName: s.name,
           packageName: s.packageDisplay,
-          saleAmount: confirmedSaleAmount,
+          saleAmount: s.price,
           sasDeduction: activationAmount,
           at: recordedAt,
         ),
         persist: false,
       );
-      final debtAlreadyRecorded = AppStore.hasRecordedCurrentDebt(s);
       for (final event in DailyTaskEvent.activationSettlement(
         subscriberUser: s.user,
         subscriberName: s.name,
         at: recordedAt,
-        collected: confirmedSaleAmount,
+        collected: paymentAllocation.appliedToCurrentCharge,
         remaining: s.remaining,
         note: 'تفعيل من قائمة المشتركين',
         addRemainingDebtEvent: !debtAlreadyRecorded,
+        chargedAmount: s.price,
       )) {
         await AppStore.addDailyTaskEvent(event, persist: false);
+      }
+      if (paymentAllocation.appliedToCarriedDebt > 0.0001) {
+        await AppStore.addDailyTaskEvent(
+          DailyTaskEvent(
+            type: 'debt_payment',
+            subscriberUser: s.user,
+            subscriberName: s.name,
+            at: recordedAt,
+            amount: paymentAllocation.appliedToCarriedDebt,
+            remainingAfter: s.remaining,
+            note: 'تسديد دين مرحّل عند التفعيل',
+          ),
+          persist: false,
+        );
       }
 
       // تحديث بيانات SAS إذا تم جلبها
@@ -875,6 +926,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
       // حفظ البيانات المحلية أولاً
       await AppStore.save();
+      if (activationInvoice != null) {
+        await _recordLedgerTransaction(
+          subscriber: s,
+          type: FinancialTransactionType.payment,
+          amount: collected,
+          date: recordedAt,
+          referenceId: 'payment-receipt:${activationInvoice.receiptNumber}',
+          note: activationInvoice.note,
+        );
+      }
 
       if (mounted) {
         if (loadingDialogShown && Navigator.of(context).canPop()) {
@@ -882,7 +943,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           loadingDialogShown = false;
         }
 
-        await _sendActivationWhatsApp(s);
+        await _sendActivationWhatsApp(s, paidAmount: collected);
         if (!mounted) return;
 
         setState(() {
@@ -1216,10 +1277,15 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     }
                   }
                 }),
-                _op(Icons.account_balance_wallet, Colors.brown, 'الديون', () async {
-                  Navigator.pop(ctx);
-                  await _debt(s);
-                }),
+                _op(
+                  Icons.account_balance_wallet,
+                  Colors.brown,
+                  'الديون',
+                  () async {
+                    Navigator.pop(ctx);
+                    await _debt(s);
+                  },
+                ),
                 _op(Icons.phone, Colors.blue, 'اتصال مباشر', () {
                   Navigator.pop(ctx);
                   phoneCall(s);
@@ -1763,7 +1829,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             barrierDismissible: false,
             builder: (_) => const Center(child: CircularProgressIndicator()),
           );
-          final hadActivationHistory = AppStore.hasRecordedActivation(s);
+
           final activationResponse = await api
               .activateUser(userId)
               .timeout(const Duration(seconds: 30));
@@ -1772,7 +1838,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           final activatedAt =
               SasSyncService.activationDateFromSas(activationResponse) ??
               DateTime.now();
-            final recordedAt = DateTime.now();
+          final recordedAt = DateTime.now();
           _setStartDateAsActivationDay(s, at: activatedAt);
 
           // جلب بيانات المشترك المحدثة من SAS
@@ -1814,11 +1880,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             subscriberUser: s.user,
             subscriberName: s.name,
             at: recordedAt,
-            collected: s.paid,
+            collected: 0,
             remaining: s.remaining,
             note: 'تفعيل بعد تغيير الباقة',
             addRemainingDebtEvent: !debtAlreadyRecorded,
-            isReactivation: hadActivationHistory,
+            isReactivation: true,
+            chargedAmount: s.price,
           )) {
             await AppStore.addDailyTaskEvent(event, persist: false);
           }
@@ -1850,7 +1917,15 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
   }
 
-  Future<void> _debt(Subscriber s, {bool autoOpenReceiptAfterSave = false}) async {
+  Future<void> _debt(
+    Subscriber s, {
+    bool autoOpenReceiptAfterSave = false,
+  }) async {
+    if (AppStore.rolloverMonthlyBalances()) {
+      await AppStore.save();
+      if (!mounted) return;
+    }
+    final dialogBillingMonthKey = s.billingMonthKey;
     final price = TextEditingController(text: s.price.toStringAsFixed(0));
     final paid = TextEditingController(text: s.paid.toStringAsFixed(0));
     await showDialog<void>(
@@ -1882,10 +1957,18 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   ),
                   onChanged: (_) => setLocal(() {}),
                   decoration: const InputDecoration(
-                    labelText: 'الواصل',
+                    labelText: 'واصل الشهر الحالي',
                     border: OutlineInputBorder(),
                   ),
                 ),
+                if (s.carriedDebt > 0.0001)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      'الدين المرحّل: ${s.carriedDebt.toStringAsFixed(0)} د.ع • إجمالي المتبقي: ${s.remaining.toStringAsFixed(0)} د.ع',
+                      style: TextStyle(color: Colors.orange.shade800),
+                    ),
+                  ),
                 const SizedBox(height: 8),
                 Builder(
                   builder: (_) {
@@ -1931,6 +2014,18 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               ),
               FilledButton(
                 onPressed: () async {
+                  if (s.billingMonthKey != dialogBillingMonthKey) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'بدأ شهر جديد أثناء التعديل؛ افتح شاشة الدين مجدداً',
+                          ),
+                        ),
+                      );
+                    }
+                    return;
+                  }
                   final oldPrice = s.price;
                   final oldPaid = s.paid;
                   final oldRemaining = s.remaining;
@@ -1944,10 +2039,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     }
                     return;
                   }
-                  if (newPaidAmount == null) {
+                  if (newPaidAmount == null ||
+                      newPaidAmount < 0 ||
+                      newPaidAmount > newPrice) {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('أدخل قيمة الواصل')),
+                        const SnackBar(
+                          content: Text(
+                            'يجب أن يكون الواصل بين صفر ومبلغ الاشتراك',
+                          ),
+                        ),
                       );
                     }
                     return;
@@ -1961,7 +2062,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   );
                   final delta = adjustment.paymentDelta;
                   final addedDebt = adjustment.addedDebt;
-                  if (delta.abs() <= 0.0001 && addedDebt <= 0.0001) {
+                  final reducedDebt = adjustment.reducedDebt;
+                  final subscriptionDelta = adjustment.subscriptionDelta;
+                  if (delta.abs() <= 0.0001 &&
+                      subscriptionDelta.abs() <= 0.0001) {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -1987,16 +2091,30 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     );
                   }
 
-                  if (delta > 0) {
+                  final entryCollection = adjustment.appliedToCurrentCharge;
+                  final debtRepayment = adjustment.appliedToCarriedDebt;
+                  if (entryCollection > 0.0001) {
                     await AppStore.addDailyTaskEvent(
                       DailyTaskEvent(
-                        type: oldRemaining <= 0.0001 && addedDebt > 0.0001
-                            ? DailyTaskEvent.debtEntryCollectionType
-                            : 'debt_payment',
+                        type: DailyTaskEvent.debtEntryCollectionType,
                         subscriberUser: s.user,
                         subscriberName: s.name,
                         at: now,
-                        amount: delta,
+                        amount: entryCollection,
+                        remainingAfter: s.remaining,
+                        note: 'واصل من مبلغ الاشتراك الجديد',
+                      ),
+                      persist: false,
+                    );
+                  }
+                  if (debtRepayment > 0.0001) {
+                    await AppStore.addDailyTaskEvent(
+                      DailyTaskEvent(
+                        type: 'debt_payment',
+                        subscriberUser: s.user,
+                        subscriberName: s.name,
+                        at: now,
+                        amount: debtRepayment,
                         remainingAfter: s.remaining,
                         note: s.remaining <= 0.0001
                             ? 'تسديد كامل'
@@ -2020,9 +2138,23 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       persist: false,
                     );
                   }
+                  if (reducedDebt > 0.0001) {
+                    await AppStore.addDailyTaskEvent(
+                      DailyTaskEvent(
+                        type: DailyTaskEvent.debtRemovedType,
+                        subscriberUser: s.user,
+                        subscriberName: s.name,
+                        at: now,
+                        amount: reducedDebt,
+                        remainingAfter: s.remaining,
+                        note: 'تخفيض مبلغ الاشتراك',
+                      ),
+                      persist: false,
+                    );
+                  }
 
                   if (delta > 0.0001) s.paymentDate = fmt(now);
-                  if (s.paid <= 0) s.paymentDate = '';
+                  if (s.paid <= 0 && delta <= 0.0001) s.paymentDate = '';
                   if ((oldPrice - s.price).abs() > 0.0001 ||
                       (oldPaid - s.paid).abs() > 0.0001 ||
                       (oldRemaining - s.remaining).abs() > 0.0001) {
@@ -2031,6 +2163,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     if (addedDebt > 0.0001) {
                       editDetails.add(
                         'بتاريخ $operationDate تم إضافة مبلغ دين ${addedDebt.toStringAsFixed(0)} د.ع',
+                      );
+                    }
+                    if (reducedDebt > 0.0001) {
+                      editDetails.add(
+                        'بتاريخ $operationDate تم تخفيض مبلغ الاشتراك ${reducedDebt.toStringAsFixed(0)} د.ع',
                       );
                     }
                     if (delta > 0.0001) {
@@ -2053,7 +2190,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                         subscriberUser: s.user,
                         subscriberName: s.name,
                         at: now,
-                        amount: s.remaining - oldRemaining,
+                        amount: subscriptionDelta,
                         remainingAfter: s.remaining,
                         note: editDetails.join(' | '),
                       ),
@@ -2070,6 +2207,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       referenceId: 'payment-receipt:${invoice!.receiptNumber}',
                       note: invoice.note,
                     );
+                  } else if (delta < -0.0001) {
+                    await _recordLedgerTransaction(
+                      subscriber: s,
+                      type: FinancialTransactionType.adjustment,
+                      amount: delta,
+                      date: now,
+                      referenceId:
+                          'payment-correction:${s.subscriberId}:${now.toUtc().toIso8601String()}',
+                      note: 'تصحيح تخفيض الواصل',
+                    );
                   }
                   if (addedDebt > 0.0001) {
                     await _recordLedgerTransaction(
@@ -2080,6 +2227,17 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       referenceId:
                           'debt-edit:${s.subscriberId}:${now.toUtc().toIso8601String()}',
                       note: 'إضافة مبلغ من شاشة ديون المشترك',
+                    );
+                  }
+                  if (reducedDebt > 0.0001) {
+                    await _recordLedgerTransaction(
+                      subscriber: s,
+                      type: FinancialTransactionType.adjustment,
+                      amount: -reducedDebt,
+                      date: now,
+                      referenceId:
+                          'debt-reduction:${s.subscriberId}:${now.toUtc().toIso8601String()}',
+                      note: 'تخفيض مبلغ الاشتراك',
                     );
                   }
 

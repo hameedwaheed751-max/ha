@@ -107,40 +107,40 @@ class WhatsAppSendLog {
   final Map<String, dynamic>? responseBody;
 
   Map<String, dynamic> toJson() => {
-        'at': at.toIso8601String(),
-        'eventType': eventType,
-        'total': total,
-        'sent': sent,
-        'failed': failed,
-        'ok': ok,
-        'note': note,
-        'to': to,
-        'attempt': attempt,
-        'statusCode': statusCode,
-        'endpoint': endpoint,
-        'requestBody': requestBody,
-        'responseBody': responseBody,
-      };
+    'at': at.toIso8601String(),
+    'eventType': eventType,
+    'total': total,
+    'sent': sent,
+    'failed': failed,
+    'ok': ok,
+    'note': note,
+    'to': to,
+    'attempt': attempt,
+    'statusCode': statusCode,
+    'endpoint': endpoint,
+    'requestBody': requestBody,
+    'responseBody': responseBody,
+  };
 
   factory WhatsAppSendLog.fromJson(Map<String, dynamic> j) => WhatsAppSendLog(
-        at: DateTime.tryParse((j['at'] ?? '').toString()) ?? DateTime.now(),
-        eventType: (j['eventType'] ?? 'unknown').toString(),
-        total: (j['total'] as num?)?.toInt() ?? 0,
-        sent: (j['sent'] as num?)?.toInt() ?? 0,
-        failed: (j['failed'] as num?)?.toInt() ?? 0,
-        ok: j['ok'] == true,
-        note: (j['note'] ?? '').toString(),
-        to: (j['to'] ?? '').toString(),
-        attempt: (j['attempt'] as num?)?.toInt() ?? 1,
-        statusCode: (j['statusCode'] as num?)?.toInt(),
-        endpoint: (j['endpoint'] ?? '').toString(),
-        requestBody: j['requestBody'] is Map
-            ? Map<String, dynamic>.from(j['requestBody'] as Map)
-            : null,
-        responseBody: j['responseBody'] is Map
-            ? Map<String, dynamic>.from(j['responseBody'] as Map)
-            : null,
-      );
+    at: DateTime.tryParse((j['at'] ?? '').toString()) ?? DateTime.now(),
+    eventType: (j['eventType'] ?? 'unknown').toString(),
+    total: (j['total'] as num?)?.toInt() ?? 0,
+    sent: (j['sent'] as num?)?.toInt() ?? 0,
+    failed: (j['failed'] as num?)?.toInt() ?? 0,
+    ok: j['ok'] == true,
+    note: (j['note'] ?? '').toString(),
+    to: (j['to'] ?? '').toString(),
+    attempt: (j['attempt'] as num?)?.toInt() ?? 1,
+    statusCode: (j['statusCode'] as num?)?.toInt(),
+    endpoint: (j['endpoint'] ?? '').toString(),
+    requestBody: j['requestBody'] is Map
+        ? Map<String, dynamic>.from(j['requestBody'] as Map)
+        : null,
+    responseBody: j['responseBody'] is Map
+        ? Map<String, dynamic>.from(j['responseBody'] as Map)
+        : null,
+  );
 }
 
 class RenderWhatsAppService {
@@ -180,15 +180,19 @@ class RenderWhatsAppService {
 
     final workerFallback = (sasWebProxyUrl ?? '').trim();
     if (workerFallback.isNotEmpty &&
-        !workerFallback.contains('netagent-sas-proxy.wakeel-net-hamwdy.workers.dev')) {
+        !workerFallback.contains(
+          'netagent-sas-proxy.wakeel-net-hamwdy.workers.dev',
+        )) {
       return workerFallback;
     }
 
     return _defaultSendEndpoint;
   }
+
   static String get _runtimeEmbeddedApiKey {
     return readRuntimeAppConfig('sasProxyToken') ?? _embeddedApiKey;
   }
+
   static const String _metaApiBaseUrl = String.fromEnvironment(
     'META_WHATSAPP_API_URL',
     defaultValue: 'https://graph.facebook.com/v22.0',
@@ -234,8 +238,10 @@ class RenderWhatsAppService {
     final normalizedOfficePhone = normalizePhone(officePhone);
     final alreadyContainsPhone =
         (officeDigits.isNotEmpty && messageDigits.contains(officeDigits)) ||
-        (normalizedOfficePhone.isNotEmpty && messageDigits.contains(normalizedOfficePhone));
-    final alreadyContainsAgent = agentLabel.isNotEmpty && message.contains(agentLabel);
+        (normalizedOfficePhone.isNotEmpty &&
+            messageDigits.contains(normalizedOfficePhone));
+    final alreadyContainsAgent =
+        agentLabel.isNotEmpty && message.contains(agentLabel);
 
     if (alreadyContainsPhone && alreadyContainsAgent) return message;
 
@@ -339,8 +345,10 @@ class RenderWhatsAppService {
       '{{تاريخ البدء}}': variables['startDate'] ?? '',
       '{{تاريخ انتهاء الاشتراك}}': variables['endDate'] ?? '',
       '{{تاريخ الانتهاء}}': variables['endDate'] ?? '',
-      '{{subscription_start}}': variables['subscription_start'] ?? variables['startDate'] ?? '',
-      '{{subscription_end}}': variables['subscription_end'] ?? variables['endDate'] ?? '',
+      '{{subscription_start}}':
+          variables['subscription_start'] ?? variables['startDate'] ?? '',
+      '{{subscription_end}}':
+          variables['subscription_end'] ?? variables['endDate'] ?? '',
       '{{مبلغ الاشتراك}}': variables['price'] ?? '',
       '{{المبلغ}}': variables['amount'] ?? '',
       '{{التاريخ}}': variables['date'] ?? '',
@@ -356,7 +364,10 @@ class RenderWhatsAppService {
     // دعم عام لأي placeholder عربي/إنجليزي بصيغة {{...}} أو {key} حتى لو وُجدت مسافات.
     out = out.replaceAllMapped(
       RegExp(r'\{\{\s*([^{}]+?)\s*\}\}|\{\s*([a-zA-Z][^{}]*?)\s*\}'),
-      (m) => _valueForPlaceholder((m.group(1) ?? m.group(2) ?? '').trim(), variables),
+      (m) => _valueForPlaceholder(
+        (m.group(1) ?? m.group(2) ?? '').trim(),
+        variables,
+      ),
     );
     return out;
   }
@@ -394,10 +405,10 @@ class RenderWhatsAppService {
   }
 
   static String _normalizePlaceholderKey(String placeholder) {
-    return placeholder
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^\p{L}\p{N}]', unicode: true), '');
+    return placeholder.trim().toLowerCase().replaceAll(
+      RegExp(r'[^\p{L}\p{N}]', unicode: true),
+      '',
+    );
   }
 
   static String _valueForPlaceholder(
@@ -408,8 +419,16 @@ class RenderWhatsAppService {
     final explicitCandidates = <String>{
       placeholder.trim(),
       placeholder.trim().toLowerCase(),
-      placeholder.trim().replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_').trim().toLowerCase(),
-      placeholder.trim().replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '').trim().toLowerCase(),
+      placeholder
+          .trim()
+          .replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_')
+          .trim()
+          .toLowerCase(),
+      placeholder
+          .trim()
+          .replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '')
+          .trim()
+          .toLowerCase(),
     }.where((value) => value.isNotEmpty).toSet();
 
     const aliases = <String, List<String>>{
@@ -459,12 +478,7 @@ class RenderWhatsAppService {
         'مبلغالاشتراك',
         'سعرالاشتراك',
       ],
-      'paid': <String>[
-        'paid',
-        'paidamount',
-        'الواصل',
-        'المبلغالواصل',
-      ],
+      'paid': <String>['paid', 'paidamount', 'الواصل', 'المبلغالواصل'],
       'remaining': <String>[
         'remaining',
         'remainingamount',
@@ -505,11 +519,7 @@ class RenderWhatsAppService {
         'officephone',
         'رقمالواتساب',
       ],
-      'message': <String>[
-        'message',
-        'الرسالة',
-        'النص',
-      ],
+      'message': <String>['message', 'الرسالة', 'النص'],
     };
 
     for (final entry in aliases.entries) {
@@ -571,7 +581,9 @@ class RenderWhatsAppService {
     };
   }
 
-  static List<dynamic> _extractTemplateBodyParameters(Map<String, dynamic> payload) {
+  static List<dynamic> _extractTemplateBodyParameters(
+    Map<String, dynamic> payload,
+  ) {
     final template = payload['template'];
     if (template is! Map) return const <String>[];
     final components = template['components'];
@@ -582,19 +594,24 @@ class RenderWhatsAppService {
       if ((component['type'] ?? '').toString() != 'body') continue;
       final parameters = component['parameters'];
       if (parameters is! List) return const <String>[];
-      return parameters.whereType<Map>().map((parameter) {
-        final text = (parameter['text'] ?? '').toString().trim();
-        final parameterName =
-            (parameter['parameter_name'] ?? '').toString().trim();
-        if (parameterName.isEmpty) return text;
-        return <String, String>{
-          'parameterName': parameterName,
-          'text': text,
-        };
-      }).where((value) {
-        if (value is String) return value.isNotEmpty;
-        return value is Map && (value['text'] ?? '').toString().isNotEmpty;
-      }).toList();
+      return parameters
+          .whereType<Map>()
+          .map((parameter) {
+            final text = (parameter['text'] ?? '').toString().trim();
+            final parameterName = (parameter['parameter_name'] ?? '')
+                .toString()
+                .trim();
+            if (parameterName.isEmpty) return text;
+            return <String, String>{
+              'parameterName': parameterName,
+              'text': text,
+            };
+          })
+          .where((value) {
+            if (value is String) return value.isNotEmpty;
+            return value is Map && (value['text'] ?? '').toString().isNotEmpty;
+          })
+          .toList();
     }
 
     return const <String>[];
@@ -603,9 +620,9 @@ class RenderWhatsAppService {
   static Map<String, String> _canonicalTemplateVariables(
     Map<String, String> variables,
   ) => <String, String>{
-        for (final name in canonicalMetaVariableNames)
-          name: variables[name]?.trim() ?? '',
-      };
+    for (final name in canonicalMetaVariableNames)
+      name: variables[name]?.trim() ?? '',
+  };
 
   static Future<(String endpoint, String apiKey)> loadConfig() async {
     final runtimeWhatsAppEndpoint = readRuntimeAppConfig('whatsappServiceUrl');
@@ -618,17 +635,28 @@ class RenderWhatsAppService {
 
     final phoneNumberId = _resolvePhoneNumberId();
     if (phoneNumberId.isEmpty) {
-      final fallbackEndpoint = _coalesce(_runtimeDefaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim().endsWith('/send-message')
-          ? _coalesce(_runtimeDefaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim()
+      final fallbackEndpoint =
+          _coalesce(
+            _runtimeDefaultSendEndpoint,
+            'https://ha-0cs7.onrender.com',
+          ).trim().endsWith('/send-message')
+          ? _coalesce(
+              _runtimeDefaultSendEndpoint,
+              'https://ha-0cs7.onrender.com',
+            ).trim()
           : '${_coalesce(_runtimeDefaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim().replaceAll(RegExp(r'/+$'), '')}/send-message';
-      final fallbackToken = _coalesce(_runtimeEmbeddedApiKey, _legacyEmbeddedApiKey).trim();
+      final fallbackToken = _coalesce(
+        _runtimeEmbeddedApiKey,
+        _legacyEmbeddedApiKey,
+      ).trim();
       return (fallbackEndpoint, fallbackToken);
     }
 
     final baseUrl = _metaApiBaseUrl.trim().isNotEmpty
         ? _metaApiBaseUrl.trim()
         : 'https://graph.facebook.com/v22.0';
-    final endpoint = '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/$phoneNumberId/messages';
+    final endpoint =
+        '${baseUrl.replaceAll(RegExp(r'/+$'), '')}/$phoneNumberId/messages';
     final token = _resolveAccessToken();
     return (endpoint, token);
   }
@@ -639,7 +667,10 @@ class RenderWhatsAppService {
   }
 
   static String _buildProxySendMessageEndpoint() {
-    final endpoint = _coalesce(_runtimeDefaultSendEndpoint, 'https://ha-0cs7.onrender.com').trim();
+    final endpoint = _coalesce(
+      _runtimeDefaultSendEndpoint,
+      'https://ha-0cs7.onrender.com',
+    ).trim();
     if (endpoint.endsWith('/send-message')) return endpoint;
     return '${endpoint.replaceAll(RegExp(r'/+$'), '')}/send-message';
   }
@@ -727,8 +758,8 @@ class RenderWhatsAppService {
     final error = metaError is Map
         ? metaError
         : proxyError is Map
-            ? proxyError
-            : null;
+        ? proxyError
+        : null;
 
     if (error is Map) {
       final errorData = error['error_data'];
@@ -770,26 +801,34 @@ class RenderWhatsAppService {
     }
 
     final endpoint = forcePlainText
-      ? _buildProxySendMessageEndpoint()
-      : await loadSendMessageEndpoint();
+        ? _buildProxySendMessageEndpoint()
+        : await loadSendMessageEndpoint();
     final config = await loadConfig();
     final apiKey = config.$2;
-    final headers = <String, String>{
-      'Content-Type': 'application/json',
-    };
-    final usesMetaTemplate = !forcePlainText &&
-      endpoint.contains('graph.facebook.com') &&
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    final usesMetaTemplate =
+        !forcePlainText &&
+        endpoint.contains('graph.facebook.com') &&
         _resolvePhoneNumberId().isNotEmpty &&
         apiKey.isNotEmpty;
 
     final resolvedApiKey = _coalesce(apiKey, '').trim();
-    final proxyToken = _coalesce(_runtimeEmbeddedApiKey, _legacyEmbeddedApiKey).trim();
+    final proxyToken = _coalesce(
+      _runtimeEmbeddedApiKey,
+      _legacyEmbeddedApiKey,
+    ).trim();
     if (resolvedApiKey.isNotEmpty) {
       headers['Authorization'] = 'Bearer $resolvedApiKey';
       if (!usesMetaTemplate) {
-        headers['x-api-key'] = proxyToken.isNotEmpty ? proxyToken : resolvedApiKey;
-        headers['x-proxy-token'] = proxyToken.isNotEmpty ? proxyToken : resolvedApiKey;
-        headers['x-sas-proxy-token'] = proxyToken.isNotEmpty ? proxyToken : resolvedApiKey;
+        headers['x-api-key'] = proxyToken.isNotEmpty
+            ? proxyToken
+            : resolvedApiKey;
+        headers['x-proxy-token'] = proxyToken.isNotEmpty
+            ? proxyToken
+            : resolvedApiKey;
+        headers['x-sas-proxy-token'] = proxyToken.isNotEmpty
+            ? proxyToken
+            : resolvedApiKey;
       }
     } else if (proxyToken.isNotEmpty) {
       headers['x-api-key'] = proxyToken;
@@ -800,35 +839,38 @@ class RenderWhatsAppService {
     if (endpoint.isEmpty) {
       return const RenderSingleWhatsAppResult(
         success: false,
-        error: 'Missing Meta WhatsApp configuration. Set META_WHATSAPP_PHONE_NUMBER_ID and META_WHATSAPP_ACCESS_TOKEN.',
+        error:
+            'Missing Meta WhatsApp configuration. Set META_WHATSAPP_PHONE_NUMBER_ID and META_WHATSAPP_ACCESS_TOKEN.',
       );
     }
     if (!forcePlainText && payloadOverride == null) {
       return const RenderSingleWhatsAppResult(
         success: false,
-        error: 'A canonical named-parameter payload is required for Meta templates',
+        error:
+            'A canonical named-parameter payload is required for Meta templates',
       );
     }
 
     final payload = (forcePlainText)
-      ? <String, dynamic>{
-        'to': normalizedPhone,
-        'message': cleanMessage,
-        'clientBuild': clientBuild,
-        }
-      : usesMetaTemplate
+        ? <String, dynamic>{
+            'to': normalizedPhone,
+            'message': cleanMessage,
+            'clientBuild': clientBuild,
+          }
+        : usesMetaTemplate
         ? payloadOverride!
         : () {
             final templateMap = payloadOverride!['template'];
-            final templateNameValue =
-                templateMap is Map ? (templateMap['name'] ?? '').toString().trim() : '';
+            final templateNameValue = templateMap is Map
+                ? (templateMap['name'] ?? '').toString().trim()
+                : '';
             final languageCode = templateMap is Map
                 ? ((templateMap['language'] is Map
-                        ? (templateMap['language'] as Map)['code']
-                        : null) ??
-                    'ar')
-                    .toString()
-                    .trim()
+                              ? (templateMap['language'] as Map)['code']
+                              : null) ??
+                          'ar')
+                      .toString()
+                      .trim()
                 : 'ar';
             final params = _extractTemplateBodyParameters(payloadOverride);
             if (templateNameValue.isNotEmpty) {
@@ -839,7 +881,8 @@ class RenderWhatsAppService {
                 'templateName': templateNameValue,
                 'language': languageCode.isEmpty ? 'ar' : languageCode,
                 'parameters': params,
-                'templateVariables': templateVariables ?? const <String, String>{},
+                'templateVariables':
+                    templateVariables ?? const <String, String>{},
               };
             }
 
@@ -855,7 +898,9 @@ class RenderWhatsAppService {
 
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        debugPrint('Render WhatsApp request body:\n${const JsonEncoder.withIndent('  ').convert(currentPayload)}');
+        debugPrint(
+          'Render WhatsApp request body:\n${const JsonEncoder.withIndent('  ').convert(currentPayload)}',
+        );
         final response = await http
             .post(
               Uri.parse(endpoint),
@@ -874,8 +919,11 @@ class RenderWhatsAppService {
           } catch (_) {}
         }
 
-        debugPrint('Render WhatsApp response body:\n${response.body.isEmpty ? '<empty>' : response.body}');
-        final successByStatus = response.statusCode >= 200 && response.statusCode < 300;
+        debugPrint(
+          'Render WhatsApp response body:\n${response.body.isEmpty ? '<empty>' : response.body}',
+        );
+        final successByStatus =
+            response.statusCode >= 200 && response.statusCode < 300;
         final success = successByStatus && (data['success'] != false);
 
         await _appendAttemptLog(
@@ -903,7 +951,9 @@ class RenderWhatsAppService {
 
         final errorMessage = _metaErrorMessage(data, response.statusCode);
         if (data.isNotEmpty) {
-          debugPrint('Render WhatsApp Meta error JSON:\n${const JsonEncoder.withIndent('  ').convert(data)}');
+          debugPrint(
+            'Render WhatsApp Meta error JSON:\n${const JsonEncoder.withIndent('  ').convert(data)}',
+          );
         } else {
           debugPrint('Render WhatsApp Meta error body:\n${response.body}');
         }
@@ -918,7 +968,6 @@ class RenderWhatsAppService {
         if (response.statusCode >= 400 && response.statusCode < 500) {
           break;
         }
-
       } catch (e) {
         await _appendAttemptLog(
           eventType: eventType,
@@ -990,10 +1039,7 @@ class RenderWhatsAppService {
         variables: vars,
       );
     } on StateError catch (error) {
-      return RenderSingleWhatsAppResult(
-        success: false,
-        error: error.message,
-      );
+      return RenderSingleWhatsAppResult(success: false, error: error.message);
     }
 
     return _sendCore(
@@ -1021,11 +1067,13 @@ class RenderWhatsAppService {
   static Future<RenderSingleWhatsAppResult> notifySubscriptionActivated(
     Subscriber subscriber, {
     String? template,
+    double? paidAmount,
   }) {
     return _notifyByType(
       type: WhatsAppNotificationType.subscriptionActivated,
       subscriber: subscriber,
       template: template,
+      paidAmount: paidAmount,
     );
   }
 
@@ -1184,7 +1232,12 @@ class RenderWhatsAppService {
         .toList();
 
     if (filtered.isEmpty) {
-      const result = RenderWhatsAppResult(ok: false, total: 0, sent: 0, failed: 0);
+      const result = RenderWhatsAppResult(
+        ok: false,
+        total: 0,
+        sent: 0,
+        failed: 0,
+      );
       await _appendLog(
         WhatsAppSendLog(
           at: DateTime.now(),

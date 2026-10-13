@@ -49,6 +49,162 @@ void main() {
     expect(s.payments.last.amount, 10);
   });
 
+  test(
+    'monthly rollover carries debt and resets current month amounts once',
+    () {
+      final subscriber = Subscriber(
+        user: 'u1',
+        name: 'Test User',
+        phone: '',
+        address: '',
+        ip: '',
+        type: 'basic',
+        price: 35000,
+        paid: 20000,
+        carriedDebt: 5000,
+        billingMonthKey: '2026-09',
+        startDate: DateTime(2026, 9, 1),
+        endDate: DateTime(2026, 10, 1),
+      );
+
+      expect(subscriber.rolloverToMonth(DateTime(2026, 10, 1)), isTrue);
+      expect(subscriber.price, 0);
+      expect(subscriber.paid, 0);
+      expect(subscriber.carriedDebt, 20000);
+      expect(subscriber.remaining, 20000);
+      expect(subscriber.billingMonthKey, '2026-10');
+      expect(subscriber.rolloverToMonth(DateTime(2026, 10, 1)), isFalse);
+      expect(subscriber.remaining, 20000);
+    },
+  );
+
+  test('payment clears carried debt before paying the current month', () {
+    final subscriber = Subscriber(
+      user: 'u1',
+      name: 'Test User',
+      phone: '',
+      address: '',
+      ip: '',
+      type: 'basic',
+      price: 35000,
+      paid: 0,
+      carriedDebt: 20000,
+      billingMonthKey: '2026-10',
+      startDate: DateTime(2026, 10, 1),
+      endDate: DateTime(2026, 11, 1),
+    );
+
+    final allocation = subscriber.applyPayment(
+      25000,
+      at: DateTime(2026, 10, 13),
+    );
+
+    expect(allocation.totalApplied, 25000);
+    expect(allocation.appliedToCarriedDebt, 20000);
+    expect(allocation.appliedToCurrentCharge, 5000);
+    expect(subscriber.carriedDebt, 0);
+    expect(subscriber.paid, 5000);
+    expect(subscriber.currentMonthRemaining, 30000);
+    expect(subscriber.remaining, 30000);
+  });
+
+  test(
+    'a first-of-month payment rolls the prior balance before allocation',
+    () {
+      final subscriber = Subscriber(
+        user: 'u1',
+        name: 'Test User',
+        phone: '',
+        address: '',
+        ip: '',
+        type: 'basic',
+        price: 35000,
+        paid: 20000,
+        billingMonthKey: '2026-09',
+        startDate: DateTime(2026, 9, 1),
+        endDate: DateTime(2026, 10, 1),
+      );
+
+      final allocation = subscriber.applyPayment(
+        10000,
+        at: DateTime(2026, 10, 1),
+      );
+
+      expect(subscriber.price, 0);
+      expect(subscriber.paid, 0);
+      expect(allocation.appliedToCarriedDebt, 10000);
+      expect(allocation.appliedToCurrentCharge, 0);
+      expect(subscriber.carriedDebt, 5000);
+      expect(subscriber.remaining, 5000);
+    },
+  );
+
+  test('editing the received amount also allocates carried debt first', () {
+    final subscriber = Subscriber(
+      user: 'u1',
+      name: 'Test User',
+      phone: '',
+      address: '',
+      ip: '',
+      type: 'basic',
+      price: 0,
+      paid: 0,
+      carriedDebt: 20000,
+      billingMonthKey: '2026-10',
+      startDate: DateTime(2026, 10, 1),
+      endDate: DateTime(2026, 11, 1),
+    );
+
+    final adjustment = subscriber.adjustDebtAmounts(
+      subscriptionAmount: 35000,
+      paidAmount: 25000,
+      at: DateTime(2026, 10, 13),
+    );
+
+    expect(adjustment.addedDebt, 35000);
+    expect(adjustment.paymentDelta, 25000);
+    expect(adjustment.appliedToCarriedDebt, 20000);
+    expect(adjustment.appliedToCurrentCharge, 5000);
+    expect(subscriber.carriedDebt, 0);
+    expect(subscriber.paid, 5000);
+    expect(subscriber.remaining, 30000);
+  });
+
+  test(
+    'legacy payment history does not restore previous months paid amount',
+    () {
+      final subscriber = Subscriber.fromJson({
+        'user': 'u1',
+        'name': 'Test User',
+        'phone': '',
+        'address': '',
+        'ip': '',
+        'type': 'basic',
+        'price': 0,
+        'paid': 0,
+        'carriedDebt': 12000,
+        'billingMonthKey': '2026-10',
+        'startDate': '2026-10-01T00:00:00.000',
+        'endDate': '2026-11-01T00:00:00.000',
+        'payments': [
+          {
+            'amount': 20000,
+            'at': '2026-09-15T00:00:00.000',
+            'note': 'دفعة شهر سابق',
+          },
+        ],
+      });
+
+      expect(subscriber.paid, 0);
+      expect(subscriber.paymentsTotal, 20000);
+      expect(subscriber.remaining, 12000);
+      expect(
+        subscriber.toJson()['billingMonthKey'],
+        subscriber.billingMonthKey,
+      );
+    },
+  );
+
   test('setDebtAmounts clamps paid to subscription amount', () {
     final s = _subscriber(price: 120, paid: 30);
 
@@ -145,58 +301,62 @@ void main() {
     expect(applied, 30);
   });
 
-  test('partial subscription collection adds remaining debt to daily tasks', () {
-    final s = _subscriber(price: 0, paid: 0);
-    final at = DateTime(2026, 9, 29, 10);
+  test(
+    'partial subscription collection adds remaining debt to daily tasks',
+    () {
+      final s = _subscriber(price: 0, paid: 0);
+      final at = DateTime(2026, 9, 29, 10);
 
-    final adjustment = s.adjustDebtAmounts(
-      subscriptionAmount: 35000,
-      paidAmount: 15000,
-      at: at,
-    );
-    final events = [
-      if (adjustment.paymentDelta > 0)
+      final adjustment = s.adjustDebtAmounts(
+        subscriptionAmount: 35000,
+        paidAmount: 15000,
+        at: at,
+      );
+      final events = [
+        if (adjustment.paymentDelta > 0)
+          DailyTaskEvent(
+            type: DailyTaskEvent.debtEntryCollectionType,
+            subscriberUser: s.user,
+            subscriberName: s.name,
+            at: at,
+            amount: adjustment.paymentDelta,
+            remainingAfter: s.remaining,
+          ),
+        if (adjustment.addedDebt > 0)
+          DailyTaskEvent(
+            type: 'debt_added',
+            subscriberUser: s.user,
+            subscriberName: s.name,
+            at: at,
+            amount: adjustment.addedDebt,
+            remainingAfter: s.remaining,
+          ),
         DailyTaskEvent(
-          type: DailyTaskEvent.debtEntryCollectionType,
+          type: 'debt_payment',
           subscriberUser: s.user,
           subscriberName: s.name,
-          at: at,
-          amount: adjustment.paymentDelta,
-          remainingAfter: s.remaining,
+          at: at.add(const Duration(hours: 1)),
+          amount: 5000,
+          remainingAfter: 15000,
         ),
-      if (adjustment.addedDebt > 0)
-        DailyTaskEvent(
-          type: 'debt_added',
-          subscriberUser: s.user,
-          subscriberName: s.name,
-          at: at,
-          amount: adjustment.addedDebt,
-          remainingAfter: s.remaining,
-        ),
-      DailyTaskEvent(
-        type: 'debt_payment',
-        subscriberUser: s.user,
-        subscriberName: s.name,
-        at: at.add(const Duration(hours: 1)),
-        amount: 5000,
-        remainingAfter: 15000,
-      ),
-    ];
+      ];
 
-    final debtToday = DailyTaskSummary.fromEvents(events.take(2));
-    final afterRepayment = DailyTaskSummary.fromEvents(events);
-    expect(adjustment.paymentDelta, 15000);
-    expect(adjustment.addedDebt, 20000);
-    expect(s.paid, 15000);
-    expect(s.remaining, 20000);
-    expect(debtToday.debtPaymentsCollected, 15000);
-    expect(debtToday.debtAddedTotal, 20000);
-    expect(debtToday.netDebtMovement, 20000);
-    expect(afterRepayment.debtPaymentsCollected, 20000);
-    expect(afterRepayment.debtAddedTotal, 20000);
-    expect(afterRepayment.debtRepaymentsTotal, 5000);
-    expect(afterRepayment.netDebtMovement, 15000);
-  });
+      final debtToday = DailyTaskSummary.fromEvents(events.take(2));
+      final afterRepayment = DailyTaskSummary.fromEvents(events);
+      expect(adjustment.paymentDelta, 15000);
+      expect(adjustment.addedDebt, 35000);
+      expect(s.paid, 15000);
+      expect(s.remaining, 20000);
+      expect(debtToday.debtPaymentsCollected, 15000);
+      expect(debtToday.debtPaymentCases, 1);
+      expect(debtToday.debtAddedTotal, 35000);
+      expect(debtToday.netDebtMovement, 20000);
+      expect(afterRepayment.debtPaymentsCollected, 20000);
+      expect(afterRepayment.debtAddedTotal, 35000);
+      expect(afterRepayment.debtRepaymentsTotal, 20000);
+      expect(afterRepayment.netDebtMovement, 15000);
+    },
+  );
 
   test('daily summary separates added debt from collected cash', () {
     final events = <DailyTaskEvent>[
@@ -235,43 +395,46 @@ void main() {
     expect(summary.debtAddedTotal, 7000);
   });
 
-  test('monthly net debt movement offsets repayments without erasing prior debt', () {
-    final events = <DailyTaskEvent>[
-      DailyTaskEvent(
-        type: 'debt_added',
-        subscriberUser: 'u1',
-        subscriberName: 'User 1',
-        at: DateTime(2026, 8, 31, 18),
-        amount: 30000,
-        remainingAfter: 30000,
-      ),
-      DailyTaskEvent(
-        type: 'debt_added',
-        subscriberUser: 'u1',
-        subscriberName: 'User 1',
-        at: DateTime(2026, 9, 2, 9),
-        amount: 5000,
-        remainingAfter: 35000,
-      ),
-      DailyTaskEvent(
-        type: 'debt_payment',
-        subscriberUser: 'u1',
-        subscriberName: 'User 1',
-        at: DateTime(2026, 9, 3, 10),
-        amount: 10000,
-        remainingAfter: 25000,
-      ),
-    ];
+  test(
+    'monthly net debt movement offsets repayments without erasing prior debt',
+    () {
+      final events = <DailyTaskEvent>[
+        DailyTaskEvent(
+          type: 'debt_added',
+          subscriberUser: 'u1',
+          subscriberName: 'User 1',
+          at: DateTime(2026, 8, 31, 18),
+          amount: 30000,
+          remainingAfter: 30000,
+        ),
+        DailyTaskEvent(
+          type: 'debt_added',
+          subscriberUser: 'u1',
+          subscriberName: 'User 1',
+          at: DateTime(2026, 9, 2, 9),
+          amount: 5000,
+          remainingAfter: 35000,
+        ),
+        DailyTaskEvent(
+          type: 'debt_payment',
+          subscriberUser: 'u1',
+          subscriberName: 'User 1',
+          at: DateTime(2026, 9, 3, 10),
+          amount: 10000,
+          remainingAfter: 25000,
+        ),
+      ];
 
-    final september = DailyTaskSummary.fromEvents(
-      events.where((event) => event.at.year == 2026 && event.at.month == 9),
-    );
+      final september = DailyTaskSummary.fromEvents(
+        events.where((event) => event.at.year == 2026 && event.at.month == 9),
+      );
 
-    expect(september.debtAddedTotal, 5000);
-    expect(september.debtPaymentsCollected, 10000);
-    expect(september.netDebtMovement, -5000);
-    expect(events.first.remainingAfter, 30000);
-  });
+      expect(september.debtAddedTotal, 5000);
+      expect(september.debtPaymentsCollected, 10000);
+      expect(september.netDebtMovement, -5000);
+      expect(events.first.remainingAfter, 30000);
+    },
+  );
 
   test('daily task history retains events from the previous month', () {
     final previousMonthEvent = DailyTaskEvent(
@@ -309,24 +472,28 @@ void main() {
     expect(summary.totalCollected, 20000);
   });
 
-  test('fully paid activation records cash once and adds no debt', () {
-    final events = DailyTaskEvent.activationSettlement(
-      subscriberUser: 'u1',
-      subscriberName: 'User 1',
-      at: DateTime(2026, 9, 3),
-      collected: 35000,
-      remaining: 0,
-      note: 'تفعيل',
-    );
+  test(
+    'fully paid activation records the charge and cash with zero balance',
+    () {
+      final events = DailyTaskEvent.activationSettlement(
+        subscriberUser: 'u1',
+        subscriberName: 'User 1',
+        at: DateTime(2026, 9, 3),
+        collected: 35000,
+        remaining: 0,
+        note: 'تفعيل',
+      );
 
-    final summary = DailyTaskSummary.fromEvents(events);
+      final summary = DailyTaskSummary.fromEvents(events);
 
-    expect(events, hasLength(1));
-    expect(summary.activationCollected, 35000);
-    expect(summary.debtPaymentsCollected, 0);
-    expect(summary.debtAddedTotal, 0);
-    expect(summary.totalCollected, 35000);
-  });
+      expect(events, hasLength(2));
+      expect(summary.activationCollected, 35000);
+      expect(summary.debtPaymentsCollected, 0);
+      expect(summary.debtAddedTotal, 35000);
+      expect(summary.netDebtMovement, 0);
+      expect(summary.totalCollected, 35000);
+    },
+  );
 
   test('reactivation does not count the previous paid balance as new cash', () {
     final events = DailyTaskEvent.activationSettlement(
@@ -489,8 +656,57 @@ void main() {
 
     expect(summary.activationCollected, 20000);
     expect(summary.debtPaymentsCollected, 5000);
-    expect(summary.debtAddedTotal, 15000);
+    expect(summary.debtAddedTotal, 35000);
+    expect(summary.netDebtMovement, 10000);
     expect(summary.totalCollected, 25000);
+  });
+
+  test('activation cash against old debt is classified as debt repayment', () {
+    final subscriber = Subscriber(
+      user: 'u1',
+      name: 'Test User',
+      phone: '',
+      address: '',
+      ip: '',
+      type: 'basic',
+      price: 35000,
+      paid: 0,
+      carriedDebt: 20000,
+      billingMonthKey: '2026-10',
+      startDate: DateTime(2026, 10, 1),
+      endDate: DateTime(2026, 11, 1),
+    );
+    final at = DateTime(2026, 10, 13);
+    final allocation = subscriber.applyPayment(25000, at: at);
+    final events = [
+      ...DailyTaskEvent.activationSettlement(
+        subscriberUser: subscriber.user,
+        subscriberName: subscriber.name,
+        at: at,
+        collected: allocation.appliedToCurrentCharge,
+        remaining: subscriber.remaining,
+        note: 'activation',
+        chargedAmount: subscriber.price,
+      ),
+      if (allocation.appliedToCarriedDebt > 0)
+        DailyTaskEvent(
+          type: 'debt_payment',
+          subscriberUser: subscriber.user,
+          subscriberName: subscriber.name,
+          at: at,
+          amount: allocation.appliedToCarriedDebt,
+          remainingAfter: subscriber.remaining,
+        ),
+    ];
+
+    final summary = DailyTaskSummary.fromEvents(events);
+
+    expect(summary.activationCollected, 5000);
+    expect(summary.debtPaymentsCollected, 20000);
+    expect(summary.totalCollected, 25000);
+    expect(summary.debtAddedTotal, 35000);
+    expect(summary.netDebtMovement, 10000);
+    expect(subscriber.remaining, 30000);
   });
 
   test('a new local subscriber has no recorded activation yet', () {
@@ -522,7 +738,83 @@ void main() {
     expect(AppStore.hasRecordedActivation(subscriber), isFalse);
   });
 
-  test('added debt is based on remaining increase, not subscription price', () {
+  test(
+    'adjusting a subscription tracks its charge independently of collection',
+    () {
+      final subscriber = _subscriber(price: 0, paid: 0);
+      final adjustment = subscriber.adjustDebtAmounts(
+        subscriptionAmount: 35000,
+        paidAmount: 15000,
+        at: DateTime(2026, 9, 29),
+      );
+
+      expect(adjustment.subscriptionDelta, 35000);
+      expect(adjustment.paymentDelta, 15000);
+      expect(adjustment.addedDebt, 35000);
+      expect(adjustment.reducedDebt, 0);
+      expect(subscriber.remaining, 20000);
+    },
+  );
+
+  test('adjusting a subscription rejects collection above its charge', () {
+    final subscriber = _subscriber(price: 35000, paid: 0);
+
+    expect(
+      () => subscriber.adjustDebtAmounts(
+        subscriptionAmount: 35000,
+        paidAmount: 35001,
+        at: DateTime(2026, 9, 29),
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('raising charge and collecting the increase has zero debt movement', () {
+    final subscriber = _subscriber(price: 35000, paid: 0);
+    final adjustment = subscriber.adjustDebtAmounts(
+      subscriptionAmount: 55000,
+      paidAmount: 20000,
+      at: DateTime(2026, 9, 29),
+    );
+    final summary = DailyTaskSummary.fromEvents([
+      DailyTaskEvent(
+        type: 'debt_added',
+        subscriberUser: subscriber.user,
+        subscriberName: subscriber.name,
+        at: DateTime(2026, 9, 29),
+        amount: adjustment.addedDebt,
+        remainingAfter: subscriber.remaining,
+      ),
+      DailyTaskEvent(
+        type: DailyTaskEvent.debtEntryCollectionType,
+        subscriberUser: subscriber.user,
+        subscriberName: subscriber.name,
+        at: DateTime(2026, 9, 29),
+        amount: adjustment.paymentDelta,
+        remainingAfter: subscriber.remaining,
+      ),
+    ]);
+
+    expect(adjustment.addedDebt, 20000);
+    expect(subscriber.remaining, 35000);
+    expect(summary.netDebtMovement, 0);
+  });
+
+  test('lowering subscription amount is recorded as a debt reduction', () {
+    final subscriber = _subscriber(price: 35000, paid: 0);
+    final adjustment = subscriber.adjustDebtAmounts(
+      subscriptionAmount: 20000,
+      paidAmount: 0,
+      at: DateTime(2026, 9, 29),
+    );
+
+    expect(adjustment.subscriptionDelta, -15000);
+    expect(adjustment.addedDebt, 0);
+    expect(adjustment.reducedDebt, 15000);
+    expect(subscriber.remaining, 20000);
+  });
+
+  test('added debt event amount can represent subscription charge', () {
     expect(
       DailyTaskEvent.addedDebtAmount(previousRemaining: 0, currentRemaining: 0),
       0,
@@ -550,42 +842,45 @@ void main() {
     );
   });
 
-  test('Windows debts payload keeps existing payment rows when remote is partial', () {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    try {
-      final existingPayment = PaymentRecord(
-        amount: 20,
-        at: DateTime(2026, 8, 1, 10),
-        note: 'old payment',
-      );
-      final subscriber = _subscriber(price: 100, paid: 20)
-        ..payments = [existingPayment];
-      AppStore.subscribers
-        ..clear()
-        ..add(subscriber);
+  test(
+    'Windows debts payload keeps existing payment rows when remote is partial',
+    () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        final existingPayment = PaymentRecord(
+          amount: 20,
+          at: DateTime(2026, 8, 1, 10),
+          note: 'old payment',
+        );
+        final subscriber = _subscriber(price: 100, paid: 20)
+          ..payments = [existingPayment];
+        AppStore.subscribers
+          ..clear()
+          ..add(subscriber);
 
-      AppStore.applyDebtsPayload({
-        'u1': {
-          'user': 'u1',
-          'subscriptionAmount': 100,
-          'paidAmount': 50,
-          'remainingAmount': 50,
-          'payments': [
-            {
-              'amount': 30,
-              'at': DateTime(2026, 8, 2, 10).toIso8601String(),
-              'note': 'new payment',
-            },
-          ],
-        },
-      });
+        AppStore.applyDebtsPayload({
+          'u1': {
+            'user': 'u1',
+            'subscriptionAmount': 100,
+            'paidAmount': 50,
+            'remainingAmount': 50,
+            'payments': [
+              {
+                'amount': 30,
+                'at': DateTime(2026, 8, 2, 10).toIso8601String(),
+                'note': 'new payment',
+              },
+            ],
+          },
+        });
 
-      expect(subscriber.payments.length, 2);
-      expect(subscriber.payments.map((payment) => payment.amount), [20, 30]);
-      expect(subscriber.paid, 50);
-      expect(subscriber.remaining, 50);
-    } finally {
-      debugDefaultTargetPlatformOverride = null;
-    }
-  });
+        expect(subscriber.payments.length, 2);
+        expect(subscriber.payments.map((payment) => payment.amount), [20, 30]);
+        expect(subscriber.paid, 50);
+        expect(subscriber.remaining, 50);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
 }

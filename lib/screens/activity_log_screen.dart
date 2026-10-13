@@ -18,6 +18,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
     'all': 'كل العمليات',
     'activation': 'تفعيل',
     'debt_added': 'إضافة دين',
+    DailyTaskEvent.debtRemovedType: 'تخفيض دين',
     'debt_payment': 'تسديد دين',
     DailyTaskEvent.debtEntryCollectionType: 'تحصيل عند التفعيل',
     DailyTaskEvent.debtEditType: 'تعديل مبالغ',
@@ -84,6 +85,8 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
     switch (event.type) {
       case 'debt_added':
         return Colors.red;
+      case DailyTaskEvent.debtRemovedType:
+        return Colors.blueGrey;
       case 'debt_payment':
       case DailyTaskEvent.debtEntryCollectionType:
         return Colors.green;
@@ -111,6 +114,8 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
     switch (event.type) {
       case 'debt_added':
         return Icons.add_card_outlined;
+      case DailyTaskEvent.debtRemovedType:
+        return Icons.remove_circle_outline;
       case 'debt_payment':
       case DailyTaskEvent.debtEntryCollectionType:
         return Icons.payments_outlined;
@@ -149,10 +154,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('سجل العمليات'),
-          centerTitle: true,
-        ),
+        appBar: AppBar(title: const Text('سجل العمليات'), centerTitle: true),
         body: Column(
           children: [
             Padding(
@@ -246,7 +248,8 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                       itemBuilder: (context, index) {
                         final event = events[index];
                         final color = _eventColor(event);
-                        final isEdit = event.type == DailyTaskEvent.debtEditType;
+                        final isEdit =
+                            event.type == DailyTaskEvent.debtEditType;
                         return Card(
                           margin: EdgeInsets.zero,
                           child: ListTile(
@@ -262,7 +265,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                             subtitle: Text(
                               '${_formatDate(event.at)}'
                               '${event.subscriberUser.isEmpty ? '' : ' • ${event.subscriberUser}'}'
-                              '${event.note.trim().isEmpty ? '' : '\n${event.note.trim().replaceAll(' | ', '\n')}' }'
+                              '${event.note.trim().isEmpty ? '' : '\n${event.note.trim().replaceAll(' | ', '\n')}'}'
                               '${event.remainingAfter > 0 ? '\nالمتبقي ${event.remainingAfter.toStringAsFixed(0)} د.ع' : ''}',
                               maxLines: isEdit ? 5 : 3,
                               overflow: TextOverflow.ellipsis,

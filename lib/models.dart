@@ -29,23 +29,57 @@ String _normalizeSubscriberId(String? value) {
       '${hex.substring(20)}';
 }
 
+String _monthKeyOf(DateTime date) =>
+    '${date.year}-${date.month.toString().padLeft(2, '0')}';
+
 class PaymentRecord {
-  PaymentRecord({required this.amount, required this.at, this.note = ''});
+  PaymentRecord({
+    required this.amount,
+    required this.at,
+    this.note = '',
+    String billingMonthKey = '',
+    double currentChargeAmount = 0,
+  }) : _billingMonthKey = billingMonthKey,
+       _currentChargeAmount = currentChargeAmount;
   double amount;
   DateTime at;
   String note;
+  String? _billingMonthKey;
+  double? _currentChargeAmount;
+
+  String get billingMonthKey => _billingMonthKey ?? '';
+  set billingMonthKey(String value) => _billingMonthKey = value;
+
+  double get currentChargeAmount => _currentChargeAmount ?? 0;
+  set currentChargeAmount(double value) => _currentChargeAmount = value;
 
   Map<String, dynamic> toJson() => {
     'amount': amount,
     'at': at.toIso8601String(),
     'note': note,
+    'billingMonthKey': billingMonthKey,
+    'currentChargeAmount': currentChargeAmount,
   };
 
   factory PaymentRecord.fromJson(Map<String, dynamic> j) => PaymentRecord(
     amount: (j['amount'] ?? 0).toDouble(),
     at: DateTime.tryParse((j['at'] ?? '').toString()) ?? DateTime.now(),
     note: (j['note'] ?? '').toString(),
+    billingMonthKey: (j['billingMonthKey'] ?? '').toString(),
+    currentChargeAmount: (j['currentChargeAmount'] as num?)?.toDouble() ?? 0,
   );
+}
+
+class PaymentAllocation {
+  const PaymentAllocation({
+    required this.totalApplied,
+    required this.appliedToCarriedDebt,
+    required this.appliedToCurrentCharge,
+  });
+
+  final double totalApplied;
+  final double appliedToCarriedDebt;
+  final double appliedToCurrentCharge;
 }
 
 class InvoiceRecord {
@@ -127,6 +161,7 @@ class DailyTaskEvent {
   String note;
 
   static const debtEntryCollectionType = 'debt_entry_collection';
+  static const debtRemovedType = 'debt_removed';
   static const debtEditType = 'debt_edit';
   static const subscriberCreatedType = 'subscriber_created';
   static const subscriberUpdatedType = 'subscriber_updated';
@@ -166,11 +201,15 @@ class DailyTaskEvent {
     required String note,
     bool addRemainingDebtEvent = true,
     bool isReactivation = false,
+    double? chargedAmount,
   }) {
     final safeCollected = !isReactivation && collected.isFinite && collected > 0
         ? collected
         : 0.0;
     final safeRemaining = remaining.isFinite && remaining > 0 ? remaining : 0.0;
+    final safeCharge = chargedAmount != null && chargedAmount.isFinite
+        ? chargedAmount.clamp(0, double.infinity).toDouble()
+        : safeCollected + safeRemaining;
     return [
       DailyTaskEvent(
         type: 'activation',
@@ -181,15 +220,15 @@ class DailyTaskEvent {
         remainingAfter: safeRemaining,
         note: note,
       ),
-      if (addRemainingDebtEvent && safeRemaining > 0.0001)
+      if (addRemainingDebtEvent && safeCharge > 0.0001)
         DailyTaskEvent(
           type: 'debt_added',
           subscriberUser: subscriberUser,
           subscriberName: subscriberName,
           at: at,
-          amount: safeRemaining,
+          amount: safeCharge,
           remainingAfter: safeRemaining,
-          note: 'دين متبقٍ عند التفعيل',
+          note: 'قيمة الاشتراك المستحقة عند التفعيل',
         ),
     ];
   }
@@ -394,6 +433,7 @@ class DailyTaskSummary {
     required this.debtPaymentsCollected,
     required this.debtRepaymentsTotal,
     required this.debtAddedTotal,
+    this.debtReducedTotal = 0,
   });
 
   final int activationCases;
@@ -402,10 +442,15 @@ class DailyTaskSummary {
   final double debtPaymentsCollected;
   final double debtRepaymentsTotal;
   final double debtAddedTotal;
+  final double debtReducedTotal;
 
   double get totalCollected => activationCollected + debtPaymentsCollected;
 
-  double get netDebtMovement => debtAddedTotal - debtRepaymentsTotal;
+  double get netDebtMovement =>
+      debtAddedTotal -
+      debtRepaymentsTotal -
+      debtReducedTotal -
+      activationCollected;
 
   factory DailyTaskSummary.fromEvents(
     Iterable<DailyTaskEvent> events, {
@@ -417,6 +462,8 @@ class DailyTaskSummary {
     var debtPaymentsCollected = 0.0;
     var debtRepaymentsTotal = 0.0;
     var debtAddedTotal = 0.0;
+    var debtReducedTotal = 0.0;
+    final paymentCaseKeys = <String>{};
 
     for (final event in events) {
       final amount = amountOf?.call(event) ?? event.amount;
@@ -426,11 +473,18 @@ class DailyTaskSummary {
       } else if ((event.type == 'debt_payment' ||
               event.type == 'debt_entry_collection') &&
           amount > 0) {
-        debtPaymentCases++;
+        final subscriber = event.subscriberUser.trim().toLowerCase().isNotEmpty
+            ? event.subscriberUser.trim().toLowerCase()
+            : event.subscriberName.trim().toLowerCase();
+        final caseKey =
+            '$subscriber|${event.at.toUtc().microsecondsSinceEpoch}';
+        if (paymentCaseKeys.add(caseKey)) debtPaymentCases++;
         debtPaymentsCollected += amount;
-        if (event.type == 'debt_payment') debtRepaymentsTotal += amount;
+        debtRepaymentsTotal += amount;
       } else if (event.type == 'debt_added' && amount > 0) {
         debtAddedTotal += amount;
+      } else if (event.type == DailyTaskEvent.debtRemovedType && amount > 0) {
+        debtReducedTotal += amount;
       }
     }
 
@@ -441,18 +495,27 @@ class DailyTaskSummary {
       debtPaymentsCollected: debtPaymentsCollected,
       debtRepaymentsTotal: debtRepaymentsTotal,
       debtAddedTotal: debtAddedTotal,
+      debtReducedTotal: debtReducedTotal,
     );
   }
 }
 
 class DebtAdjustmentResult {
   const DebtAdjustmentResult({
+    required this.subscriptionDelta,
     required this.paymentDelta,
     required this.addedDebt,
+    required this.reducedDebt,
+    this.appliedToCarriedDebt = 0,
+    this.appliedToCurrentCharge = 0,
   });
 
+  final double subscriptionDelta;
   final double paymentDelta;
   final double addedDebt;
+  final double reducedDebt;
+  final double appliedToCarriedDebt;
+  final double appliedToCurrentCharge;
 }
 
 class Subscriber {
@@ -471,6 +534,9 @@ class Subscriber {
     this.active = true,
     this.disabled = false,
     this.paid = 0,
+    double carriedDebt = 0,
+    String? billingMonthKey,
+    bool billingMonthKeyWasMissing = false,
     this.paymentDate = '',
     this.points = 0,
     this.source = 'local',
@@ -480,9 +546,14 @@ class Subscriber {
     List<PaymentRecord>? payments,
     List<InvoiceRecord>? invoices,
   }) : subscriberId = _normalizeSubscriberId(subscriberId),
+       _carriedDebt = carriedDebt,
        payments = payments ?? <PaymentRecord>[],
        invoices = invoices ?? <InvoiceRecord>[],
-       sasData = sasData ?? <String, dynamic>{};
+       sasData = sasData ?? <String, dynamic>{},
+       _billingMonthKeyNeedsPersistence = billingMonthKeyWasMissing,
+       _billingMonthKey = billingMonthKey?.trim().isNotEmpty == true
+           ? billingMonthKey!.trim()
+           : _monthKeyOf(DateTime.now());
 
   final String subscriberId;
   String user;
@@ -495,6 +566,9 @@ class Subscriber {
   String paymentDate;
   double price;
   double paid;
+  double? _carriedDebt;
+  String? _billingMonthKey;
+  bool? _billingMonthKeyNeedsPersistence;
   DateTime startDate;
   DateTime endDate;
   bool active;
@@ -507,13 +581,26 @@ class Subscriber {
   List<PaymentRecord> payments;
   List<InvoiceRecord> invoices;
 
+  double get carriedDebt => _carriedDebt ?? 0;
+  set carriedDebt(double value) => _carriedDebt = value;
+
+  String get billingMonthKey => _billingMonthKey ?? _monthKeyOf(DateTime.now());
+  set billingMonthKey(String value) => _billingMonthKey = value;
+
+  bool get billingMonthKeyNeedsPersistence =>
+      _billingMonthKeyNeedsPersistence ?? false;
+  set billingMonthKeyNeedsPersistence(bool value) =>
+      _billingMonthKeyNeedsPersistence = value;
+
   double get paymentsTotal =>
       payments.fold<double>(0, (sum, p) => sum + p.amount);
 
   double get invoicesTotal =>
       invoices.fold<double>(0, (sum, inv) => sum + inv.amount);
 
-  double get remaining => (price - paid).clamp(0, double.infinity).toDouble();
+  double get currentMonthRemaining =>
+      (price - paid).clamp(0, double.infinity).toDouble();
+  double get remaining => carriedDebt + currentMonthRemaining;
   bool get expired => endDate.isBefore(DateTime.now());
   bool get isActive => active && !disabled && !expired;
   bool get isOnline => sasOnline || _detectOnline(sasData);
@@ -537,11 +624,11 @@ class Subscriber {
     if (!paid.isFinite || paid < 0) {
       paid = 0;
     }
+    if (!carriedDebt.isFinite || carriedDebt < 0) {
+      carriedDebt = 0;
+    }
     if (paid > price) {
       paid = price;
-    }
-    if (paid <= 0) {
-      paymentDate = '';
     }
   }
 
@@ -584,19 +671,14 @@ class Subscriber {
           amount: paid,
           at: at ?? DateTime.now(),
           note: 'رصيد واصل سابق',
+          billingMonthKey: billingMonthKey,
+          currentChargeAmount: paid,
         ),
       );
     }
   }
 
   void reconcilePaidFromPayments() {
-    if (payments.isEmpty) {
-      normalizeDebtFields();
-      return;
-    }
-
-    final total = paymentsTotal;
-    paid = total;
     normalizeDebtFields();
   }
 
@@ -606,10 +688,9 @@ class Subscriber {
     String? increaseNote,
     String? decreaseNote,
   }) {
+    rolloverToMonth(at ?? DateTime.now());
     normalizeDebtFields();
     _backfillLegacyPaidToPayments(at: at);
-    // Always derive from ledger truth before applying any delta.
-    reconcilePaidFromPayments();
     if (!targetPaid.isFinite) return 0;
 
     final boundedTarget = targetPaid.clamp(0, price).toDouble();
@@ -623,6 +704,8 @@ class Subscriber {
       PaymentRecord(
         amount: delta,
         at: stamp,
+        billingMonthKey: billingMonthKey,
+        currentChargeAmount: delta,
         note: delta >= 0
             ? (increaseNote ?? 'تعديل الواصل من شاشة الديون')
             : (decreaseNote ?? 'تصحيح تخفيض الواصل من شاشة الديون'),
@@ -638,49 +721,113 @@ class Subscriber {
     required double paidAmount,
     DateTime? at,
   }) {
-    final previousRemaining = remaining;
+    rolloverToMonth(at ?? DateTime.now());
+    if (!subscriptionAmount.isFinite || subscriptionAmount < 0) {
+      throw ArgumentError.value(subscriptionAmount, 'subscriptionAmount');
+    }
+    if (!paidAmount.isFinite || paidAmount < 0) {
+      throw ArgumentError.value(paidAmount, 'paidAmount');
+    }
+    if (paidAmount > subscriptionAmount) {
+      throw ArgumentError.value(paidAmount, 'paidAmount');
+    }
+    normalizeDebtFields();
+    final previousPrice = price;
     price = subscriptionAmount;
     normalizeDebtFields();
-    final paymentDelta = adjustPaidToTarget(
-      paidAmount.clamp(0, price).toDouble(),
-      at: at,
-      increaseNote: 'تعديل الواصل من شاشة الديون',
-      decreaseNote: 'تخفيض الواصل من شاشة الديون',
-    );
+    final subscriptionDelta = price - previousPrice;
+    final targetPaid = paidAmount.clamp(0, price).toDouble();
+    final requestedPaymentDelta = targetPaid - paid;
+    var paymentDelta = 0.0;
+    var appliedToCarriedDebt = 0.0;
+    var appliedToCurrentCharge = 0.0;
+    if (requestedPaymentDelta > 0.0001) {
+      final allocation = applyPayment(
+        requestedPaymentDelta,
+        at: at,
+        note: 'واصل من تعديل شاشة الديون',
+      );
+      paymentDelta = allocation.totalApplied;
+      appliedToCarriedDebt = allocation.appliedToCarriedDebt;
+      appliedToCurrentCharge = allocation.appliedToCurrentCharge;
+    } else if (requestedPaymentDelta < -0.0001) {
+      paymentDelta = adjustPaidToTarget(
+        targetPaid,
+        at: at,
+        increaseNote: 'تعديل الواصل من شاشة الديون',
+        decreaseNote: 'تخفيض الواصل من شاشة الديون',
+      );
+    }
     return DebtAdjustmentResult(
+      subscriptionDelta: subscriptionDelta,
       paymentDelta: paymentDelta,
-      addedDebt: DailyTaskEvent.addedDebtAmount(
-        previousRemaining: previousRemaining,
-        currentRemaining: remaining,
-      ),
+      addedDebt: subscriptionDelta > 0 ? subscriptionDelta : 0,
+      reducedDebt: subscriptionDelta < 0 ? -subscriptionDelta : 0,
+      appliedToCarriedDebt: appliedToCarriedDebt,
+      appliedToCurrentCharge: appliedToCurrentCharge,
     );
   }
 
   double applyPartialPayment(double amount, {DateTime? at, String? note}) {
+    return applyPayment(amount, at: at, note: note).totalApplied;
+  }
+
+  PaymentAllocation applyPayment(double amount, {DateTime? at, String? note}) {
+    rolloverToMonth(at ?? DateTime.now());
     normalizeDebtFields();
     _backfillLegacyPaidToPayments(at: at);
-    // Keep `paid` aligned with payment ledger before adding a new payment.
-    reconcilePaidFromPayments();
-    if (!amount.isFinite || amount <= 0) return 0;
+    if (!amount.isFinite || amount <= 0) {
+      return const PaymentAllocation(
+        totalApplied: 0,
+        appliedToCarriedDebt: 0,
+        appliedToCurrentCharge: 0,
+      );
+    }
 
     final applied = amount > remaining ? remaining : amount;
-    if (applied <= 0) return 0;
+    if (applied <= 0) {
+      return const PaymentAllocation(
+        totalApplied: 0,
+        appliedToCarriedDebt: 0,
+        appliedToCurrentCharge: 0,
+      );
+    }
 
-    paid += applied;
+    final appliedToCarriedDebt = applied.clamp(0, carriedDebt).toDouble();
+    carriedDebt -= appliedToCarriedDebt;
+    final appliedToCurrentCharge = applied - appliedToCarriedDebt;
+    paid += appliedToCurrentCharge;
     final stamp = at ?? DateTime.now();
     payments.add(
       PaymentRecord(
         amount: applied,
         at: stamp,
+        billingMonthKey: billingMonthKey,
+        currentChargeAmount: appliedToCurrentCharge,
         note: note ?? (remaining <= 0.0001 ? 'تسديد كامل' : 'تسديد جزئي'),
       ),
     );
-    return applied;
+    return PaymentAllocation(
+      totalApplied: applied,
+      appliedToCarriedDebt: appliedToCarriedDebt,
+      appliedToCurrentCharge: appliedToCurrentCharge,
+    );
+  }
+
+  bool rolloverToMonth(DateTime date) {
+    final nextMonthKey = monthKeyOf(date);
+    if (nextMonthKey.compareTo(billingMonthKey) <= 0) return false;
+    carriedDebt += currentMonthRemaining;
+    price = 0;
+    paid = 0;
+    paymentDate = '';
+    billingMonthKey = nextMonthKey;
+    normalizeDebtFields();
+    return true;
   }
 
   static String monthKeyOf(DateTime date) {
-    final m = date.month.toString().padLeft(2, '0');
-    return '${date.year}-$m';
+    return _monthKeyOf(date);
   }
 
   InvoiceRecord? registerInvoiceFromPayment({
@@ -843,6 +990,8 @@ class Subscriber {
     'ip': ip,
     'type': type,
     'price': price,
+    'carriedDebt': carriedDebt,
+    'billingMonthKey': billingMonthKey,
     'startDate': startDate.toIso8601String(),
     'endDate': endDate.toIso8601String(),
     'notes': notes,
@@ -878,6 +1027,10 @@ class Subscriber {
       ip: j['ip'] ?? '',
       type: packageFromSas,
       price: (j['price'] ?? 0).toDouble(),
+      carriedDebt: (j['carriedDebt'] as num?)?.toDouble() ?? 0,
+      billingMonthKey: (j['billingMonthKey'] ?? monthKeyOf(DateTime.now()))
+          .toString(),
+      billingMonthKeyWasMissing: !j.containsKey('billingMonthKey'),
       startDate: DateTime.tryParse(j['startDate'] ?? '') ?? DateTime.now(),
       endDate: DateTime.tryParse(j['endDate'] ?? '') ?? DateTime.now(),
       notes: j['notes'] ?? '',
@@ -905,6 +1058,11 @@ class Subscriber {
                 .toList()
           : <InvoiceRecord>[],
     );
+    if (!j.containsKey('paid')) {
+      subscriber.paid = subscriber.paymentsTotal
+          .clamp(0, subscriber.price)
+          .toDouble();
+    }
     subscriber.reconcilePaidFromPayments();
     return subscriber;
   }
@@ -1008,6 +1166,16 @@ class AppStore {
   static const int dataVersion = 1;
   static const String subscribersRevisionKey = 'subscribersRevision';
   static const String packagesRevisionKey = 'packagesRevision';
+
+  static bool rolloverMonthlyBalances({DateTime? now}) {
+    final reference = now ?? DateTime.now();
+    var changed = false;
+    for (final subscriber in subscribers) {
+      changed = subscriber.rolloverToMonth(reference) || changed;
+    }
+    return changed;
+  }
+
   static const String dailyTaskEventsKey = 'dailyTaskEvents';
   static const int dailyTaskRetentionDays = 400;
   static const int maxDailyTaskEvents = 12000;
@@ -1850,6 +2018,11 @@ class AppStore {
       await _loadSubscribers(p);
     }
 
+    final needsMonthKeyMigration = subscribers.any(
+      (subscriber) => subscriber.billingMonthKeyNeedsPersistence,
+    );
+    if (rolloverMonthlyBalances() || needsMonthKeyMigration) await save();
+
     try {
       await _syncDebtsNodeToFirebase();
     } catch (e) {
@@ -2045,6 +2218,8 @@ class AppStore {
       'subscriptionAmount': subscriber.price,
       'paidAmount': subscriber.paid,
       'remainingAmount': subscriber.remaining,
+      'carriedDebt': subscriber.carriedDebt,
+      'billingMonthKey': subscriber.billingMonthKey,
       'paymentDate': subscriber.paymentDate,
       'payments': subscriber.payments
           .map((payment) => payment.toJson())
@@ -2240,6 +2415,12 @@ class AppStore {
           paidAmount: paidAmount,
         );
       }
+      final carriedDebt = (debt['carriedDebt'] as num?)?.toDouble();
+      if (carriedDebt != null) subscriber.carriedDebt = carriedDebt;
+      final billingMonthKey = (debt['billingMonthKey'] ?? '').toString().trim();
+      if (billingMonthKey.isNotEmpty) {
+        subscriber.billingMonthKey = billingMonthKey;
+      }
       subscriber.paymentDate = (debt['paymentDate'] ?? subscriber.paymentDate)
           .toString();
 
@@ -2379,6 +2560,7 @@ class AppStore {
       debugPrint('AppStore.save: User not logged in, saving locally only');
     }
     final p = await SharedPreferences.getInstance();
+    rolloverMonthlyBalances();
     subscribersRevision = DateTime.now().millisecondsSinceEpoch;
     refreshSubscriptionStatus();
 
@@ -2435,6 +2617,9 @@ class AppStore {
     }
     await p.setInt('dataVersion', dataVersion);
     await p.setString('subscribers', encoded);
+    for (final subscriber in subscribers) {
+      subscriber.billingMonthKeyNeedsPersistence = false;
+    }
     _trimDailyTaskEvents();
     await p.setString(
       dailyTaskEventsKey,
@@ -2749,6 +2934,7 @@ class AppStore {
           (event.type != 'activation' &&
               event.type != 'debt_added' &&
               event.type != 'debt_payment' &&
+              event.type != DailyTaskEvent.debtRemovedType &&
               event.type != DailyTaskEvent.debtEntryCollectionType)) {
         continue;
       }
@@ -2760,6 +2946,7 @@ class AppStore {
 
     return (latestFinancialEvent?.type == 'debt_added' ||
             latestFinancialEvent?.type == 'debt_payment' ||
+            latestFinancialEvent?.type == DailyTaskEvent.debtRemovedType ||
             latestFinancialEvent?.type ==
                 DailyTaskEvent.debtEntryCollectionType) &&
         (latestFinancialEvent!.remainingAfter - subscriber.remaining).abs() <=

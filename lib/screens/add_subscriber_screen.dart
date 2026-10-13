@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
+import '../services/subscriber_financial_ledger.dart';
 
 class AddSubscriberScreen extends StatefulWidget {
   final Subscriber? subscriber;
@@ -28,12 +29,35 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
   final sasParentId = TextEditingController();
   DateTime? startDate;
   DateTime? endDate;
+  String? _openedBillingMonthKey;
   bool loadingSasLists = false;
   String? sasListsError;
   List<Map<String, dynamic>> sasProfiles = [];
   List<Map<String, dynamic>> sasParents = [];
   int? selectedProfileId;
   int? selectedParentId;
+
+  Future<void> _recordLedgerTransaction({
+    required Subscriber subscriber,
+    required FinancialTransactionType type,
+    required double amount,
+    required DateTime date,
+    required String referenceId,
+    required String note,
+  }) async {
+    try {
+      await SubscriberFinancialLedger().addTransaction(
+        subscriberId: subscriber.subscriberId,
+        date: date,
+        type: type,
+        amount: amount,
+        referenceId: referenceId,
+        note: note,
+      );
+    } catch (error) {
+      debugPrint('Financial ledger write failed: $error');
+    }
+  }
 
   String fmt(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
@@ -134,6 +158,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
     super.initState();
     final s = widget.subscriber;
     if (s != null) {
+      _openedBillingMonthKey = s.billingMonthKey;
       _populateFromSubscriber(s);
     } else {
       startDate = DateTime.now();
@@ -274,7 +299,9 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
         color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF2E7D32),
       ),
       filled: true,
-      fillColor: isDark ? const Color(0xFF1E293B) : colors.surfaceContainerHighest,
+      fillColor: isDark
+          ? const Color(0xFF1E293B)
+          : colors.surfaceContainerHighest,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(
@@ -413,13 +440,26 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.right,
                     decoration: dec(
-                      'المبلغ المدفوع',
+                      widget.subscriber == null
+                          ? 'المبلغ المدفوع عند التسجيل'
+                          : 'واصل الشهر الحالي',
                       Icons.price_check_outlined,
                     ),
                   ),
                 ),
               ],
             ),
+            if ((widget.subscriber?.carriedDebt ?? 0) > 0.0001) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  'الدين المرحّل: ${widget.subscriber!.carriedDebt.toStringAsFixed(0)} د.ع • '
+                  'إجمالي المتبقي: ${widget.subscriber!.remaining.toStringAsFixed(0)} د.ع',
+                  style: TextStyle(color: Colors.orange.shade800),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             TextField(
               controller: paymentDate,
@@ -575,7 +615,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                   }
                   final p = double.tryParse(price.text) ?? 0;
                   final pd = double.tryParse(paid.text) ?? 0;
-                  if (p < 0 || pd < 0) {
+                  if (!p.isFinite || !pd.isFinite || p < 0 || pd < 0) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text(
@@ -664,24 +704,97 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                       increaseNote: 'رصيد افتتاحي للمشترك الجديد',
                       decreaseNote: 'تصحيح رصيد افتتاحي للمشترك الجديد',
                     );
+                    final createdAt = DateTime.now();
+                    InvoiceRecord? openingInvoice;
+                    if (pd > 0.0001) {
+                      final receiptNumber = await AppStore.issueReceiptNumber(
+                        persist: false,
+                      );
+                      openingInvoice = subscriber.registerInvoiceFromPayment(
+                        receiptNumber: receiptNumber,
+                        amount: pd,
+                        at: createdAt,
+                        note: 'وصل واصل افتتاحي',
+                      );
+                    }
                     if (subscriber.paymentDate.isEmpty && pd > 0) {
                       subscriber.paymentDate = paymentDate.text.trim().isEmpty
-                          ? fmt(DateTime.now())
+                          ? fmt(createdAt)
                           : paymentDate.text.trim();
                     }
                     AppStore.subscribers.add(subscriber);
+                    if (p > 0.0001) {
+                      await AppStore.addDailyTaskEvent(
+                        DailyTaskEvent(
+                          type: 'debt_added',
+                          subscriberUser: subscriber.user,
+                          subscriberName: subscriber.name,
+                          at: createdAt,
+                          amount: p,
+                          remainingAfter: subscriber.remaining,
+                          note: 'قيمة الاشتراك عند إنشاء المشترك',
+                        ),
+                        persist: false,
+                      );
+                    }
+                    if (pd > 0.0001) {
+                      await AppStore.addDailyTaskEvent(
+                        DailyTaskEvent(
+                          type: DailyTaskEvent.debtEntryCollectionType,
+                          subscriberUser: subscriber.user,
+                          subscriberName: subscriber.name,
+                          at: createdAt,
+                          amount: pd,
+                          remainingAfter: subscriber.remaining,
+                          note: 'واصل افتتاحي عند إنشاء المشترك',
+                        ),
+                        persist: false,
+                      );
+                    }
                     await AppStore.addDailyTaskEvent(
                       DailyTaskEvent(
                         type: DailyTaskEvent.subscriberCreatedType,
                         subscriberUser: subscriber.user,
                         subscriberName: subscriber.name,
-                        at: DateTime.now(),
+                        at: createdAt,
                         note: 'تم إنشاء ملف المشترك',
                       ),
                       persist: false,
                     );
+                    if (p > 0.0001) {
+                      await _recordLedgerTransaction(
+                        subscriber: subscriber,
+                        type: FinancialTransactionType.openingBalance,
+                        amount: p,
+                        date: createdAt,
+                        referenceId:
+                            'opening-balance:${subscriber.subscriberId}',
+                        note: 'الرصيد الافتتاحي للاشتراك',
+                      );
+                    }
+                    if (pd > 0.0001 && openingInvoice != null) {
+                      await _recordLedgerTransaction(
+                        subscriber: subscriber,
+                        type: FinancialTransactionType.payment,
+                        amount: pd,
+                        date: createdAt,
+                        referenceId:
+                            'payment-receipt:${openingInvoice.receiptNumber}',
+                        note: openingInvoice.note,
+                      );
+                    }
                   } else {
                     final s = widget.subscriber!;
+                    if (s.billingMonthKey != _openedBillingMonthKey) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'بدأ شهر جديد أثناء التعديل؛ افتح ملف المشترك مجدداً',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
                     final oldUser = s.user;
                     final oldName = s.name;
                     final oldPhone = s.phone;
@@ -734,7 +847,6 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                     s.address = address.text.trim();
                     s.ip = ip.text.trim();
                     s.type = type.text.trim();
-                    s.price = p;
                     double targetPaid;
                     if ((pd - oldPaid).abs() > 0.0001) {
                       targetPaid = pd.clamp(0, p).toDouble();
@@ -745,17 +857,21 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                       targetPaid = oldPaid.clamp(0, p).toDouble();
                     }
                     final now = DateTime.now();
-                    final delta = s.adjustPaidToTarget(
-                      targetPaid,
+                    final adjustment = s.adjustDebtAmounts(
+                      subscriptionAmount: p,
+                      paidAmount: targetPaid,
                       at: now,
-                      increaseNote: 'تعديل رصيد الواصل من شاشة المشترك',
-                      decreaseNote: 'تصحيح رصيد الواصل من شاشة المشترك',
                     );
+                    final delta = adjustment.paymentDelta;
+                    final subscriptionDelta = adjustment.subscriptionDelta;
+                    final addedDebt = adjustment.addedDebt;
+                    final reducedDebt = adjustment.reducedDebt;
+                    InvoiceRecord? invoice;
                     if (delta > 0.0001) {
                       final receiptNumber = await AppStore.issueReceiptNumber(
                         persist: false,
                       );
-                      s.registerInvoiceFromPayment(
+                      invoice = s.registerInvoiceFromPayment(
                         receiptNumber: receiptNumber,
                         amount: delta,
                         at: now,
@@ -763,7 +879,122 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                       );
                       s.paymentDate = fmt(now);
                     }
-                    if (s.paid <= 0) s.paymentDate = '';
+                    final entryCollection = adjustment.appliedToCurrentCharge;
+                    final debtRepayment = adjustment.appliedToCarriedDebt;
+                    if (addedDebt > 0.0001) {
+                      await AppStore.addDailyTaskEvent(
+                        DailyTaskEvent(
+                          type: 'debt_added',
+                          subscriberUser: s.user,
+                          subscriberName: s.name,
+                          at: now,
+                          amount: addedDebt,
+                          remainingAfter: s.remaining,
+                          note: 'زيادة مبلغ الاشتراك',
+                        ),
+                        persist: false,
+                      );
+                    }
+                    if (reducedDebt > 0.0001) {
+                      await AppStore.addDailyTaskEvent(
+                        DailyTaskEvent(
+                          type: DailyTaskEvent.debtRemovedType,
+                          subscriberUser: s.user,
+                          subscriberName: s.name,
+                          at: now,
+                          amount: reducedDebt,
+                          remainingAfter: s.remaining,
+                          note: 'تخفيض مبلغ الاشتراك',
+                        ),
+                        persist: false,
+                      );
+                    }
+                    if (entryCollection > 0.0001) {
+                      await AppStore.addDailyTaskEvent(
+                        DailyTaskEvent(
+                          type: DailyTaskEvent.debtEntryCollectionType,
+                          subscriberUser: s.user,
+                          subscriberName: s.name,
+                          at: now,
+                          amount: entryCollection,
+                          remainingAfter: s.remaining,
+                          note: 'واصل من مبلغ الاشتراك الجديد',
+                        ),
+                        persist: false,
+                      );
+                    }
+                    if (debtRepayment > 0.0001) {
+                      await AppStore.addDailyTaskEvent(
+                        DailyTaskEvent(
+                          type: 'debt_payment',
+                          subscriberUser: s.user,
+                          subscriberName: s.name,
+                          at: now,
+                          amount: debtRepayment,
+                          remainingAfter: s.remaining,
+                          note: 'تسديد دين',
+                        ),
+                        persist: false,
+                      );
+                    }
+                    if (subscriptionDelta.abs() > 0.0001 ||
+                        delta.abs() > 0.0001) {
+                      await AppStore.addDailyTaskEvent(
+                        DailyTaskEvent(
+                          type: DailyTaskEvent.debtEditType,
+                          subscriberUser: s.user,
+                          subscriberName: s.name,
+                          at: now,
+                          amount: subscriptionDelta,
+                          remainingAfter: s.remaining,
+                          note: 'تعديل مبلغ الاشتراك والواصل',
+                        ),
+                        persist: false,
+                      );
+                    }
+                    if (addedDebt > 0.0001) {
+                      await _recordLedgerTransaction(
+                        subscriber: s,
+                        type: FinancialTransactionType.debt,
+                        amount: addedDebt,
+                        date: now,
+                        referenceId:
+                            'debt-edit:${s.subscriberId}:${now.toUtc().toIso8601String()}',
+                        note: 'زيادة مبلغ الاشتراك',
+                      );
+                    }
+                    if (reducedDebt > 0.0001) {
+                      await _recordLedgerTransaction(
+                        subscriber: s,
+                        type: FinancialTransactionType.adjustment,
+                        amount: -reducedDebt,
+                        date: now,
+                        referenceId:
+                            'debt-reduction:${s.subscriberId}:${now.toUtc().toIso8601String()}',
+                        note: 'تخفيض مبلغ الاشتراك',
+                      );
+                    }
+                    if (delta > 0.0001 && invoice != null) {
+                      await _recordLedgerTransaction(
+                        subscriber: s,
+                        type: FinancialTransactionType.payment,
+                        amount: delta,
+                        date: now,
+                        referenceId: 'payment-receipt:${invoice.receiptNumber}',
+                        note: invoice.note,
+                      );
+                    } else if (delta < -0.0001) {
+                      await _recordLedgerTransaction(
+                        subscriber: s,
+                        type: FinancialTransactionType.adjustment,
+                        amount: delta,
+                        date: now,
+                        referenceId:
+                            'payment-correction:${s.subscriberId}:${now.toUtc().toIso8601String()}',
+                        note: 'تصحيح تخفيض الواصل',
+                      );
+                    }
+                    if (s.paid <= 0 && delta < 0) s.paymentDate = '';
                     s.startDate = startDate!;
                     s.endDate = endDate!;
                     s.notes = notes.text.trim();
@@ -800,8 +1031,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                       if (oldPhone != s.phone) 'رقم الهاتف',
                       if (oldAddress != s.address) 'العنوان',
                       if (oldIp != s.ip) 'عنوان IP',
-                      if ((oldPrice - s.price).abs() > 0.0001)
-                        'مبلغ الاشتراك',
+                      if ((oldPrice - s.price).abs() > 0.0001) 'مبلغ الاشتراك',
                       if ((oldPaid - s.paid).abs() > 0.0001) 'الواصل',
                       if (!AppStore.isSameDay(oldStartDate, s.startDate))
                         'تاريخ التفعيل',

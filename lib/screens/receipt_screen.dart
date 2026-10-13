@@ -26,14 +26,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   String get receiptNo =>
       receiptNumber == null ? '...' : receiptNumber!.toString().padLeft(6, '0');
 
-    bool get hasBoundInvoice => widget.invoice != null;
+  bool get hasBoundInvoice => widget.invoice != null;
 
-    DateTime get receiptDate => widget.invoice?.at ?? DateTime.now();
+  DateTime get receiptDate => widget.invoice?.at ?? DateTime.now();
 
-    String get invoiceMonthKey =>
-      widget.invoice?.monthKey.isNotEmpty == true
-        ? widget.invoice!.monthKey
-        : Subscriber.monthKeyOf(receiptDate);
+  String get invoiceMonthKey => widget.invoice?.monthKey.isNotEmpty == true
+      ? widget.invoice!.monthKey
+      : Subscriber.monthKeyOf(receiptDate);
 
   String get issuedAt {
     final d = receiptDate;
@@ -70,7 +69,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   Future<void> _issueNumber() async {
     if (hasBoundInvoice) {
-      if (mounted) setState(() => receiptNumber = widget.invoice!.receiptNumber);
+      if (mounted)
+        setState(() => receiptNumber = widget.invoice!.receiptNumber);
       return;
     }
     final n = await AppStore.issueReceiptNumber();
@@ -104,7 +104,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
         widget.invoice?.subscriptionAmountSnapshot,
         subscriber.price,
       ),
-      'الواصل': _snapshotAmount(
+      'واصل الاشتراك الحالي': _snapshotAmount(
         widget.invoice?.paidAmountSnapshot,
         subscriber.paid,
       ),
@@ -112,8 +112,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
         widget.invoice?.remainingAmountSnapshot,
         subscriber.remaining,
       ),
-      if (widget.invoice != null)
-        'الشهر المحاسبي': invoiceMonthKey,
+      if (widget.invoice != null) 'الشهر المحاسبي': invoiceMonthKey,
       'تاريخ التفعيل': fmt(subscriber.startDate),
       'تاريخ التسديد': _receiptPaymentDate,
       'تاريخ الانتهاء': fmt(subscriber.endDate),
@@ -216,136 +215,139 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   }
 
   Widget row(String a, String b) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(a, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 12),
-            Flexible(child: Text(b)),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(a, style: const TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(width: 12),
+        Flexible(child: Text(b)),
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: Scaffold(
-          appBar: AppBar(title: const Text('وصل الاستلام'), centerTitle: true),
-          body: ListView(
-            padding: const EdgeInsets.all(18),
-            children: [
-              Card(
-                elevation: 3,
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Column(
-                    children: [
-                      if (AppStore.officeLogoBase64.isNotEmpty)
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(14),
-                          child: Image.memory(
-                            base64Decode(AppStore.officeLogoBase64),
-                            width: 76,
-                            height: 76,
-                            fit: BoxFit.contain,
-                          ),
-                        ),
-                      const SizedBox(height: 8),
-                      Text(
-                        AppStore.officeName,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
+    textDirection: TextDirection.rtl,
+    child: Scaffold(
+      appBar: AppBar(title: const Text('وصل الاستلام'), centerTitle: true),
+      body: ListView(
+        padding: const EdgeInsets.all(18),
+        children: [
+          Card(
+            elevation: 3,
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                children: [
+                  if (AppStore.officeLogoBase64.isNotEmpty)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Image.memory(
+                        base64Decode(AppStore.officeLogoBase64),
+                        width: 76,
+                        height: 76,
+                        fit: BoxFit.contain,
                       ),
-                      if (AppStore.officePhone.isNotEmpty)
-                        Text('هاتف المكتب: ${AppStore.officePhone}'),
-                      if (AppStore.officeAddress.isNotEmpty)
-                        Text(AppStore.officeAddress),
-                      const Divider(height: 28),
-                      const Text(
-                        'وصل استلام',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          'رقم الوصل: $receiptNo',
-                          style: TextStyle(
-                          color: Colors.grey.shade700,
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      ),
-                      const SizedBox(height: 12),
-                      row('اسم المشترك', subscriber.name),
-                      row('اليوزر', subscriber.user),
-                      row('رقم الهاتف', subscriber.phone),
-                      row('الباقة', _receiptPackage),
-                      if (widget.invoice != null)
-                        row('مبلغ الفاتورة', widget.invoice!.amount.toStringAsFixed(0)),
-                      row(
-                        'مبلغ الاشتراك',
-                        _snapshotAmount(
-                          widget.invoice?.subscriptionAmountSnapshot,
-                          subscriber.price,
-                        ),
-                      ),
-                      row(
-                        'الواصل',
-                        _snapshotAmount(
-                          widget.invoice?.paidAmountSnapshot,
-                          subscriber.paid,
-                        ),
-                      ),
-                      row(
-                        'المتبقي',
-                        _snapshotAmount(
-                          widget.invoice?.remainingAmountSnapshot,
-                          subscriber.remaining,
-                        ),
-                      ),
-                      if (widget.invoice != null)
-                        row('الشهر المحاسبي', invoiceMonthKey),
-                      row('تاريخ التفعيل', fmt(subscriber.startDate)),
-                      row('تاريخ التسديد', _receiptPaymentDate),
-                      row('تاريخ الانتهاء', fmt(subscriber.endDate)),
-                      row('تاريخ إصدار الوصل', issuedAt),
-                      const Divider(height: 28),
-                      Text(AppStore.receiptFooter, textAlign: TextAlign.center),
-                    ],
+                    ),
+                  const SizedBox(height: 8),
+                  Text(
+                    AppStore.officeName,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
+                  if (AppStore.officePhone.isNotEmpty)
+                    Text('هاتف المكتب: ${AppStore.officePhone}'),
+                  if (AppStore.officeAddress.isNotEmpty)
+                    Text(AppStore.officeAddress),
+                  const Divider(height: 28),
+                  const Text(
+                    'وصل استلام',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'رقم الوصل: $receiptNo',
+                      style: TextStyle(
+                        color: Colors.grey.shade700,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  row('اسم المشترك', subscriber.name),
+                  row('اليوزر', subscriber.user),
+                  row('رقم الهاتف', subscriber.phone),
+                  row('الباقة', _receiptPackage),
+                  if (widget.invoice != null)
+                    row(
+                      'مبلغ الفاتورة',
+                      widget.invoice!.amount.toStringAsFixed(0),
+                    ),
+                  row(
+                    'مبلغ الاشتراك',
+                    _snapshotAmount(
+                      widget.invoice?.subscriptionAmountSnapshot,
+                      subscriber.price,
+                    ),
+                  ),
+                  row(
+                    'واصل الاشتراك الحالي',
+                    _snapshotAmount(
+                      widget.invoice?.paidAmountSnapshot,
+                      subscriber.paid,
+                    ),
+                  ),
+                  row(
+                    'المتبقي',
+                    _snapshotAmount(
+                      widget.invoice?.remainingAmountSnapshot,
+                      subscriber.remaining,
+                    ),
+                  ),
+                  if (widget.invoice != null)
+                    row('الشهر المحاسبي', invoiceMonthKey),
+                  row('تاريخ التفعيل', fmt(subscriber.startDate)),
+                  row('تاريخ التسديد', _receiptPaymentDate),
+                  row('تاريخ الانتهاء', fmt(subscriber.endDate)),
+                  row('تاريخ إصدار الوصل', issuedAt),
+                  const Divider(height: 28),
+                  Text(AppStore.receiptFooter, textAlign: TextAlign.center),
+                ],
               ),
-              const SizedBox(height: 14),
-              SizedBox(
-                height: 52,
-                child: FilledButton.icon(
-                  onPressed: receiptNumber == null ? null : printReceipt,
-                  icon: const Icon(Icons.print),
-                  label: const Text('طباعة الوصل / حفظ PDF'),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 52,
-                child: OutlinedButton.icon(
-                  onPressed: receiptNumber == null ? null : shareReceipt,
-                  icon: const Icon(Icons.share),
-                  label: const Text('مشاركة الوصل'),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
-      );
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 52,
+            child: FilledButton.icon(
+              onPressed: receiptNumber == null ? null : printReceipt,
+              icon: const Icon(Icons.print),
+              label: const Text('طباعة الوصل / حفظ PDF'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 52,
+            child: OutlinedButton.icon(
+              onPressed: receiptNumber == null ? null : shareReceipt,
+              icon: const Icon(Icons.share),
+              label: const Text('مشاركة الوصل'),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

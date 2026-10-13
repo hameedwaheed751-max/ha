@@ -76,21 +76,21 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
   double get _monthlyInvoiceTotal => AppStore.subscribers
       .expand((subscriber) => subscriber.invoices)
       .where(
-      (invoice) =>
-        (invoice.monthKey.isNotEmpty
-          ? invoice.monthKey
-          : Subscriber.monthKeyOf(invoice.at)) ==
-        Subscriber.monthKeyOf(_month),
+        (invoice) =>
+            (invoice.monthKey.isNotEmpty
+                ? invoice.monthKey
+                : Subscriber.monthKeyOf(invoice.at)) ==
+            Subscriber.monthKeyOf(_month),
       )
       .fold<double>(0, (total, invoice) => total + invoice.amount);
 
-    double get _invoiceReconciliationDifference =>
+  double get _invoiceReconciliationDifference =>
       _monthlyInvoiceTotal - _summary.netCollections;
 
-    double get _currentOutstandingDebt => AppStore.subscribers.fold<double>(
-      0,
-      (total, subscriber) => total + subscriber.remaining,
-    );
+  double get _currentOutstandingDebt => AppStore.subscribers.fold<double>(
+    0,
+    (total, subscriber) => total + subscriber.remaining,
+  );
 
   String _money(double value) {
     final rounded = value.round();
@@ -246,6 +246,10 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
         xls.DoubleCellValue(_monthlyDebtSummary.debtAddedTotal),
       ]);
       sheet.appendRow([
+        xls.TextCellValue('تخفيضات الدين خلال الشهر'),
+        xls.DoubleCellValue(_monthlyDebtSummary.debtReducedTotal),
+      ]);
+      sheet.appendRow([
         xls.TextCellValue('الواصل من التسديد'),
         xls.DoubleCellValue(_monthlyDebtSummary.debtPaymentsCollected),
       ]);
@@ -326,9 +330,9 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تعذر تصدير التقرير: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('تعذر تصدير التقرير: $error')));
     }
   }
 
@@ -337,40 +341,36 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     IconData icon,
     List<(IconData, String, String, Color)> metrics,
     double tileWidth,
-  ) =>
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Row(
         children: [
-          Row(
-            children: [
-              Icon(icon, size: 19, color: const Color(0xFF2E7D32)),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              for (final metric in metrics)
-                _MetricTile(
-                  width: tileWidth,
-                  icon: metric.$1,
-                  label: metric.$2,
-                  value: metric.$3,
-                  color: metric.$4,
-                ),
-            ],
+          Icon(icon, size: 19, color: const Color(0xFF2E7D32)),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
           ),
         ],
-      );
+      ),
+      const SizedBox(height: 10),
+      Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        children: [
+          for (final metric in metrics)
+            _MetricTile(
+              width: tileWidth,
+              icon: metric.$1,
+              label: metric.$2,
+              value: metric.$3,
+              color: metric.$4,
+            ),
+        ],
+      ),
+    ],
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -446,35 +446,30 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _metricSection(
-                      'حركة رصيد SAS',
-                      Icons.cloud_outlined,
-                      [
-                        (
-                          Icons.add_card_rounded,
-                          'إيداعات الشهر',
-                          _loadingJournalMonth ? '...' : _money(balanceAdded),
-                          const Color(0xFF1B7F5C),
-                        ),
-                        (
-                          Icons.account_balance_wallet_outlined,
-                          'الاستقطاعات الفعلية',
-                          _loadingJournalMonth ? '...' : _money(sasDeductions),
-                          const Color(0xFFC04A35),
-                        ),
-                        (
-                          Icons.calculate_outlined,
-                          'الرصيد بعد آخر حركة',
-                          _loadingJournalMonth
-                              ? '...'
-                              : latestSasBalance == null
-                              ? 'غير متاح'
-                              : _money(latestSasBalance),
-                          const Color(0xFF4E5D78),
-                        ),
-                      ],
-                      width,
-                    ),
+                    _metricSection('حركة رصيد SAS', Icons.cloud_outlined, [
+                      (
+                        Icons.add_card_rounded,
+                        'إيداعات الشهر',
+                        _loadingJournalMonth ? '...' : _money(balanceAdded),
+                        const Color(0xFF1B7F5C),
+                      ),
+                      (
+                        Icons.account_balance_wallet_outlined,
+                        'الاستقطاعات الفعلية',
+                        _loadingJournalMonth ? '...' : _money(sasDeductions),
+                        const Color(0xFFC04A35),
+                      ),
+                      (
+                        Icons.calculate_outlined,
+                        'الرصيد بعد آخر حركة',
+                        _loadingJournalMonth
+                            ? '...'
+                            : latestSasBalance == null
+                            ? 'غير متاح'
+                            : _money(latestSasBalance),
+                        const Color(0xFF4E5D78),
+                      ),
+                    ], width),
                     const SizedBox(height: 20),
                     _metricSection(
                       'المبيعات والتحصيل من المشتركين',
@@ -541,6 +536,12 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                           'المطالبات المضافة خلال الشهر',
                           _money(debtSummary.debtAddedTotal),
                           const Color(0xFF8B6914),
+                        ),
+                        (
+                          Icons.remove_circle_outline,
+                          'تخفيضات الدين خلال الشهر',
+                          _money(debtSummary.debtReducedTotal),
+                          const Color(0xFF546E7A),
                         ),
                         (
                           Icons.account_balance_wallet_outlined,
