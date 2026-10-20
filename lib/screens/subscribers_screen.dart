@@ -888,27 +888,13 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         subscriberUser: s.user,
         subscriberName: s.name,
         at: recordedAt,
-        collected: paymentAllocation.appliedToCurrentCharge,
+        collected: collected,
         remaining: s.remaining,
         note: 'تفعيل من قائمة المشتركين',
         addRemainingDebtEvent: !debtAlreadyRecorded,
         chargedAmount: s.price,
       )) {
         await AppStore.addDailyTaskEvent(event, persist: false);
-      }
-      if (paymentAllocation.appliedToCarriedDebt > 0.0001) {
-        await AppStore.addDailyTaskEvent(
-          DailyTaskEvent(
-            type: 'debt_payment',
-            subscriberUser: s.user,
-            subscriberName: s.name,
-            at: recordedAt,
-            amount: paymentAllocation.appliedToCarriedDebt,
-            remainingAfter: s.remaining,
-            note: 'تسديد دين مرحّل عند التفعيل',
-          ),
-          persist: false,
-        );
       }
 
       // تحديث بيانات SAS إذا تم جلبها

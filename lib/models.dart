@@ -211,15 +211,16 @@ class DailyTaskEvent {
         ? chargedAmount.clamp(0, double.infinity).toDouble()
         : safeCollected + safeRemaining;
     return [
-      DailyTaskEvent(
-        type: 'activation',
-        subscriberUser: subscriberUser,
-        subscriberName: subscriberName,
-        at: at,
-        amount: safeCollected,
-        remainingAfter: safeRemaining,
-        note: note,
-      ),
+      if (safeCollected > 0.0001)
+        DailyTaskEvent(
+          type: 'activation',
+          subscriberUser: subscriberUser,
+          subscriberName: subscriberName,
+          at: at,
+          amount: safeCollected,
+          remainingAfter: safeRemaining,
+          note: note,
+        ),
       if (addRemainingDebtEvent && safeCharge > 0.0001)
         DailyTaskEvent(
           type: 'debt_added',

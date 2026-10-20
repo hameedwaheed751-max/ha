@@ -495,41 +495,49 @@ void main() {
     },
   );
 
-  test('reactivation does not count the previous paid balance as new cash', () {
-    final events = DailyTaskEvent.activationSettlement(
-      subscriberUser: 'u1',
-      subscriberName: 'User 1',
-      at: DateTime(2026, 9, 4),
-      collected: 35000,
-      remaining: 0,
-      note: 'إعادة تفعيل',
-      isReactivation: true,
-    );
+  test(
+    'reactivation with no new cash records no financial activation event',
+    () {
+      final events = DailyTaskEvent.activationSettlement(
+        subscriberUser: 'u1',
+        subscriberName: 'User 1',
+        at: DateTime(2026, 9, 4),
+        collected: 35000,
+        remaining: 0,
+        note: 'إعادة تفعيل',
+        isReactivation: true,
+      );
 
-    final summary = DailyTaskSummary.fromEvents(events);
+      final summary = DailyTaskSummary.fromEvents(events);
 
-    expect(summary.activationCases, 1);
-    expect(summary.activationCollected, 0);
-    expect(summary.totalCollected, 0);
-  });
+      expect(events, isEmpty);
+      expect(summary.activationCases, 0);
+      expect(summary.activationCollected, 0);
+      expect(summary.totalCollected, 0);
+    },
+  );
 
-  test('reactivation does not count the previous paid balance as new cash', () {
-    final events = DailyTaskEvent.activationSettlement(
-      subscriberUser: 'u1',
-      subscriberName: 'User 1',
-      at: DateTime(2026, 9, 4),
-      collected: 35000,
-      remaining: 0,
-      note: 'إعادة تفعيل',
-      isReactivation: true,
-    );
+  test(
+    'reactivation with no new cash records no financial activation event',
+    () {
+      final events = DailyTaskEvent.activationSettlement(
+        subscriberUser: 'u1',
+        subscriberName: 'User 1',
+        at: DateTime(2026, 9, 4),
+        collected: 35000,
+        remaining: 0,
+        note: 'إعادة تفعيل',
+        isReactivation: true,
+      );
 
-    final summary = DailyTaskSummary.fromEvents(events);
+      final summary = DailyTaskSummary.fromEvents(events);
 
-    expect(summary.activationCases, 1);
-    expect(summary.activationCollected, 0);
-    expect(summary.totalCollected, 0);
-  });
+      expect(events, isEmpty);
+      expect(summary.activationCases, 0);
+      expect(summary.activationCollected, 0);
+      expect(summary.totalCollected, 0);
+    },
+  );
 
   test('unpaid activation adds only the actual remaining debt', () {
     final events = DailyTaskEvent.activationSettlement(
@@ -543,8 +551,9 @@ void main() {
 
     final summary = DailyTaskSummary.fromEvents(events);
 
-    expect(events, hasLength(2));
-    expect(summary.activationCases, 1);
+    expect(events, hasLength(1));
+    expect(events.single.type, 'debt_added');
+    expect(summary.activationCases, 0);
     expect(summary.activationCollected, 0);
     expect(summary.debtPaymentsCollected, 0);
     expect(summary.debtAddedTotal, 35000);
@@ -590,8 +599,8 @@ void main() {
 
     expect(debtAlreadyRecorded, isTrue);
     expect(events.where((event) => event.type == 'debt_added'), isEmpty);
-    expect(events.where((event) => event.type == 'activation'), hasLength(1));
-    expect(events.single.remainingAfter, 35000);
+    expect(events.where((event) => event.type == 'activation'), isEmpty);
+    expect(events, isEmpty);
   });
 
   test('activation does not re-add debt adjusted by an earlier payment', () {
@@ -661,7 +670,7 @@ void main() {
     expect(summary.totalCollected, 25000);
   });
 
-  test('activation cash against old debt is classified as debt repayment', () {
+  test('activation records full cash once when it first pays carried debt', () {
     final subscriber = Subscriber(
       user: 'u1',
       name: 'Test User',
@@ -678,31 +687,22 @@ void main() {
     );
     final at = DateTime(2026, 10, 13);
     final allocation = subscriber.applyPayment(25000, at: at);
-    final events = [
-      ...DailyTaskEvent.activationSettlement(
-        subscriberUser: subscriber.user,
-        subscriberName: subscriber.name,
-        at: at,
-        collected: allocation.appliedToCurrentCharge,
-        remaining: subscriber.remaining,
-        note: 'activation',
-        chargedAmount: subscriber.price,
-      ),
-      if (allocation.appliedToCarriedDebt > 0)
-        DailyTaskEvent(
-          type: 'debt_payment',
-          subscriberUser: subscriber.user,
-          subscriberName: subscriber.name,
-          at: at,
-          amount: allocation.appliedToCarriedDebt,
-          remainingAfter: subscriber.remaining,
-        ),
-    ];
+    final events = DailyTaskEvent.activationSettlement(
+      subscriberUser: subscriber.user,
+      subscriberName: subscriber.name,
+      at: at,
+      collected: allocation.totalApplied,
+      remaining: subscriber.remaining,
+      note: 'activation',
+      chargedAmount: subscriber.price,
+    );
 
     final summary = DailyTaskSummary.fromEvents(events);
 
-    expect(summary.activationCollected, 5000);
-    expect(summary.debtPaymentsCollected, 20000);
+    expect(events.where((event) => event.type == 'activation'), hasLength(1));
+    expect(events.where((event) => event.type == 'debt_payment'), isEmpty);
+    expect(summary.activationCollected, 25000);
+    expect(summary.debtPaymentsCollected, 0);
     expect(summary.totalCollected, 25000);
     expect(summary.debtAddedTotal, 35000);
     expect(summary.netDebtMovement, 10000);
