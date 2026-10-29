@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../services/payment_request_service.dart';
-import '../services/render_whatsapp_service.dart';
+import '../services/whatsapp_notification_dispatcher.dart';
 
 class PaymentRequestsAdminScreen extends StatefulWidget {
   const PaymentRequestsAdminScreen({super.key});
@@ -36,10 +36,13 @@ class _PaymentRequestsAdminScreenState
         ),
       );
 
-      await RenderWhatsAppService.sendSingleMessage(
+      await WhatsAppNotificationDispatcher().sendText(
         to: phone,
-        message:
+        text:
             'مرحباً ${request.agentName}،\n✅ تم قبول طلب الاشتراك بنجاح.\n📦 الباقة: $planLabel\n📅 ينتهي الاشتراك: ${endDate.isNotEmpty ? endDate : '—'}\n\nشكراً لاختياركم خدمتنا.',
+        eventType: 'payment_approved',
+        idempotencyKey:
+            'payment_approved:${_safeEventId(request.requestId)}',
       );
 
       if (!mounted) return;
@@ -108,10 +111,13 @@ class _PaymentRequestsAdminScreenState
         ),
       );
 
-      await RenderWhatsAppService.sendSingleMessage(
+      await WhatsAppNotificationDispatcher().sendText(
         to: phone,
-        message:
+        text:
             'مرحباً ${request.agentName}،\n❌ تم رفض طلب الاشتراك.\nالسبب: $reason\n\nللاستفسار يرجى التواصل مع:\n🏢 ${AppStore.effectiveAgentName}\n\nشكراً لكم.',
+        eventType: 'payment_rejected',
+        idempotencyKey:
+            'payment_rejected:${_safeEventId(request.requestId)}',
       );
 
       if (!mounted) return;
@@ -127,6 +133,9 @@ class _PaymentRequestsAdminScreenState
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  String _safeEventId(String value) =>
+      value.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
 
   Future<void> _showReceipt(String url) async {
     if (url.trim().isEmpty) return;

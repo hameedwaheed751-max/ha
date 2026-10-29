@@ -8,6 +8,7 @@ import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
 import '../services/render_whatsapp_service.dart';
 import '../services/subscriber_financial_ledger.dart';
+import '../services/whatsapp_notification_dispatcher.dart';
 import 'add_subscriber_screen.dart';
 import 'receipt_screen.dart';
 import 'subscriber_details_screen.dart';
@@ -483,10 +484,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
     final defaultMessage =
         'مرحباً ${s.name}، تحية من ${AppStore.officeName}. تاريخ انتهاء اشتراكك ${fmt(s.endDate)}.';
-    final result = await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
+    final result = await WhatsAppNotificationDispatcher().sendSubscriberMessage(
       s,
       message: (message ?? defaultMessage).trim(),
-      template: '{message}',
+      eventType: 'general_message',
+      eventId: 'manual_${DateTime.now().microsecondsSinceEpoch}',
     );
 
     if (!mounted) return;
@@ -510,10 +512,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     final activationTemplate =
         AppStore.messageTemplates['activation'] ??
         'مرحباً {name}، تم تفعيل اشتراكك لدى {office}. الباقة: {package} وتنتهي بتاريخ {endDate}.';
-    final result = await RenderWhatsAppService.notifySubscriptionActivated(
+    final result = await WhatsAppNotificationDispatcher()
+        .notifySubscriptionActivated(
       s,
       template: activationTemplate,
       paidAmount: paidAmount,
+      eventId: 'activation_${s.subscriberId}_${s.startDate.millisecondsSinceEpoch}_${s.endDate.millisecondsSinceEpoch}_${(paidAmount ?? 0).round()}',
     );
     if (!result.success) {
       debugPrint(
@@ -620,10 +624,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     onTap: () {
                       Navigator.pop(ctx);
                       RenderWhatsAppService.dispatchInBackground(
-                        RenderWhatsAppService.notifyGeneralMessageToSubscriber(
+                        WhatsAppNotificationDispatcher().sendSubscriberMessage(
                           s,
-                          message: '',
-                          template: template,
+                          message: template,
+                          eventType: 'general_message',
+                          eventId:
+                              'saved_template_${DateTime.now().microsecondsSinceEpoch}',
                         ),
                       );
                       if (mounted) {

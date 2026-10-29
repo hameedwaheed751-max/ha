@@ -2,6 +2,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
 import 'render_whatsapp_service.dart';
+import 'whatsapp_notification_dispatcher.dart';
 
 class AutoNotificationService {
   static const String _dailyRunPrefix = 'wa_auto_daily_expiry_';
@@ -20,6 +21,7 @@ class AutoNotificationService {
 
     final nearTemplate = AppStore.messageTemplates['nearExpiry'];
     final expiredTemplate = AppStore.messageTemplates['expired'];
+    final dispatcher = WhatsAppNotificationDispatcher();
 
     for (final s in AppStore.subscribers) {
       final phone = RenderWhatsAppService.normalizePhone(s.phone);
@@ -29,18 +31,20 @@ class AutoNotificationService {
 
       if (!s.disabled && !s.expired && days >= 0 && days <= 3) {
         RenderWhatsAppService.dispatchInBackground(
-          RenderWhatsAppService.notifySubscriptionExpiresIn3Days(
+          dispatcher.notifySubscriptionExpiresIn3Days(
             s,
             template: nearTemplate,
+            eventId: '${day}_${s.subscriberId}_${s.endDate.millisecondsSinceEpoch}',
           ),
         );
       }
 
       if (s.expired) {
         RenderWhatsAppService.dispatchInBackground(
-          RenderWhatsAppService.notifySubscriptionExpired(
+          dispatcher.notifySubscriptionExpired(
             s,
             template: expiredTemplate,
+            eventId: '${day}_${s.subscriberId}_${s.endDate.millisecondsSinceEpoch}',
           ),
         );
       }
@@ -64,10 +68,12 @@ class AutoNotificationService {
     }
 
     RenderWhatsAppService.dispatchInBackground(
-      RenderWhatsAppService.notifyDebtPaid(
+      WhatsAppNotificationDispatcher().notifyDebtPaid(
         subscriber,
         amountPaid: oldRemaining,
         remainingBalance: newRemaining,
+        eventId:
+            'settled_${subscriber.subscriberId}_${DateTime.now().microsecondsSinceEpoch}',
       ),
     );
   }

@@ -67,3 +67,14 @@ android/build/
 analyze_*.txt
 build_log.txt
 test_output.txt
+
+# WAHA credentials and runtime data
+whatsapp_waha/.env
+whatsapp_waha/waha_api_key.txt
+whatsapp_waha/data/sessions/
+whatsapp_waha/gateway/secrets/
+whatsapp_waha/gateway/data/idempotency.json
+whatsapp_waha/**/node_modules/
+
+# Potentially sensitive gateway archive
+/netagent-gateway-qr-candidate.tar

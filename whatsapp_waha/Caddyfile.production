@@ -1,0 +1,9 @@
+{$WAHA_GATEWAY_HOST} {
+	encode zstd gzip
+	tls {
+		issuer acme {
+			profile shortlived
+		}
+	}
+	reverse_proxy gateway:3001
+}

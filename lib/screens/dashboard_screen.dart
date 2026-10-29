@@ -13,6 +13,7 @@ import '../sas_sync_service.dart';
 import '../services/auto_notification_service.dart';
 import '../services/render_whatsapp_service.dart';
 import '../services/subscriber_financial_ledger.dart';
+import '../services/whatsapp_notification_dispatcher.dart';
 import 'subscribers_screen.dart';
 import 'settings_screen.dart';
 import 'alerts_screen.dart';
@@ -2442,6 +2443,15 @@ class _DashboardScreenState extends State<DashboardScreen>
         const Color(0xFFF57C00),
         () => _pushDashboard(const ChatScreen()),
       ),
+      if (widget.isAgentMode)
+        (
+          'الواتساب',
+          '',
+          const Color(0xFF25D366),
+          () => _pushDashboard(
+            const SettingsScreen(openWhatsAppLinking: true),
+          ),
+        ),
       (
         'المشتركين',
         'assets/reference/subscribers.png',
@@ -2520,12 +2530,19 @@ class _DashboardScreenState extends State<DashboardScreen>
                         Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Image.asset(
-                              _referenceAssetPath(action.$2),
-                              width: 38,
-                              height: 38,
-                              fit: BoxFit.contain,
-                            ),
+                            if (action.$2.isEmpty)
+                              Icon(
+                                Icons.qr_code_2_rounded,
+                                color: action.$3,
+                                size: 38,
+                              )
+                            else
+                              Image.asset(
+                                _referenceAssetPath(action.$2),
+                                width: 38,
+                                height: 38,
+                                fit: BoxFit.contain,
+                              ),
                             const SizedBox(height: 9),
                             Text(
                               action.$1,
@@ -3858,10 +3875,12 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       return;
     }
 
-    final result = await RenderWhatsAppService.notifyDebtAdded(
+    final result = await WhatsAppNotificationDispatcher(
+      provider: WhatsAppNotificationDispatcher.configuredProvider,
+    ).notifyDebtReminder(
       s,
-      amountAdded: 0,
       remainingBalance: s.remaining,
+      eventId: 'manual_${DateTime.now().toUtc().toIso8601String().substring(0, 10)}_${s.subscriberId}_${s.remaining.toStringAsFixed(0)}',
     );
 
     if (!mounted) return;

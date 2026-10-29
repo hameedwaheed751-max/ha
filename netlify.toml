@@ -3,7 +3,25 @@
   command = "bash scripts/build_web_netlify.sh"
 
 [build.environment]
+  FLUTTER_WEB_USE_SKIA = "true"
+  NODE_VERSION = "18"
   SECRETS_SCAN_SMART_DETECTION_ENABLED = "false"
+
+[build.processing]
+  skip_processing = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Cache-Control = "public, max-age=0, must-revalidate"
 
 [[headers]]
   for = "/index.html"
@@ -11,16 +29,12 @@
     Cache-Control = "no-store, no-cache, must-revalidate"
 
 [[headers]]
-  for = "/flutter_bootstrap.js"
-  [headers.values]
-    Cache-Control = "no-store, no-cache, must-revalidate"
-
-[[headers]]
-  for = "/main.dart.js"
-  [headers.values]
-    Cache-Control = "no-store, no-cache, must-revalidate"
-
-[[headers]]
   for = "/flutter_service_worker.js"
   [headers.values]
     Cache-Control = "no-store, no-cache, must-revalidate"
+
+[context.production.environment]
+  WAHA_GATEWAY_URL = "https://netagentiraq.duckdns.org"
+  WHATSAPP_SERVICE_URL = "https://ha-0cs7.onrender.com"
+  SAS_PROXY_TOKEN = "your-proxy-token-here"
+  SAS_WEB_PROXY_URL = "https://netagent-sas-proxy.wakeel-net-hamwdy.workers.dev"

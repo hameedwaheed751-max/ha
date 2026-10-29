@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../models.dart';
 import '../services/notification_export_service.dart';
 import '../services/render_whatsapp_service.dart';
+import '../services/whatsapp_notification_dispatcher.dart';
 
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
@@ -101,6 +102,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
     String eventType = 'manual_campaign',
     String note = '',
   }) async {
+    final notificationRunDay = DateTime.now().toUtc().toIso8601String().substring(0, 10);
     final valid = recipients
         .where((s) => normalizePhone(s.phone).isNotEmpty)
         .toList();
@@ -120,12 +122,30 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
     try {
       RenderWhatsAppResult result;
+      final dispatcher = WhatsAppNotificationDispatcher();
+      final campaignId = DateTime.now().microsecondsSinceEpoch;
       if (type == 'all') {
-        result = await RenderWhatsAppService.sendBroadcastMessage(
-          subscribers: valid,
-          template: template,
-          eventType: eventType,
-          note: note,
+        var sent = 0;
+        var failed = 0;
+        for (final s in valid) {
+          final dispatched = await dispatcher.sendSubscriberMessage(
+            s,
+            message: _applyTemplate(template, s),
+            eventType: 'broadcast',
+            eventId: '${notificationRunDay}_${campaignId}_${s.subscriberId}',
+          );
+          if (dispatched.success) {
+            sent += 1;
+          } else {
+            failed += 1;
+          }
+        }
+        result = RenderWhatsAppResult(
+          ok: failed == 0,
+          total: valid.length,
+          sent: sent,
+          failed: failed,
+          raw: {'eventType': eventType, 'note': note},
         );
       } else {
         var sent = 0;
@@ -134,38 +154,58 @@ class _AlertsScreenState extends State<AlertsScreen> {
           final rendered = _applyTemplate(template, s);
           late final RenderSingleWhatsAppResult single;
           if (type == 'threeDays') {
-            // معطل: إرسال "ينتهي الاشتراك خلال 3 أيام" - تم التعطيل مؤقتاً
-            // لإعادة التفعيل، أزل هذا التعليق واستخدم الكود أدناه:
-            /*
-            single =
-                await RenderWhatsAppService.notifySubscriptionExpiresIn3Days(
+            final dispatched =
+                await dispatcher.notifySubscriptionExpiresIn3Days(
                   s,
                   template: rendered,
+                  eventId:
+                      '${notificationRunDay}_${s.subscriberId}_${s.endDate.millisecondsSinceEpoch}',
                 );
-            */
-            single = const RenderSingleWhatsAppResult(
-              success: false,
-              error: 'إرسال "ينتهي الاشتراك خلال 3 أيام" معطل مؤقتاً',
+            single = RenderSingleWhatsAppResult(
+              success: dispatched.success,
+              messageId: dispatched.messageId,
+              error: dispatched.error,
+              statusCode: dispatched.statusCode,
             );
           } else if (type == 'debt') {
-            single = await RenderWhatsAppService.notifyDebtAdded(
+            final dispatched = await dispatcher.notifyDebtReminder(
               s,
-              amountAdded: 0,
               remainingBalance: s.remaining,
               template: rendered,
+              eventId: '${notificationRunDay}_${s.subscriberId}_${s.remaining.toStringAsFixed(0)}',
+            );
+            single = RenderSingleWhatsAppResult(
+              success: dispatched.success,
+              messageId: dispatched.messageId,
+              error: dispatched.error,
+              statusCode: dispatched.statusCode,
             );
           } else if (type == 'activated') {
-            single = await RenderWhatsAppService.notifySubscriptionActivated(
+            final dispatched = await dispatcher.notifySubscriptionActivated(
               s,
               template: rendered,
+              eventId: '${notificationRunDay}_${s.subscriberId}_${s.endDate.millisecondsSinceEpoch}',
+            );
+            single = RenderSingleWhatsAppResult(
+              success: dispatched.success,
+              messageId: dispatched.messageId,
+              error: dispatched.error,
+              statusCode: dispatched.statusCode,
             );
           } else {
-            single =
-                await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
-                  s,
-                  message: rendered,
-                  template: '{message}',
-                );
+            final dispatched = await dispatcher.sendSubscriberMessage(
+              s,
+              message: rendered,
+              eventType: 'general_message',
+              eventId:
+                  '${notificationRunDay}_${s.subscriberId}_${s.endDate.millisecondsSinceEpoch}',
+            );
+            single = RenderSingleWhatsAppResult(
+              success: dispatched.success,
+              messageId: dispatched.messageId,
+              error: dispatched.error,
+              statusCode: dispatched.statusCode,
+            );
           }
 
           if (single.success) {
@@ -195,7 +235,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
           content: Text(
             ok
                 ? 'تم الإرسال بنجاح'
-                : 'اكتمل الإرسال مع أخطاء: قبلت Meta عدد $sent، وفشل $failed من $total',
+                : 'اكتمل الإرسال مع أخطاء: نجح $sent، وفشل $failed من $total',
           ),
           duration: const Duration(seconds: 5),
         ),
@@ -205,7 +245,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('فشل الإرسال عبر Render: $e')));
+      ).showSnackBar(SnackBar(content: Text('فشل إرسال رسائل WhatsApp: $e')));
     } finally {
       if (mounted) {
         setState(() => _sendingAutomatic = false);

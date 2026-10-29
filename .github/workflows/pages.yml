@@ -5,6 +5,15 @@ on:
     branches:
       - master
   workflow_dispatch:
+    inputs:
+      whatsapp_provider:
+        description: WhatsApp provider for this manual build only
+        type: choice
+        options:
+          - meta
+          - waha
+        default: meta
+        required: true
 
 permissions:
   contents: read
@@ -36,7 +45,25 @@ jobs:
         run: flutter pub get
 
       - name: Build Flutter Web
-        run: flutter build web --release --base-href /ha/
+        env:
+          NETAGENT_WHATSAPP_PROVIDER: ${{ github.event_name == 'workflow_dispatch' && inputs.whatsapp_provider || 'meta' }}
+          WAHA_GATEWAY_URL: ${{ vars.WAHA_GATEWAY_URL || 'https://netagentiraq.duckdns.org' }}
+        run: |
+          case "$NETAGENT_WHATSAPP_PROVIDER" in
+            meta|waha) ;;
+            *) echo "Unsupported WhatsApp provider" >&2; exit 1 ;;
+          esac
+
+          if [ "$NETAGENT_WHATSAPP_PROVIDER" = "waha" ]; then
+            case "$WAHA_GATEWAY_URL" in
+              https://*) ;;
+              *) echo "WAHA_GATEWAY_URL must be an HTTPS URL when WAHA is selected" >&2; exit 1 ;;
+            esac
+          fi
+
+          flutter build web --release --base-href /ha/ \
+            --dart-define="NETAGENT_WHATSAPP_PROVIDER=$NETAGENT_WHATSAPP_PROVIDER" \
+            --dart-define="WAHA_GATEWAY_URL=$WAHA_GATEWAY_URL"
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
