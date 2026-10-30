@@ -57,6 +57,7 @@ class WahaNotificationService {
 
   static const String _configuredGatewayUrl = String.fromEnvironment(
     'WAHA_GATEWAY_URL',
+    defaultValue: 'https://netagentiraq.duckdns.org',
   );
 
   final String _gatewayUrl;

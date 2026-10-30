@@ -1,5 +1,8 @@
+import 'package:flutter/foundation.dart';
+
 import '../models.dart';
 import 'render_whatsapp_service.dart';
+import 'whatsapp_notification_preferences.dart';
 import 'waha_notification_service.dart';
 
 enum WhatsAppProvider { meta, waha }
@@ -18,18 +21,21 @@ class WhatsAppDispatchResult {
   final int? statusCode;
 }
 
-typedef WahaTextSender = Future<WahaSendResult> Function({
-  required String to,
-  required String text,
-  required String eventType,
-  required String idempotencyKey,
-});
+typedef WahaTextSender =
+    Future<WahaSendResult> Function({
+      required String to,
+      required String text,
+      required String eventType,
+      required String idempotencyKey,
+    });
 
 class WhatsAppNotificationDispatcher {
   WhatsAppNotificationDispatcher({
     this.provider = WhatsAppProvider.waha,
     WahaTextSender? wahaSender,
-  }) : _wahaSender = wahaSender ?? _defaultWahaSender;
+    WhatsAppNotificationPreferences? preferences,
+  }) : _wahaSender = wahaSender ?? _defaultWahaSender,
+       _preferences = preferences ?? FirebaseWhatsAppNotificationPreferences();
 
   static const String _providerDefine = String.fromEnvironment(
     'NETAGENT_WHATSAPP_PROVIDER',
@@ -43,6 +49,7 @@ class WhatsAppNotificationDispatcher {
 
   final WhatsAppProvider provider;
   final WahaTextSender _wahaSender;
+  final WhatsAppNotificationPreferences _preferences;
 
   static Future<WahaSendResult> _defaultWahaSender({
     required String to,
@@ -66,7 +73,10 @@ class WhatsAppNotificationDispatcher {
     type: WhatsAppNotificationType.subscriptionActivated,
     eventType: 'subscription_activated',
     eventId: eventId,
-    template: template ?? AppStore.messageTemplates['activation'] ?? AppStore.activationTemplate,
+    template:
+        template ??
+        AppStore.messageTemplates['activation'] ??
+        AppStore.activationTemplate,
     paidAmount: paidAmount,
   );
 
@@ -81,7 +91,8 @@ class WhatsAppNotificationDispatcher {
     type: WhatsAppNotificationType.debtAdded,
     eventType: 'debt_reminder',
     eventId: eventId,
-    template: template ?? AppStore.messageTemplates['debt'] ?? AppStore.debtTemplate,
+    template:
+        template ?? AppStore.messageTemplates['debt'] ?? AppStore.debtTemplate,
     amount: amountAdded > 0 ? amountAdded : remainingBalance,
     balance: remainingBalance,
   );
@@ -95,7 +106,10 @@ class WhatsAppNotificationDispatcher {
     type: WhatsAppNotificationType.subscriptionExpiresIn3Days,
     eventType: 'expiry_3days',
     eventId: eventId,
-    template: template ?? AppStore.messageTemplates['nearExpiry'] ?? AppStore.nearExpiryTemplate,
+    template:
+        template ??
+        AppStore.messageTemplates['nearExpiry'] ??
+        AppStore.nearExpiryTemplate,
   );
 
   Future<WhatsAppDispatchResult> notifySubscriptionExpired(
@@ -107,7 +121,8 @@ class WhatsAppNotificationDispatcher {
     type: WhatsAppNotificationType.subscriptionExpired,
     eventType: 'subscription_expired',
     eventId: eventId,
-    template: template ??
+    template:
+        template ??
         AppStore.messageTemplates['expired'] ??
         'مرحباً {{customer_name}}،\n⚠️ اشتراكك لدى {{agent_name}} منتهي. يرجى التجديد لاستمرار الخدمة.\n📦 الباقة: {{package_name}}\n📅 تاريخ الانتهاء: {{subscription_end_date}}\n📱 {{whatsapp_number}}',
   );
@@ -123,7 +138,8 @@ class WhatsAppNotificationDispatcher {
     type: WhatsAppNotificationType.debtPaid,
     eventType: 'debt_paid',
     eventId: eventId,
-    template: template ??
+    template:
+        template ??
         AppStore.messageTemplates['debtPaid'] ??
         'مرحباً {{customer_name}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المتبقي: {{remaining_amount}} دينار عراقي\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.',
     amount: amountPaid,
@@ -137,6 +153,9 @@ class WhatsAppNotificationDispatcher {
     required String eventType,
     required String eventId,
   }) async {
+    final eventCheck = await _checkEvent(eventType);
+    if (eventCheck.blocked != null) return eventCheck.blocked!;
+
     // تحديد الـ Provider بناءً على نوع الحدث
     // الرسائل الأربعة المطلوبة تذهب إلى WAHA
     // باقي الرسائل تستخدم الـ Provider المحدد (قد يكون meta أو waha حسب الإعداد)
@@ -158,11 +177,12 @@ class WhatsAppNotificationDispatcher {
       }
 
       // استخدام Meta للرسائل العامة
-      final result = await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
-        subscriber,
-        message: message,
-        template: '{message}',
-      );
+      final result =
+          await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
+            subscriber,
+            message: eventCheck.preference?.message ?? message,
+            template: '{message}',
+          );
 
       return WhatsAppDispatchResult(
         success: result.success,
@@ -175,7 +195,7 @@ class WhatsAppNotificationDispatcher {
     final phone = RenderWhatsAppService.normalizePhone(subscriber.phone);
     final rendered = _appendAgentFooter(
       RenderWhatsAppService.applyTemplate(
-        message.trim(),
+        (eventCheck.preference?.message ?? message).trim(),
         _variablesForSubscriber(subscriber),
       ).trim(),
     );
@@ -193,6 +213,9 @@ class WhatsAppNotificationDispatcher {
     required String eventType,
     required String idempotencyKey,
   }) async {
+    final eventCheck = await _checkEvent(eventType);
+    if (eventCheck.blocked != null) return eventCheck.blocked!;
+
     // تحديد الـ Provider بناءً على نوع الحدث
     // الرسائل الأربعة المطلوبة تذهب إلى WAHA
     // باقي الرسائل تستخدم الـ Provider المحدد (قد يكون meta أو waha حسب الإعداد)
@@ -208,7 +231,7 @@ class WhatsAppNotificationDispatcher {
       // استخدام Meta للرسائل العامة
       final result = await RenderWhatsAppService.sendSingleMessage(
         to: to,
-        message: text,
+        message: eventCheck.preference?.message ?? text,
       );
 
       return WhatsAppDispatchResult(
@@ -221,7 +244,7 @@ class WhatsAppNotificationDispatcher {
 
     return _sendWahaText(
       to: to,
-      text: text,
+      text: eventCheck.preference?.message ?? text,
       eventType: eventType,
       idempotencyKey: idempotencyKey,
     );
@@ -237,6 +260,10 @@ class WhatsAppNotificationDispatcher {
     double? paidAmount,
     double? balance,
   }) async {
+    final eventCheck = await _checkEvent(eventType);
+    if (eventCheck.blocked != null) return eventCheck.blocked!;
+    final resolvedTemplate = eventCheck.preference?.message ?? template;
+
     // تحديد الـ Provider بناءً على نوع الحدث
     // الرسائل الأربعة المطلوبة تذهب إلى WAHA
     // باقي الرسائل تستخدم الـ Provider المحدد (قد يكون meta أو waha حسب الإعداد)
@@ -254,7 +281,7 @@ class WhatsAppNotificationDispatcher {
           WhatsAppNotificationType.subscriptionActivated =>
             await RenderWhatsAppService.notifySubscriptionActivated(
               subscriber,
-              template: template,
+              template: resolvedTemplate,
               paidAmount: paidAmount,
             ),
           WhatsAppNotificationType.debtAdded =>
@@ -262,38 +289,39 @@ class WhatsAppNotificationDispatcher {
               subscriber,
               amountAdded: amount ?? 0,
               remainingBalance: balance ?? subscriber.remaining,
-              template: template,
+              template: resolvedTemplate,
             ),
           WhatsAppNotificationType.subscriptionExpiresIn3Days =>
             await RenderWhatsAppService.notifySubscriptionExpiresIn3Days(
               subscriber,
-              template: template,
+              template: resolvedTemplate,
             ),
           WhatsAppNotificationType.subscriptionExpired =>
             await RenderWhatsAppService.notifySubscriptionExpired(
               subscriber,
-              template: template,
+              template: resolvedTemplate,
             ),
           WhatsAppNotificationType.debtPaid =>
             await RenderWhatsAppService.notifyDebtPaid(
               subscriber,
               amountPaid: amount ?? 0,
               remainingBalance: balance ?? subscriber.remaining,
-              template: template,
+              template: resolvedTemplate,
             ),
           WhatsAppNotificationType.subscriptionRenewed =>
             await RenderWhatsAppService.notifySubscriptionRenewed(
               subscriber,
-              template: template,
+              template: resolvedTemplate,
             ),
           WhatsAppNotificationType.generalMessage =>
             await RenderWhatsAppService.notifyGeneralMessageToSubscriber(
               subscriber,
-              message: template,
+              message: resolvedTemplate,
               template: '{message}',
             ),
-          WhatsAppNotificationType.broadcast =>
-            throw StateError('Broadcast notifications are handled separately.'),
+          WhatsAppNotificationType.broadcast => throw StateError(
+            'Broadcast notifications are handled separately.',
+          ),
         };
         return WhatsAppDispatchResult(
           success: result.success,
@@ -327,7 +355,10 @@ class WhatsAppNotificationDispatcher {
       balance: balance,
     );
     final rendered = _appendAgentFooter(
-      RenderWhatsAppService.applyTemplate(template.trim(), variables).trim(),
+      RenderWhatsAppService.applyTemplate(
+        resolvedTemplate.trim(),
+        variables,
+      ).trim(),
     );
 
     return _sendWahaText(
@@ -336,6 +367,35 @@ class WhatsAppNotificationDispatcher {
       eventType: eventType,
       idempotencyKey: '$eventType:${subscriber.subscriberId}:$eventId',
     );
+  }
+
+  Future<_WhatsAppEventCheck> _checkEvent(String eventType) async {
+    if (!FirebaseWhatsAppNotificationPreferences.eventTypes.contains(
+      eventType,
+    )) {
+      return const _WhatsAppEventCheck();
+    }
+    try {
+      final preference = await _preferences.load(eventType);
+      if (!preference.enabled) {
+        return _WhatsAppEventCheck(
+          preference: preference,
+          blocked: const WhatsAppDispatchResult(
+            success: false,
+            error: 'notification_disabled',
+          ),
+        );
+      }
+      return _WhatsAppEventCheck(preference: preference);
+    } catch (_) {
+      debugPrint('WhatsApp event settings could not be loaded.');
+      return const _WhatsAppEventCheck(
+        blocked: WhatsAppDispatchResult(
+          success: false,
+          error: 'notification_settings_unavailable',
+        ),
+      );
+    }
   }
 
   Future<WhatsAppDispatchResult> _sendWahaText({
@@ -351,6 +411,7 @@ class WhatsAppNotificationDispatcher {
         error: 'Recipient and message are required.',
       );
     }
+
     if (eventType.trim().isEmpty || idempotencyKey.trim().isEmpty) {
       return const WhatsAppDispatchResult(
         success: false,
@@ -389,7 +450,8 @@ class WhatsAppNotificationDispatcher {
     final phone = RenderWhatsAppService.normalizePhone(AppStore.officePhone);
     final remaining = (balance ?? subscriber.remaining).toStringAsFixed(0);
     final payment = (paidAmount ?? subscriber.paid).toStringAsFixed(0);
-    final resolvedAmount = (amount ?? balance ?? subscriber.remaining).toStringAsFixed(0);
+    final resolvedAmount = (amount ?? balance ?? subscriber.remaining)
+        .toStringAsFixed(0);
     final startDate = format(subscriber.startDate);
     final endDate = format(subscriber.endDate);
     final today = format(DateTime.now());
@@ -439,12 +501,22 @@ class WhatsAppNotificationDispatcher {
     if (parts.isEmpty) return message;
     final allDigits = message.replaceAll(RegExp(r'[^0-9]'), '');
     final officeDigits = officePhone.replaceAll(RegExp(r'[^0-9]'), '');
-    final normalizedOfficePhone = RenderWhatsAppService.normalizePhone(officePhone);
+    final normalizedOfficePhone = RenderWhatsAppService.normalizePhone(
+      officePhone,
+    );
     final hasPhone =
         (officeDigits.isNotEmpty && allDigits.contains(officeDigits)) ||
-        (normalizedOfficePhone.isNotEmpty && allDigits.contains(normalizedOfficePhone));
+        (normalizedOfficePhone.isNotEmpty &&
+            allDigits.contains(normalizedOfficePhone));
     final hasAgent = agent.isNotEmpty && message.contains(agent);
     if (hasPhone && hasAgent) return message;
     return '${message.trim()}\n🏢 ${parts.join(' • ')}'.trim();
   }
+}
+
+class _WhatsAppEventCheck {
+  const _WhatsAppEventCheck({this.preference, this.blocked});
+
+  final WhatsAppNotificationEventPreference? preference;
+  final WhatsAppDispatchResult? blocked;
 }

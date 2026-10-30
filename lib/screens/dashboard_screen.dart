@@ -16,6 +16,7 @@ import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
 import 'subscribers_screen.dart';
 import 'settings_screen.dart';
+import 'whatsapp_linking_screen.dart';
 import 'alerts_screen.dart';
 import 'subscriber_details_screen.dart';
 import 'packages_screen.dart';
@@ -2443,15 +2444,12 @@ class _DashboardScreenState extends State<DashboardScreen>
         const Color(0xFFF57C00),
         () => _pushDashboard(const ChatScreen()),
       ),
-      if (widget.isAgentMode)
-        (
-          'الواتساب',
-          '',
-          const Color(0xFF25D366),
-          () => _pushDashboard(
-            const SettingsScreen(openWhatsAppLinking: true),
-          ),
-        ),
+      (
+        'الواتساب',
+        '',
+        const Color(0xFF25D366),
+        () => _pushDashboard(const WhatsAppLinkingScreen()),
+      ),
       (
         'المشتركين',
         'assets/reference/subscribers.png',
