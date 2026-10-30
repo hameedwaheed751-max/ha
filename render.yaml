@@ -1,5 +1,19 @@
 services:
   - type: web
+    name: netagent-web
+    env: static
+    branch: master
+    buildCommand: bash scripts/build_web_render.sh
+    staticPublishPath: build/web
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: WAHA_GATEWAY_URL
+        value: https://netagentiraq.duckdns.org
+
+  - type: web
     name: netagent-sas-proxy
     env: node
     branch: master
