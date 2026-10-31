@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -1182,6 +1183,9 @@ class AppStore {
   static const int maxDailyTaskEvents = 12000;
   static const String accountingActivationsKey = 'accountingActivations';
   static String? _loadedUid;
+  static const String localDataOwnerKey = 'localDataOwnerUid';
+  static bool _remoteLoadConfirmed = false;
+  static Future<void> _loadQueue = Future<void>.value();
   static const String activationTemplate =
       'مرحباً {{customer_name}}،\n✅ تم تفعيل اشتراك الإنترنت بنجاح.\n📦 الباقة: {{package_name}}\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المبلغ المتبقي: {{remaining_amount}} دينار عراقي\n📅 يبدأ الاشتراك: {{subscription_start}}\n📅 ينتهي الاشتراك: {{subscription_end}}\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.';
   static const String debtPaidTemplate =
@@ -1417,7 +1421,11 @@ class AppStore {
     try {
       var snapshot = await _agentRef.get().timeout(const Duration(seconds: 10));
       var data = snapshot.value;
-      if (data == null || data is! Map) return;
+      if (data == null) {
+        _remoteLoadConfirmed = true;
+        return;
+      }
+      if (data is! Map) return;
       var agentData = Map<String, dynamic>.from(data);
 
       // عند بداية التطبيق قد يكون sasUsername غير محمل بعد، فيقرأ AppStore
@@ -1435,15 +1443,20 @@ class AppStore {
           sasUsername.trim().isEmpty &&
           discoveredUsername.isNotEmpty) {
         sasUsername = discoveredUsername;
-        final currentSnapshot = await FirebaseDatabase.instance
-            .ref('agents/${uid}_$discoveredUsername')
-            .get()
-            .timeout(const Duration(seconds: 10));
-        final currentData = currentSnapshot.value;
-        if (currentData is Map) {
-          snapshot = currentSnapshot;
-          data = snapshot.value;
-          agentData = Map<String, dynamic>.from(data as Map);
+        // المسار القديم اختياري: فشل قراءته يجب ألا يلغي تحميل agents/{uid}.
+        try {
+          final currentSnapshot = await FirebaseDatabase.instance
+              .ref('agents/${uid}_$discoveredUsername')
+              .get()
+              .timeout(const Duration(seconds: 10));
+          final currentData = currentSnapshot.value;
+          if (currentData is Map) {
+            snapshot = currentSnapshot;
+            data = snapshot.value;
+            agentData = Map<String, dynamic>.from(data as Map);
+          }
+        } catch (e) {
+          debugPrint('Legacy agent path unavailable: $e');
         }
       }
       final p = await SharedPreferences.getInstance();
@@ -1692,6 +1705,7 @@ class AppStore {
       await _persistDailyTaskEventsLocally(p);
       applyAccountingActivationsPayload(agentData[accountingActivationsKey]);
       await _persistAccountingLocally(p);
+      _remoteLoadConfirmed = true;
     } catch (e) {
       debugPrint('Firebase pull failed: $e');
       final p = await SharedPreferences.getInstance();
@@ -1868,6 +1882,7 @@ class AppStore {
     subscriptionEndsAt = null;
     subscriptionStatus = 'inactive';
     _loadedUid = null;
+    _remoteLoadConfirmed = false;
 
     if (!clearStorage) return;
 
@@ -1903,6 +1918,10 @@ class AppStore {
       'web_proxy_url',
       'proxy_url',
       'render_proxy_url',
+      'ftth_sas_base_url',
+      'ftth_sas_username',
+      'ftth_sas_password',
+      'render_whatsapp_send_logs',
       'subscribersRevision',
       'packagesRevision',
       'dailyTaskEvents',
@@ -1932,12 +1951,61 @@ class AppStore {
     }
     await p.remove(_localAccountingKey(accountingActivationsKey));
     await p.remove(_localAccountingKey('accountingBalanceAdditions'));
+    const secureStorage = FlutterSecureStorage();
+    for (final key in const ['sas_manager_password_sec', 'ftth_sas_password']) {
+      try {
+        await secureStorage.delete(key: key);
+      } catch (e) {
+        debugPrint('Could not clear secure value: $e');
+      }
+    }
   }
 
-  static Future<void> load() async {
+  /// البيانات القديمة بلا مالك مسجل تُنسب للحساب إذا طابق بريدها فقط.
+  static bool isLocalDataOwnedBy({
+    required String? storedOwnerUid,
+    required String? storedEmail,
+    required String uid,
+    required String? email,
+  }) {
+    final owner = storedOwnerUid?.trim() ?? '';
+    if (owner.isNotEmpty) return owner == uid;
+    final stored = storedEmail?.trim().toLowerCase() ?? '';
+    final current = email?.trim().toLowerCase() ?? '';
+    return stored.isNotEmpty && stored == current;
+  }
+
+  static Future<void> claimLocalDataFor({
+    required String uid,
+    String? email,
+  }) async {
+    final p = await SharedPreferences.getInstance();
+    final owned = isLocalDataOwnedBy(
+      storedOwnerUid: p.getString(localDataOwnerKey),
+      storedEmail: p.getString('agentEmail'),
+      uid: uid,
+      email: email,
+    );
+    if (!owned) await clearForAccountSwitch(clearStorage: true);
+    await p.setString(localDataOwnerKey, uid);
+  }
+
+  static Future<void> load() {
+    final run = _loadQueue.then((_) => _loadNow());
+    _loadQueue = run.catchError((Object e) {
+      debugPrint('AppStore load failed: $e');
+    });
+    return run;
+  }
+
+  static Future<void> _loadNow() async {
     final uid = _uid;
     if (uid != null && _loadedUid != uid) {
       await clearForAccountSwitch();
+      await claimLocalDataFor(
+        uid: uid,
+        email: FirebaseAuth.instance.currentUser?.email,
+      );
       _loadedUid = uid;
     } else if (uid == null) {
       _loadedUid = null;
@@ -2017,6 +2085,11 @@ class AppStore {
       _migrateNearExpiryTemplate();
       await p.setString('messageTemplates', jsonEncode(messageTemplates));
       await _loadSubscribers(p);
+    }
+
+    if (!_remoteLoadConfirmed) {
+      debugPrint('Firebase data not confirmed; skipping cloud sync on load');
+      return;
     }
 
     final needsMonthKeyMigration = subscribers.any(
@@ -2562,7 +2635,11 @@ class AppStore {
     }
     final p = await SharedPreferences.getInstance();
     rolloverMonthlyBalances();
-    subscribersRevision = DateTime.now().millisecondsSinceEpoch;
+    // رفع الرقم قبل تأكيد التحميل يجعل بيانات الجهاز تتغلب على الأحدث سحابياً.
+    final canAdvanceRevision = !_isLoggedIn || _remoteLoadConfirmed;
+    if (canAdvanceRevision) {
+      subscribersRevision = DateTime.now().millisecondsSinceEpoch;
+    }
     refreshSubscriptionStatus();
 
     if (agentName.trim().isEmpty) {
@@ -2580,7 +2657,9 @@ class AppStore {
     await p.setDouble('balance', balance);
     await p.setInt('nextReceiptNumber', nextReceiptNumber);
     await p.setInt(subscribersRevisionKey, subscribersRevision);
-    packagesRevision = DateTime.now().millisecondsSinceEpoch;
+    if (canAdvanceRevision) {
+      packagesRevision = DateTime.now().millisecondsSinceEpoch;
+    }
     await p.setInt(packagesRevisionKey, packagesRevision);
     if (lastSasSync != null) {
       await p.setString('lastSasSync', lastSasSync!.toIso8601String());
@@ -2629,6 +2708,10 @@ class AppStore {
     await _persistAccountingLocally(p);
 
     if (!_isLoggedIn) return;
+    if (!_remoteLoadConfirmed) {
+      lastSaveSyncError = 'لم يكتمل تحميل بيانات الحساب من السحابة';
+      return;
+    }
 
     try {
       final ref = _agentRef;
@@ -2714,7 +2797,10 @@ class AppStore {
       final ref = _agentRef;
       realtimeListener = ref.onValue.listen((event) async {
         final data = event.snapshot.value;
-        if (data == null) return;
+        if (data == null) {
+          _remoteLoadConfirmed = true;
+          return;
+        }
         try {
           final agentData = Map<String, dynamic>.from(data as Map);
           final p = await SharedPreferences.getInstance();
@@ -2850,6 +2936,7 @@ class AppStore {
             agentData[accountingActivationsKey],
           );
           await _persistAccountingLocally(p);
+          _remoteLoadConfirmed = true;
           debugPrint('Realtime agent data updated');
         } catch (e) {
           debugPrint('Realtime update error: $e');
@@ -2875,6 +2962,9 @@ class AppStore {
   static Future<void> _deleteSubscribersWhere(
     bool Function(Subscriber subscriber) shouldDelete,
   ) async {
+    if (_isLoggedIn && !_remoteLoadConfirmed) {
+      throw StateError('لم يكتمل تحميل بيانات الحساب، أعد المحاولة بعد المزامنة');
+    }
     final previousSubscribers = List<Subscriber>.from(subscribers);
     subscribers.removeWhere(shouldDelete);
     if (subscribers.length == previousSubscribers.length) return;

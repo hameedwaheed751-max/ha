@@ -168,9 +168,13 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _loadAgentData() async {
     try {
       // إعادة تحميل البيانات من Firebase (إذا المستخدم مسجل)
-      await AppStore.load().timeout(const Duration(seconds: 8));
+      try {
+        await AppStore.load().timeout(const Duration(seconds: 8));
+      } catch (e) {
+        debugPrint('Agent data load did not finish: $e');
+      }
 
-      // بدء المزامنة اللحظية
+      // المزامنة اللحظية تكمل التأكيد إذا تأخر التحميل الأول
       AppStore.startRealtimeSync();
       AppStore.startChatSync();
 
