@@ -445,7 +445,10 @@ test('Firebase authorization lookup failures return 503', async () => {
 test('CORS allows the configured app origin and rejects unconfigured origins', async () => {
   const temp = createTempStore();
   const app = createApp({
-    config: testConfig(temp.filePath),
+    config: testConfig(temp.filePath, {
+      CORS_ALLOWED_ORIGINS:
+        'http://localhost:60518,https://wakeel-unel.onrender.com',
+    }),
     verifyIdToken: async () => ({ uid: 'uid-agent-a' }),
     authorizeAccount: async () => true,
   });
@@ -465,6 +468,28 @@ test('CORS allows the configured app origin and rejects unconfigured origins', a
         'http://localhost:60518',
       );
       assert.match(allowed.headers.get('access-control-allow-headers'), /Authorization/i);
+
+      const renderPreflight = await fetch(`${baseUrl}/api/waha/send`, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://wakeel-unel.onrender.com',
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers':
+            'authorization,content-type,idempotency-key',
+        },
+      });
+      assert.equal(renderPreflight.status, 204);
+      assert.equal(
+        renderPreflight.headers.get('access-control-allow-origin'),
+        'https://wakeel-unel.onrender.com',
+      );
+      assert.match(renderPreflight.headers.get('access-control-allow-methods'), /POST/i);
+      for (const header of ['Authorization', 'Content-Type', 'Idempotency-Key']) {
+        assert.match(
+          renderPreflight.headers.get('access-control-allow-headers'),
+          new RegExp(header, 'i'),
+        );
+      }
 
       const denied = await fetch(`${baseUrl}/api/waha/session/start`, {
         method: 'OPTIONS',

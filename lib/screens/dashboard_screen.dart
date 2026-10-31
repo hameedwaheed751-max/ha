@@ -53,6 +53,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   DateTime _dashboardDate = DateTime.now();
   Timer? _subscriptionGuardTimer;
   Timer? _monthlyRolloverTimer;
+  Timer? _expiryNotificationTimer;
   bool _handlingExpiredLockout = false;
 
   @override
@@ -64,10 +65,14 @@ class _DashboardScreenState extends State<DashboardScreen>
       const Duration(minutes: 1),
       (_) => _handleMonthlyRollover(),
     );
+    _expiryNotificationTimer = Timer.periodic(
+      AutoNotificationService.expiryCheckInterval,
+      (_) => unawaited(AutoNotificationService.runDailyExpiryAutomation()),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _loadSasWallet();
-      AutoNotificationService.runDailyExpiryAutomation();
+      unawaited(AutoNotificationService.runDailyExpiryAutomation());
       _handleSubscriptionGuardTick();
       _handleMonthlyRollover();
     });
@@ -78,12 +83,14 @@ class _DashboardScreenState extends State<DashboardScreen>
     WidgetsBinding.instance.removeObserver(this);
     _subscriptionGuardTimer?.cancel();
     _monthlyRolloverTimer?.cancel();
+    _expiryNotificationTimer?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      unawaited(AutoNotificationService.runDailyExpiryAutomation());
       _handleSubscriptionGuardTick();
       _handleMonthlyRollover();
     }
@@ -3873,13 +3880,15 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       return;
     }
 
-    final result = await WhatsAppNotificationDispatcher(
-      provider: WhatsAppNotificationDispatcher.configuredProvider,
-    ).notifyDebtReminder(
-      s,
-      remainingBalance: s.remaining,
-      eventId: 'manual_${DateTime.now().toUtc().toIso8601String().substring(0, 10)}_${s.subscriberId}_${s.remaining.toStringAsFixed(0)}',
-    );
+    final result =
+        await WhatsAppNotificationDispatcher(
+          provider: WhatsAppNotificationDispatcher.configuredProvider,
+        ).notifyDebtReminder(
+          s,
+          remainingBalance: s.remaining,
+          eventId:
+              'manual_${DateTime.now().toUtc().toIso8601String().substring(0, 10)}_${s.subscriberId}_${s.remaining.toStringAsFixed(0)}',
+        );
 
     if (!mounted) return;
     if (!result.success) {

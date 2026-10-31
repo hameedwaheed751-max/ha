@@ -13,6 +13,8 @@ This gateway is separate from Render's existing `server.js` and from Firebase Cl
 
 Use a new key after revoking any exposed key. Put secrets in an untracked `.env` or secret manager, not in Compose literals or Git. The gateway's port must stay loopback-bound for local testing; in a permanent deployment, place only the gateway behind HTTPS and keep WAHA private on the Docker network.
 
+The production Compose file appends `https://wakeel-unel.onrender.com` to the exact origin(s) supplied in `NETAGENT_WEB_ORIGIN`. Preserve the existing value in the VPS `/opt/gateway/.env`; it may contain a comma-separated origin list. Redeploy the gateway with `docker compose -f compose.production.yaml up -d gateway` after updating the Compose file.
+
 ## Security and delivery semantics
 
 The gateway accepts only a valid Firebase ID token for an enabled Firebase Auth user. The trusted administrator UID used by NetAgent's `UserRoleService` can manage only their own UID-derived session and does not receive access to agent records. Other users must have `agents/{uid}/profile` with `role=agent` and `status=active`, plus an active, unexpired subscription at `agents/{uid}/subscription`. Every identity gets a deterministic opaque session name derived server-side from the verified UID. Session status, creation, QR, reconnect, logout, and sends all use that same identity-derived session; client-provided `uid`, `agentKey`, or `session` values are ignored.

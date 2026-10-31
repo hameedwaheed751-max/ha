@@ -17,7 +17,7 @@ services:
       WAHA_API_KEY: "${WAHA_GATEWAY_API_KEY:?Set the existing WAHA API key in /opt/gateway/.env}"
       WAHA_IDEMPOTENCY_FILE: /app/data/idempotency.json
       WAHA_TIMEOUT_MS: "15000"
-      CORS_ALLOWED_ORIGINS: "${NETAGENT_WEB_ORIGIN:?Set the exact NetAgent web origin in /opt/gateway/.env}"
+      CORS_ALLOWED_ORIGINS: "${NETAGENT_WEB_ORIGIN:?Set the existing exact NetAgent web origin(s) in /opt/gateway/.env},https://wakeel-unel.onrender.com"
       CORS_ALLOW_LOCALHOST_ORIGINS: "false"
     volumes:
       - ./gateway/secrets/firebase-service-account.json:/run/secrets/firebase-service-account.json:ro

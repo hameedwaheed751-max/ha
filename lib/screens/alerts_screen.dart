@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models.dart';
+import '../services/auto_notification_service.dart';
 import '../services/notification_export_service.dart';
 import '../services/render_whatsapp_service.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
@@ -67,9 +68,14 @@ class _AlertsScreenState extends State<AlertsScreen> {
   List<Subscriber> _recipients(String type) {
     final now = DateTime.now();
     return AppStore.subscribers.where((s) {
-      final days = s.endDate.difference(now).inDays;
       if (type == 'debt') return s.remaining > 0;
-      if (type == 'threeDays') return days >= 0 && days <= 3;
+      if (type == 'threeDays') {
+        final remaining = s.endDate.difference(now);
+        return s.active &&
+            !s.disabled &&
+            remaining > Duration.zero &&
+            remaining <= const Duration(hours: 72);
+      }
       if (type == 'activated') return !s.expired && !s.disabled;
       return true;
     }).toList();
@@ -155,11 +161,9 @@ class _AlertsScreenState extends State<AlertsScreen> {
           late final RenderSingleWhatsAppResult single;
           if (type == 'threeDays') {
             final dispatched =
-                await dispatcher.notifySubscriptionExpiresIn3Days(
+                await AutoNotificationService.sendNearExpiryManually(
                   s,
                   template: rendered,
-                  eventId:
-                      '${notificationRunDay}_${s.subscriberId}_${s.endDate.millisecondsSinceEpoch}',
                 );
             single = RenderSingleWhatsAppResult(
               success: dispatched.success,
