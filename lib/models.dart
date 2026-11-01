@@ -94,7 +94,13 @@ class InvoiceRecord {
     this.paidAmountSnapshot,
     this.remainingAmountSnapshot,
     this.packageSnapshot,
-  });
+    bool cancelled = false,
+  }) : _cancelled = cancelled;
+
+  bool? _cancelled;
+
+  bool get cancelled => _cancelled ?? false;
+  set cancelled(bool value) => _cancelled = value;
 
   int receiptNumber;
   double amount;
@@ -118,6 +124,7 @@ class InvoiceRecord {
     if (remainingAmountSnapshot != null)
       'remainingAmountSnapshot': remainingAmountSnapshot,
     if (packageSnapshot != null) 'packageSnapshot': packageSnapshot,
+    if (cancelled) 'cancelled': true,
   };
 
   factory InvoiceRecord.fromJson(Map<String, dynamic> j) {
@@ -138,6 +145,7 @@ class InvoiceRecord {
       paidAmountSnapshot: optionalDouble(j['paidAmountSnapshot']),
       remainingAmountSnapshot: optionalDouble(j['remainingAmountSnapshot']),
       packageSnapshot: j['packageSnapshot']?.toString(),
+      cancelled: j['cancelled'] == true,
     );
   }
 }
@@ -152,7 +160,9 @@ class DailyTaskEvent {
     this.remainingAfter = 0,
     this.note = '',
     String category = '',
-  }) : _category = category;
+    String cancelReason = '',
+  }) : _category = category,
+       _cancelReason = cancelReason;
 
   String type;
   String subscriberUser;
@@ -165,6 +175,13 @@ class DailyTaskEvent {
 
   String get category => _category ?? '';
   set category(String value) => _category = value;
+
+  String? _cancelReason;
+
+  String get cancelReason => _cancelReason ?? '';
+  set cancelReason(String value) => _cancelReason = value;
+
+  bool get isCancelled => cancelReason.isNotEmpty;
 
   static const manualDebtCategory = 'manual_debt';
   static const purchaseCategory = 'purchase';
@@ -190,6 +207,7 @@ class DailyTaskEvent {
     'remainingAfter': remainingAfter,
     'note': note,
     if (category.isNotEmpty) 'category': category,
+    if (cancelReason.isNotEmpty) 'cancelReason': cancelReason,
   };
 
   factory DailyTaskEvent.fromJson(Map<String, dynamic> j) => DailyTaskEvent(
@@ -201,6 +219,7 @@ class DailyTaskEvent {
     remainingAfter: (j['remainingAfter'] ?? 0).toDouble(),
     note: (j['note'] ?? '').toString(),
     category: (j['category'] ?? '').toString(),
+    cancelReason: (j['cancelReason'] ?? '').toString(),
   );
 
   static List<DailyTaskEvent> activationSettlement({
@@ -470,6 +489,7 @@ class DailyTaskSummary {
   static double outstandingAddedDebt(Iterable<DailyTaskEvent> events) {
     final operations = <int, List<DailyTaskEvent>>{};
     for (final event in events) {
+      if (event.isCancelled) continue;
       operations
           .putIfAbsent(event.at.microsecondsSinceEpoch, () => [])
           .add(event);
@@ -513,6 +533,7 @@ class DailyTaskSummary {
     final paymentCaseKeys = <String>{};
 
     for (final event in events) {
+      if (event.isCancelled) continue;
       final amount = amountOf?.call(event) ?? event.amount;
       if (event.type == 'activation') {
         activationCases++;
@@ -650,8 +671,9 @@ class Subscriber {
   double get paymentsTotal =>
       payments.fold<double>(0, (sum, p) => sum + p.amount);
 
-  double get invoicesTotal =>
-      invoices.fold<double>(0, (sum, inv) => sum + inv.amount);
+  double get invoicesTotal => invoices
+      .where((inv) => !inv.cancelled)
+      .fold<double>(0, (sum, inv) => sum + inv.amount);
 
   double get currentMonthRemaining =>
       (price - paid).clamp(0, double.infinity).toDouble();
@@ -930,7 +952,7 @@ class Subscriber {
 
   Map<String, double> get monthlyInvoiceTotals {
     final out = <String, double>{};
-    for (final inv in invoices) {
+    for (final inv in invoices.where((inv) => !inv.cancelled)) {
       final key = inv.monthKey.isNotEmpty ? inv.monthKey : monthKeyOf(inv.at);
       out[key] = (out[key] ?? 0) + inv.amount;
     }
@@ -2397,7 +2419,13 @@ class AppStore {
       final event = DailyTaskEvent.fromJson(
         Map<String, dynamic>.from(rawEvent),
       );
-      eventsByKey[_dailyTaskEventKey(event)] = event;
+      final key = _dailyTaskEventKey(event);
+      // قد تصل نسخة سحابية أقدم أثناء الحفظ، والإلغاء لا يُعكس بعد تسجيله.
+      final current = eventsByKey[key];
+      if (current != null && current.isCancelled && !event.isCancelled) {
+        event.cancelReason = current.cancelReason;
+      }
+      eventsByKey[key] = event;
     }
     dailyTaskEvents
       ..clear()
@@ -3060,6 +3088,195 @@ class AppStore {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
+  /// يلغي دين أو مشتريات مضافة يدوياً، ويحتفظ بالعملية ظاهرة مع سبب الإلغاء.
+  static Future<void> cancelManualEntry(
+    Subscriber subscriber, {
+    required DateTime at,
+    required String category,
+    required String reason,
+    DateTime? now,
+  }) async {
+    final text = reason.trim();
+    if (text.isEmpty) throw StateError('اكتب سبب الإلغاء');
+    final user = subscriber.user.trim().toLowerCase();
+    final entries = dailyTaskEvents
+        .where(
+          (event) =>
+              !event.isCancelled &&
+              event.category == category &&
+              event.at.isAtSameMomentAs(at) &&
+              event.subscriberUser.trim().toLowerCase() == user,
+        )
+        .toList();
+    if (entries.isEmpty) throw StateError('العملية غير موجودة أو ملغاة سابقاً');
+
+    final stamp = now ?? DateTime.now();
+    subscriber.rolloverToMonth(stamp);
+    final unpaid = entries
+        .where((event) => event.type == 'debt_added')
+        .fold<double>(0, (total, event) => total + event.amount);
+    final collected = entries
+        .where((event) => event.type != 'debt_added')
+        .fold<double>(0, (total, event) => total + event.amount);
+    if (unpaid > subscriber.remaining + 0.0001) {
+      throw StateError(
+        'سدد المشترك جزءاً من هذا المبلغ، فلا يمكن إلغاؤه قبل تصحيح الدفعة',
+      );
+    }
+
+    final fromCarried = min(unpaid, subscriber.carriedDebt);
+    subscriber.carriedDebt -= fromCarried;
+    subscriber.price -= unpaid - fromCarried;
+    if (collected > 0.0001) {
+      subscriber.payments.add(
+        PaymentRecord(
+          amount: -collected,
+          at: stamp,
+          note: 'إلغاء عملية: $text',
+          billingMonthKey: subscriber.billingMonthKey,
+        ),
+      );
+      for (final invoice in subscriber.invoices) {
+        if (invoice.at.isAtSameMomentAs(at) &&
+            (invoice.amount - collected).abs() <= 0.0001) {
+          invoice.cancelled = true;
+        }
+      }
+    }
+    subscriber.normalizeDebtFields();
+    for (final event in entries) {
+      event.cancelReason = text;
+    }
+    await save();
+  }
+
+  static List<DailyTaskEvent> _cancellablePaymentEvents(
+    Subscriber subscriber,
+    DateTime at,
+  ) {
+    final user = subscriber.user.trim().toLowerCase();
+    final operation = dailyTaskEvents.where(
+      (event) =>
+          event.at.isAtSameMomentAs(at) &&
+          event.subscriberUser.trim().toLowerCase() == user,
+    );
+    // واصل سُجل مع مبلغ جديد جزء من ذلك المبلغ، وليس تسديداً مستقلاً.
+    final hasCharge = operation.any(
+      (event) =>
+          event.type == 'debt_added' ||
+          event.type == 'activation' ||
+          (event.type == DailyTaskEvent.debtEditType && event.amount.abs() > 0),
+    );
+    if (hasCharge) return const [];
+    final payments = operation
+        .where(
+          (event) =>
+              !event.isCancelled &&
+              event.category.isEmpty &&
+              (event.type == 'debt_payment' ||
+                  event.type == DailyTaskEvent.debtEntryCollectionType),
+        )
+        .toList();
+    final total = payments.fold<double>(0, (sum, event) => sum + event.amount);
+    final recorded = subscriber.payments.any(
+      (payment) =>
+          payment.at.isAtSameMomentAs(at) &&
+          (payment.amount - total).abs() <= 0.0001,
+    );
+    return recorded ? payments : const [];
+  }
+
+  static bool canCancelPayment(Subscriber subscriber, DailyTaskEvent event) =>
+      _cancellablePaymentEvents(subscriber, event.at).isNotEmpty;
+
+  /// يلغي عملية تسديد ويعيد مبلغها إلى الدين الذي سددته، مع إبقائها ظاهرة.
+  static Future<double> cancelPayment(
+    Subscriber subscriber, {
+    required DateTime at,
+    required String reason,
+    DateTime? now,
+  }) async {
+    final text = reason.trim();
+    if (text.isEmpty) throw StateError('اكتب سبب الإلغاء');
+    final payments = _cancellablePaymentEvents(subscriber, at);
+    if (payments.isEmpty) {
+      throw StateError('لا يمكن إلغاء هذه العملية من هنا');
+    }
+
+    final stamp = now ?? DateTime.now();
+    subscriber.rolloverToMonth(stamp);
+    final total = payments.fold<double>(0, (sum, event) => sum + event.amount);
+    final toCurrentCharge = Subscriber.monthKeyOf(at) == subscriber.billingMonthKey
+        ? payments
+              .where(
+                (event) =>
+                    event.type == DailyTaskEvent.debtEntryCollectionType,
+              )
+              .fold<double>(0, (sum, event) => sum + event.amount)
+        : 0.0;
+    final returnedToCharge = min(toCurrentCharge, subscriber.paid);
+    subscriber.paid -= returnedToCharge;
+    subscriber.carriedDebt += total - returnedToCharge;
+    subscriber.payments.add(
+      PaymentRecord(
+        amount: -total,
+        at: stamp,
+        note: 'إلغاء تسديد: $text',
+        billingMonthKey: subscriber.billingMonthKey,
+      ),
+    );
+    for (final invoice in subscriber.invoices) {
+      if (invoice.at.isAtSameMomentAs(at) &&
+          (invoice.amount - total).abs() <= 0.0001) {
+        invoice.cancelled = true;
+      }
+    }
+    subscriber.normalizeDebtFields();
+    for (final event in payments) {
+      event.cancelReason = text;
+    }
+    await save();
+    return total;
+  }
+
+  /// عمر الدين من أقدم مبلغ ما زال غير مسدد، بافتراض أن التسديد يبدأ بالأقدم.
+  static ({DateTime? since, bool hasSubscription, bool hasPurchases})
+  debtBreakdown(Subscriber subscriber) {
+    final user = subscriber.user.trim().toLowerCase();
+    final added =
+        dailyTaskEvents
+            .where(
+              (event) =>
+                  event.type == 'debt_added' &&
+                  !event.isCancelled &&
+                  event.amount > 0 &&
+                  event.subscriberUser.trim().toLowerCase() == user,
+            )
+            .toList()
+          ..sort((a, b) => b.at.compareTo(a.at));
+
+    var uncovered = subscriber.remaining;
+    DateTime? since;
+    var hasSubscription = false;
+    var hasPurchases = false;
+    for (final event in added) {
+      if (uncovered <= 0.0001) break;
+      uncovered -= event.amount;
+      since = event.at;
+      if (event.category == DailyTaskEvent.purchaseCategory) {
+        hasPurchases = true;
+      } else {
+        hasSubscription = true;
+      }
+    }
+    if (since == null || uncovered > 0.0001) hasSubscription = true;
+    return (
+      since: since,
+      hasSubscription: hasSubscription,
+      hasPurchases: hasPurchases,
+    );
+  }
+
   static double suggestedActivationPrice(Subscriber subscriber) {
     if (subscriber.currentMonthRemaining > 0.0001) {
       return subscriber.currentMonthRemaining;
@@ -3105,7 +3322,8 @@ class AppStore {
 
     DailyTaskEvent? latestFinancialEvent;
     for (final event in dailyTaskEvents) {
-      if (event.subscriberUser.trim().toLowerCase() != user ||
+      if (event.isCancelled ||
+          event.subscriberUser.trim().toLowerCase() != user ||
           (event.type != 'activation' &&
               event.type != 'debt_added' &&
               event.type != 'debt_payment' &&

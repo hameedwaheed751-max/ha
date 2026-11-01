@@ -8,60 +8,36 @@ import '../models.dart';
 import '../services/subscriber_financial_ledger.dart';
 import 'add_subscriber_screen.dart';
 import 'dashboard_widgets.dart';
+import 'manual_entry_flow.dart';
 import 'receipt_screen.dart';
 
-typedef ManualEntryResult = ({
-  String category,
-  double amount,
-  double paid,
-  String description,
-});
+class CancelEntryDialog extends StatefulWidget {
+  const CancelEntryDialog({
+    super.key,
+    required this.description,
+    required this.amount,
+  });
 
-/// تملك النافذة حقولها حتى تبقى صالحة طوال حركة الإغلاق.
-class ManualEntryDialog extends StatefulWidget {
-  const ManualEntryDialog({super.key, required this.subscriberName});
-
-  final String subscriberName;
+  final String description;
+  final double amount;
 
   @override
-  State<ManualEntryDialog> createState() => _ManualEntryDialogState();
+  State<CancelEntryDialog> createState() => _CancelEntryDialogState();
 }
 
-class _ManualEntryDialogState extends State<ManualEntryDialog> {
+class _CancelEntryDialogState extends State<CancelEntryDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _descriptionController = TextEditingController();
-  final _amountController = TextEditingController();
-  final _paidController = TextEditingController(text: '0');
-  String _category = DailyTaskEvent.manualDebtCategory;
-
-  bool get _isPurchase => _category == DailyTaskEvent.purchaseCategory;
+  final _reasonController = TextEditingController();
 
   @override
   void dispose() {
-    _descriptionController.dispose();
-    _amountController.dispose();
-    _paidController.dispose();
+    _reasonController.dispose();
     super.dispose();
-  }
-
-  double? _parseAmount(String raw) {
-    var normalized = raw.trim().replaceAll(',', '').replaceAll('٬', '');
-    const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
-    for (var digit = 0; digit < arabicDigits.length; digit++) {
-      normalized = normalized.replaceAll(arabicDigits[digit], '$digit');
-    }
-    return double.tryParse(normalized);
   }
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    final ManualEntryResult result = (
-      category: _category,
-      amount: _parseAmount(_amountController.text)!,
-      paid: _isPurchase ? _parseAmount(_paidController.text)! : 0.0,
-      description: _descriptionController.text.trim(),
-    );
-    Navigator.pop(context, result);
+    Navigator.pop(context, _reasonController.text.trim());
   }
 
   @override
@@ -70,96 +46,41 @@ class _ManualEntryDialogState extends State<ManualEntryDialog> {
       textDirection: TextDirection.rtl,
       child: AlertDialog(
         scrollable: true,
-        title: Text('إضافة دين أو مشتريات - ${widget.subscriberName}'),
+        title: const Text('إلغاء العملية'),
         content: Form(
           key: _formKey,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(
-                    value: DailyTaskEvent.manualDebtCategory,
-                    label: Text('دين مضاف'),
-                  ),
-                  ButtonSegment(
-                    value: DailyTaskEvent.purchaseCategory,
-                    label: Text('مشتريات'),
-                  ),
-                ],
-                selected: {_category},
-                showSelectedIcon: false,
-                onSelectionChanged: (selection) =>
-                    setState(() => _category = selection.first),
+              Text(
+                '${widget.description} - ${widget.amount.toStringAsFixed(0)} د.ع',
               ),
+              const SizedBox(height: 4),
+              const Text('تبقى العملية ظاهرة بعلامة ملغاة، ويعود الدين كما كان.'),
               const SizedBox(height: 12),
               TextFormField(
-                controller: _descriptionController,
+                controller: _reasonController,
                 autofocus: true,
                 maxLength: 200,
                 maxLines: 2,
                 decoration: const InputDecoration(
-                  labelText: 'الوصف',
-                  hintText: 'مثال: راوتر أو كيبل أو مبلغ سابق',
+                  labelText: 'سبب الإلغاء',
                   border: OutlineInputBorder(),
                 ),
                 validator: (value) => value == null || value.trim().isEmpty
-                    ? 'اكتب الوصف'
+                    ? 'اكتب سبب الإلغاء'
                     : null,
               ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _amountController,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: const InputDecoration(
-                  labelText: 'المبلغ',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  final amount = _parseAmount(value ?? '');
-                  if (amount == null || !amount.isFinite || amount <= 0) {
-                    return 'أدخل مبلغاً أكبر من صفر';
-                  }
-                  return null;
-                },
-              ),
-              if (_isPurchase) ...[
-                const SizedBox(height: 10),
-                TextFormField(
-                  controller: _paidController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: 'الواصل منه',
-                    helperText: 'صفر يعني أن المبلغ كله دين',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    final paid = _parseAmount(value ?? '');
-                    final amount = _parseAmount(_amountController.text);
-                    if (paid == null ||
-                        !paid.isFinite ||
-                        paid < 0 ||
-                        (amount != null && paid > amount)) {
-                      return 'الواصل يجب أن يكون بين صفر والمبلغ';
-                    }
-                    return null;
-                  },
-                ),
-              ],
             ],
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('إلغاء'),
+            child: const Text('رجوع'),
           ),
-          FilledButton(onPressed: _submit, child: const Text('حفظ')),
+          FilledButton(onPressed: _submit, child: const Text('إلغاء العملية')),
         ],
       ),
     );
@@ -544,102 +465,8 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
   }
 
   Future<void> _addManualEntry() async {
-    final entry = await showDialog<ManualEntryResult>(
-      context: context,
-      builder: (_) => ManualEntryDialog(subscriberName: s.name),
-    );
-    if (entry == null) return;
-
-    final now = DateTime.now();
-    s.rolloverToMonth(now);
-    // يُضاف خارج مبلغ الاشتراك حتى لا يدخل في مبيعات الاشتراكات وربحها.
-    s.carriedDebt += entry.amount;
-    final allocation = s.applyPayment(
-      entry.paid,
-      at: now,
-      note: entry.description,
-    );
-    final collected = allocation.totalApplied;
-    final unpaid = entry.amount - collected;
-
-    int? receiptNumber;
-    if (collected > 0.0001) {
-      receiptNumber = await AppStore.issueReceiptNumber(persist: false);
-      s.registerInvoiceFromPayment(
-        receiptNumber: receiptNumber,
-        amount: collected,
-        at: now,
-        note: entry.description,
-      );
-      s.paymentDate = f(now);
-      await AppStore.addDailyTaskEvent(
-        DailyTaskEvent(
-          type: DailyTaskEvent.debtEntryCollectionType,
-          subscriberUser: s.user,
-          subscriberName: s.name,
-          at: now,
-          amount: collected,
-          remainingAfter: s.remaining,
-          note: entry.description,
-          category: entry.category,
-        ),
-        persist: false,
-      );
-    }
-    if (unpaid > 0.0001) {
-      await AppStore.addDailyTaskEvent(
-        DailyTaskEvent(
-          type: 'debt_added',
-          subscriberUser: s.user,
-          subscriberName: s.name,
-          at: now,
-          amount: unpaid,
-          remainingAfter: s.remaining,
-          note: entry.description,
-          category: entry.category,
-        ),
-        persist: false,
-      );
-    }
-    await AppStore.save();
-
-    final stamp = now.toUtc().toIso8601String();
-    try {
-      final ledger = SubscriberFinancialLedger();
-      await ledger.addTransaction(
-        subscriberId: s.subscriberId,
-        date: now,
-        type: FinancialTransactionType.debt,
-        amount: entry.amount,
-        referenceId: 'manual-entry:${s.subscriberId}:$stamp',
-        note: entry.description,
-      );
-      if (receiptNumber != null) {
-        await ledger.addTransaction(
-          subscriberId: s.subscriberId,
-          date: now,
-          type: FinancialTransactionType.payment,
-          amount: collected,
-          referenceId: 'payment-receipt:$receiptNumber',
-          note: entry.description,
-        );
-      }
-    } catch (error) {
-      debugPrint('Financial ledger write failed: $error');
-    }
-
-    if (!mounted) return;
-    setState(() {});
-    final syncWarning = AppStore.lastSaveSyncError == null
-        ? ''
-        : ' | حُفظ محلياً وتعذرت المزامنة';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'تم الحفظ | المتبقي ${s.remaining.toStringAsFixed(0)} د.ع$syncWarning',
-        ),
-      ),
-    );
+    await recordManualEntry(context, s);
+    if (mounted) setState(() {});
   }
 
   Widget _addEntryButton() {
@@ -673,6 +500,12 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
   }
 
   Widget _manualEntriesSection(List<DailyTaskEvent> entries) {
+    final operations = <int, List<DailyTaskEvent>>{};
+    for (final event in entries) {
+      operations
+          .putIfAbsent(event.at.microsecondsSinceEpoch, () => [])
+          .add(event);
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -686,35 +519,225 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
             padding: EdgeInsets.symmetric(vertical: 12),
             child: Text('لا توجد ديون مضافة أو مشتريات مسجلة.'),
           ),
-        ...entries.map((event) {
-          final isPurchase = event.category == DailyTaskEvent.purchaseCategory;
-          final isCollected = event.type != 'debt_added';
-          final color = isCollected ? Colors.green : Colors.red;
-          final title = isPurchase
-              ? (isCollected ? 'مشتريات - واصل' : 'مشتريات - دين')
-              : 'دين مضاف';
-          return Card(
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: color.withValues(alpha: 0.12),
-                child: Icon(
-                  isPurchase
-                      ? Icons.shopping_bag_outlined
-                      : Icons.add_card_outlined,
-                  color: color,
-                ),
-              ),
-              title: Text(title),
-              subtitle: Text('${f(event.at)}\n${event.note.trim()}'),
-              isThreeLine: true,
-              trailing: Text(
-                '${event.amount.toStringAsFixed(0)} د.ع',
-                style: TextStyle(color: color, fontWeight: FontWeight.w800),
+        ...operations.values.map(_manualEntryCard),
+      ],
+    );
+  }
+
+  Widget _manualEntryCard(List<DailyTaskEvent> operation) {
+    final first = operation.first;
+    final isPurchase = first.category == DailyTaskEvent.purchaseCategory;
+    final isCancelled = operation.any((event) => event.isCancelled);
+    final unpaid = operation
+        .where((event) => event.type == 'debt_added')
+        .fold<double>(0, (sum, event) => sum + event.amount);
+    final collected = operation
+        .where((event) => event.type != 'debt_added')
+        .fold<double>(0, (sum, event) => sum + event.amount);
+    final total = unpaid + collected;
+    final cancelReason = operation
+        .map((event) => event.cancelReason)
+        .firstWhere((reason) => reason.isNotEmpty, orElse: () => '');
+    final color = isCancelled
+        ? Colors.blueGrey
+        : unpaid > 0.0001
+        ? Colors.red
+        : Colors.green;
+    TextSpan amountSpan(double amount, Color amountColor) => TextSpan(
+      text: '${amount.toStringAsFixed(0)} د.ع',
+      style: TextStyle(
+        color: isCancelled ? Colors.blueGrey : amountColor,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              backgroundColor: color.withValues(alpha: 0.12),
+              child: Icon(
+                isPurchase
+                    ? Icons.shopping_bag_outlined
+                    : Icons.add_card_outlined,
+                color: color,
               ),
             ),
-          );
-        }),
-      ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${isPurchase ? 'مشتريات' : 'دين مضاف'}'
+                    '${isCancelled ? ' (ملغاة)' : ''}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Text('${f(first.at)} • ${first.note.trim()}'),
+                  if (isPurchase)
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          const TextSpan(text: 'الواصل '),
+                          amountSpan(collected, Colors.green.shade700),
+                          const TextSpan(text: ' • المتبقي '),
+                          amountSpan(unpaid, Colors.red.shade700),
+                        ],
+                      ),
+                    ),
+                  if (isCancelled)
+                    Text(
+                      'سبب الإلغاء: $cancelReason',
+                      style: const TextStyle(color: Colors.blueGrey),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '${total.toStringAsFixed(0)} د.ع',
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w800,
+                decoration: isCancelled ? TextDecoration.lineThrough : null,
+              ),
+            ),
+            if (!isCancelled)
+              IconButton(
+                tooltip: 'إلغاء العملية',
+                onPressed: () => _cancelManualEntry(first),
+                icon: const Icon(Icons.cancel_outlined, size: 20),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _cancelPayment(DailyTaskEvent event) async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (_) => CancelEntryDialog(
+        description: 'تسديد بتاريخ ${f(event.at)}',
+        amount: event.amount,
+      ),
+    );
+    if (reason == null) return;
+
+    final now = DateTime.now();
+    final double total;
+    try {
+      total = await AppStore.cancelPayment(
+        s,
+        at: event.at,
+        reason: reason,
+        now: now,
+      );
+    } on StateError catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
+
+    try {
+      await SubscriberFinancialLedger().addTransaction(
+        subscriberId: s.subscriberId,
+        date: now,
+        type: FinancialTransactionType.adjustment,
+        amount: total,
+        referenceId:
+            'payment-cancel:${s.subscriberId}:${now.toUtc().toIso8601String()}',
+        note: reason,
+      );
+    } catch (error) {
+      debugPrint('Financial ledger write failed: $error');
+    }
+
+    if (!mounted) return;
+    setState(() {});
+    final syncWarning = AppStore.lastSaveSyncError == null
+        ? ''
+        : ' | حُفظ محلياً وتعذرت المزامنة';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'أُلغي التسديد | المتبقي ${s.remaining.toStringAsFixed(0)} د.ع$syncWarning',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _cancelManualEntry(DailyTaskEvent event) async {
+    final related = AppStore.dailyTaskEvents.where(
+      (entry) =>
+          !entry.isCancelled &&
+          entry.category == event.category &&
+          entry.at.isAtSameMomentAs(event.at) &&
+          entry.subscriberUser.trim().toLowerCase() ==
+              s.user.trim().toLowerCase(),
+    );
+    final total = related.fold<double>(0, (sum, entry) => sum + entry.amount);
+    final unpaid = related
+        .where((entry) => entry.type == 'debt_added')
+        .fold<double>(0, (sum, entry) => sum + entry.amount);
+
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (_) =>
+          CancelEntryDialog(description: event.note.trim(), amount: total),
+    );
+    if (reason == null) return;
+
+    final now = DateTime.now();
+    try {
+      await AppStore.cancelManualEntry(
+        s,
+        at: event.at,
+        category: event.category,
+        reason: reason,
+        now: now,
+      );
+    } on StateError catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
+
+    if (unpaid > 0.0001) {
+      try {
+        await SubscriberFinancialLedger().addTransaction(
+          subscriberId: s.subscriberId,
+          date: now,
+          type: FinancialTransactionType.adjustment,
+          amount: -unpaid,
+          referenceId:
+              'manual-cancel:${s.subscriberId}:${now.toUtc().toIso8601String()}',
+          note: reason,
+        );
+      } catch (error) {
+        debugPrint('Financial ledger write failed: $error');
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {});
+    final syncWarning = AppStore.lastSaveSyncError == null
+        ? ''
+        : ' | حُفظ محلياً وتعذرت المزامنة';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'أُلغيت العملية | المتبقي ${s.remaining.toStringAsFixed(0)} د.ع$syncWarning',
+        ),
+      ),
     );
   }
 
@@ -728,7 +751,9 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
         .toList();
     final currentMonthKey = Subscriber.monthKeyOf(DateTime.now());
     final monthEvents = operations.where(
-      (event) => Subscriber.monthKeyOf(event.at) == currentMonthKey,
+      (event) =>
+          !event.isCancelled &&
+          Subscriber.monthKeyOf(event.at) == currentMonthKey,
     );
 
     final totalAdded = DailyTaskSummary.outstandingAddedDebt(
@@ -751,6 +776,14 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     return ListView(
       padding: const EdgeInsets.all(14),
       children: [
+        _balanceSummaryItem(
+          context,
+          label: 'إجمالي الدين على المشترك',
+          amount: s.remaining,
+          color: s.remaining > 0.0001 ? Colors.red : Colors.green,
+          icon: Icons.account_balance_wallet_outlined,
+        ),
+        const SizedBox(height: 10),
         Row(
           children: [
             Expanded(
@@ -853,23 +886,60 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                   color: color,
                 ),
               ),
-              title: Text(title),
+              title: Text(event.isCancelled ? '$title (ملغاة)' : title),
               isThreeLine: isDebtEdit,
               subtitle: isDebtEdit
                   ? Text(
                       '${f(event.at)}\n${_formatDebtEditNote(event.note)}',
                       style: const TextStyle(height: 1.45),
                     )
-                  : Text(
-                      '${f(event.at)}'
-                      '${event.remainingAfter > 0 ? ' • المتبقي ${event.remainingAfter.toStringAsFixed(0)} د.ع' : ''}'
-                      '${event.note.trim().isNotEmpty ? ' • ${event.note.trim()}' : ''}',
+                  : Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(text: f(event.at)),
+                          if (event.remainingAfter > 0) ...[
+                            const TextSpan(text: ' • المتبقي '),
+                            TextSpan(
+                              text:
+                                  '${event.remainingAfter.toStringAsFixed(0)} د.ع',
+                              style: TextStyle(
+                                color: Colors.red.shade700,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                          if (event.note.trim().isNotEmpty)
+                            TextSpan(text: ' • ${event.note.trim()}'),
+                          if (event.isCancelled)
+                            TextSpan(
+                              text: ' • سبب الإلغاء: ${event.cancelReason}',
+                              style: const TextStyle(color: Colors.blueGrey),
+                            ),
+                        ],
+                      ),
                     ),
-              trailing: Text(
-                isDebtEdit
-                    ? 'تم التعديل'
-                    : '${event.amount.toStringAsFixed(0)} د.ع',
-                style: TextStyle(color: color, fontWeight: FontWeight.w800),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    isDebtEdit
+                        ? 'تم التعديل'
+                        : '${event.amount.toStringAsFixed(0)} د.ع',
+                    style: TextStyle(
+                      color: event.isCancelled ? Colors.blueGrey : color,
+                      fontWeight: FontWeight.w800,
+                      decoration: event.isCancelled
+                          ? TextDecoration.lineThrough
+                          : null,
+                    ),
+                  ),
+                  if (AppStore.canCancelPayment(s, event))
+                    IconButton(
+                      tooltip: 'إلغاء التسديد',
+                      onPressed: () => _cancelPayment(event),
+                      icon: const Icon(Icons.cancel_outlined, size: 20),
+                    ),
+                ],
               ),
             ),
           );
@@ -1221,10 +1291,12 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                       _invoiceMonthKey(inv) == effectiveFilter,
                                 )
                                 .toList();
-                      final invoicesTotal = invoices.fold<double>(
-                        0,
-                        (total, inv) => total + inv.amount,
-                      );
+                      final invoicesTotal = invoices
+                          .where((inv) => !inv.cancelled)
+                          .fold<double>(
+                            0,
+                            (total, inv) => total + inv.amount,
+                          );
 
                       return ListView(
                         padding: const EdgeInsets.all(14),
@@ -1301,7 +1373,8 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                     child: Icon(Icons.receipt_long_outlined),
                                   ),
                                   title: Text(
-                                    'وصل رقم ${inv.receiptNumber.toString().padLeft(6, '0')}',
+                                    'وصل رقم ${inv.receiptNumber.toString().padLeft(6, '0')}'
+                                    '${inv.cancelled ? ' (ملغى)' : ''}',
                                   ),
                                   subtitle: Text(
                                     '${f(inv.at)}${inv.note.isEmpty ? '' : ' • ${inv.note}'}',

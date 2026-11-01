@@ -462,7 +462,8 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
                 const SizedBox(height: 4),
                 Text(
                   '${event.subscriberUser}  •  ${_time(event.at)}'
-                  '${event.note.trim().isEmpty ? '' : '  •  ${event.note}'}',
+                  '${event.note.trim().isEmpty ? '' : '  •  ${event.note}'}'
+                  '${event.isCancelled ? '  •  ملغاة: ${event.cancelReason}' : ''}',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(

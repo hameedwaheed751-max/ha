@@ -77,6 +77,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
       .expand((subscriber) => subscriber.invoices)
       .where(
         (invoice) =>
+            !invoice.cancelled &&
             (invoice.monthKey.isNotEmpty
                 ? invoice.monthKey
                 : Subscriber.monthKeyOf(invoice.at)) ==

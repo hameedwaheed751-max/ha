@@ -34,6 +34,7 @@ import 'subscription_requests_admin_screen.dart';
 import 'chat_screen.dart';
 import 'add_subscriber_screen.dart';
 import 'dashboard_widgets.dart';
+import 'manual_entry_flow.dart';
 import 'partial_payment_flow.dart';
 import 'speed_test_screen.dart';
 import 'ping_screen.dart';
@@ -3103,30 +3104,14 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
 
   final TextEditingController _debtSearchC = TextEditingController();
   final ScrollController _verticalScrollController = ScrollController();
-  final ScrollController _horizontalScrollController = ScrollController();
   String _debtQuery = '';
-  String _debtFilter = 'الكل';
-  String _debtSortBy = 'name';
-  bool _debtSortAsc = true;
-  int _rowsPerPage = 50;
+  String _debtSortBy = 'largest';
 
   @override
   void dispose() {
     _debtSearchC.dispose();
     _verticalScrollController.dispose();
-    _horizontalScrollController.dispose();
     super.dispose();
-  }
-
-  void _sortDebts(String field) {
-    setState(() {
-      if (_debtSortBy == field) {
-        _debtSortAsc = !_debtSortAsc;
-      } else {
-        _debtSortBy = field;
-        _debtSortAsc = true;
-      }
-    });
   }
 
   String _date(DateTime d) =>
@@ -4128,14 +4113,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
               s.type.toLowerCase().contains(q) ||
               s.packageDisplay.toLowerCase().contains(q) ||
               _sasProfile(s).toLowerCase().contains(q);
-          if (!matchesSearch) return false;
-          if (_debtFilter == 'غير مسدد') {
-            return s.remaining > 0.0001 && s.paid <= 0.0001;
-          }
-          if (_debtFilter == 'تسديد جزئي') {
-            return s.remaining > 0.0001 && s.paid > 0.0001;
-          }
-          return true;
+          return matchesSearch && s.remaining > 0.0001;
         }).toList()..sort(
           (a, b) => a.name.trim().toLowerCase().compareTo(
             b.name.trim().toLowerCase(),
@@ -4143,39 +4121,21 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
         );
 
     final sortedDebts = List<Subscriber>.from(debts);
+    final debtSince = <Subscriber, DateTime>{
+      for (final s in sortedDebts)
+        s: AppStore.debtBreakdown(s).since ?? s.startDate,
+    };
     sortedDebts.sort((a, b) {
-      int c = 0;
       switch (_debtSortBy) {
+        case 'oldest':
+          return debtSince[a]!.compareTo(debtSince[b]!);
         case 'name':
-          c = a.name.trim().toLowerCase().compareTo(
+          return a.name.trim().toLowerCase().compareTo(
             b.name.trim().toLowerCase(),
           );
-          break;
-        case 'user':
-          c = a.user.trim().toLowerCase().compareTo(
-            b.user.trim().toLowerCase(),
-          );
-          break;
-        case 'package':
-          c = _sasProfile(
-            a,
-          ).toLowerCase().compareTo(_sasProfile(b).toLowerCase());
-          break;
-        case 'paid':
-          c = a.paid.compareTo(b.paid);
-          break;
-        case 'remaining':
-          c = a.remaining.compareTo(b.remaining);
-          break;
-        case 'startDate':
-          c = a.startDate.compareTo(b.startDate);
-          break;
         default:
-          c = a.name.trim().toLowerCase().compareTo(
-            b.name.trim().toLowerCase(),
-          );
+          return b.remaining.compareTo(a.remaining);
       }
-      return _debtSortAsc ? c : -c;
     });
     final totalSubscriptions = sortedDebts.fold<double>(
       0,
@@ -4335,22 +4295,30 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                 child: Row(
-                  children: ['الكل', 'غير مسدد', 'تسديد جزئي'].map((f) {
+                  children: const {
+                    'largest': 'الأكبر',
+                    'oldest': 'الأقدم',
+                    'name': 'الاسم',
+                  }.entries.map((sort) {
                     return Expanded(
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 3),
                         child: ChoiceChip(
                           label: SizedBox(
                             width: double.infinity,
-                            child: Text(f, textAlign: TextAlign.center),
+                            child: Text(
+                              sort.value,
+                              textAlign: TextAlign.center,
+                            ),
                           ),
-                          selected: _debtFilter == f,
+                          selected: _debtSortBy == sort.key,
                           selectedColor: greenSoft,
                           checkmarkColor: green,
                           labelStyle: TextStyle(
-                            color: _debtFilter == f ? green : null,
+                            color: _debtSortBy == sort.key ? green : null,
                           ),
-                          onSelected: (_) => setState(() => _debtFilter = f),
+                          onSelected: (_) =>
+                              setState(() => _debtSortBy = sort.key),
                         ),
                       ),
                     );
@@ -4420,242 +4388,141 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                   child: const Center(child: Text('لا توجد ديون مطابقة')),
                 )
               else
-                Card(
-                  margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    side: const BorderSide(color: Color(0xFFE2E8F0)),
-                  ),
-                  elevation: 0,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Scrollbar(
-                      controller: _horizontalScrollController,
-                      thumbVisibility: true,
-                      child: SingleChildScrollView(
-                        controller: _horizontalScrollController,
-                        scrollDirection: Axis.horizontal,
-                        child: SizedBox(
-                          width: max(
-                            940.0,
-                            MediaQuery.of(context).size.width - 40,
-                          ),
-                          child: Theme(
-                            data: Theme.of(context).copyWith(
-                              dataTableTheme: DataTableThemeData(
-                                headingRowColor: WidgetStateProperty.all(
-                                  greenSoft.withValues(alpha: 0.85),
-                                ),
-                                headingRowHeight: 56,
-                                dataRowMinHeight: 64,
-                                dataRowMaxHeight: 64,
-                                dividerThickness: 1,
-                                headingTextStyle: TextStyle(
-                                  color: green,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            child: PaginatedDataTable(
-                              showCheckboxColumn: false,
-                              horizontalMargin: 8,
-                              columnSpacing: 8,
-                              rowsPerPage: _rowsPerPage,
-                              availableRowsPerPage: const [10, 50, 100],
-                              onRowsPerPageChanged: (value) {
-                                if (value != null) {
-                                  setState(() => _rowsPerPage = value);
-                                }
-                              },
-                              sortColumnIndex: _debtSortBy == 'name'
-                                  ? 1
-                                  : _debtSortBy == 'package'
-                                  ? 2
-                                  : _debtSortBy == 'paid'
-                                  ? 3
-                                  : _debtSortBy == 'remaining'
-                                  ? 4
-                                  : _debtSortBy == 'startDate'
-                                  ? 5
-                                  : null,
-                              sortAscending: _debtSortAsc,
-                              columns: [
-                                const DataColumn(
-                                  label: Text(
-                                    'ت',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                                DataColumn(
-                                  label: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    textDirection: TextDirection.rtl,
-                                    children: [
-                                      const Icon(
-                                        Icons.person_outline,
-                                        size: 18,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      const Text(
-                                        'اسم المشترك',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  onSort: (index, ascending) =>
-                                      _sortDebts('name'),
-                                ),
-                                DataColumn(
-                                  label: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    textDirection: TextDirection.rtl,
-                                    children: [
-                                      const Icon(
-                                        Icons.inventory_2_outlined,
-                                        size: 18,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      const Text(
-                                        'الباقة',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  onSort: (index, ascending) =>
-                                      _sortDebts('package'),
-                                ),
-                                DataColumn(
-                                  numeric: true,
-                                  label: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    textDirection: TextDirection.rtl,
-                                    children: [
-                                      const Icon(
-                                        Icons.payments_outlined,
-                                        size: 18,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      const Text(
-                                        'الواصل',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  onSort: (index, ascending) =>
-                                      _sortDebts('paid'),
-                                ),
-                                DataColumn(
-                                  numeric: true,
-                                  label: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    textDirection: TextDirection.rtl,
-                                    children: [
-                                      const Icon(
-                                        Icons.money_off_csred_outlined,
-                                        size: 18,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      const Text(
-                                        'المتبقي',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  onSort: (index, ascending) =>
-                                      _sortDebts('remaining'),
-                                ),
-                                DataColumn(
-                                  label: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    textDirection: TextDirection.rtl,
-                                    children: [
-                                      const Icon(
-                                        Icons.event_outlined,
-                                        size: 18,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      const Text(
-                                        'تاريخ التفعيل',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  onSort: (index, ascending) =>
-                                      _sortDebts('startDate'),
-                                ),
-                                const DataColumn(
-                                  label: Text(
-                                    'تاريخ التسديد',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                                const DataColumn(
-                                  label: Text(
-                                    'العمليات',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                              source: _DebtsDataSource(
-                                data: sortedDebts,
-                                onNameTap: (subscriber) async {
-                                  await Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => SubscriberDetailsScreen(
-                                        subscriber: subscriber,
-                                        onEditDebt: _editDebt,
-                                        onAddDebtAmount: _addDebtAmount,
-                                        onPartialDebtPayment: _partialPayment,
-                                      ),
-                                    ),
-                                  );
-                                  if (mounted) setState(() {});
-                                },
-                                onEdit: _editDebt,
-                                onAddAmount: _addDebtAmount,
-                                onPartialPayment: _partialPayment,
-                                onReminder: _sendReminder,
-                                onReceipt: _openReceipt,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                ...sortedDebts.map(_debtCard),
+              const SizedBox(height: 12),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _openDebtSubscriber(Subscriber subscriber) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SubscriberDetailsScreen(
+          subscriber: subscriber,
+          onEditDebt: _editDebt,
+          onAddDebtAmount: _addDebtAmount,
+          onPartialDebtPayment: _partialPayment,
+        ),
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
+  String _debtDetails(Subscriber subscriber) {
+    final breakdown = AppStore.debtBreakdown(subscriber);
+    final days = DateTime.now()
+        .difference(breakdown.since ?? subscriber.startDate)
+        .inDays;
+    final source = breakdown.hasSubscription && breakdown.hasPurchases
+        ? 'اشتراك ومشتريات'
+        : breakdown.hasPurchases
+        ? 'مشتريات'
+        : 'اشتراك';
+    final age = days <= 0 ? 'اليوم' : 'منذ $days يوماً';
+    return '${_sasProfile(subscriber)} • $age • $source';
+  }
+
+  Widget _debtCard(Subscriber subscriber) {
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: Color(0xFFE2E8F0)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () => _openDebtSubscriber(subscriber),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          subscriber.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _debtDetails(subscriber),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  '${subscriber.remaining.toStringAsFixed(0)} د.ع',
+                  style: const TextStyle(
+                    color: Color(0xFFC2413B),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () => _partialPayment(subscriber),
+                  icon: const Icon(Icons.payments_outlined, size: 18),
+                  label: const Text('تسديد'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: () => _addManualEntry(subscriber),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('إضافة'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _sendReminder(subscriber),
+                  icon: const Icon(Icons.notifications_active, size: 18),
+                  label: const Text('تذكير'),
+                ),
+                IconButton(
+                  tooltip: 'وصل',
+                  onPressed: () => _openReceipt(subscriber),
+                  icon: const Icon(Icons.print, color: Colors.blue),
+                ),
+                DebtOperationsMenu(
+                  subscriber: subscriber,
+                  onEdit: _editDebt,
+                  onAddAmount: _addManualEntry,
+                  onPartialPayment: _partialPayment,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _addManualEntry(Subscriber subscriber) async {
+    await recordManualEntry(context, subscriber);
+    if (mounted) setState(() {});
   }
 
   Widget _debtMetricTile({
@@ -4713,165 +4580,5 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
         ],
       ),
     );
-  }
-}
-
-class _DebtsDataSource extends DataTableSource {
-  _DebtsDataSource({
-    required this.data,
-    required this.onNameTap,
-    required this.onEdit,
-    required this.onAddAmount,
-    required this.onPartialPayment,
-    required this.onReminder,
-    required this.onReceipt,
-  });
-
-  final List<Subscriber> data;
-  final Future<void> Function(Subscriber) onNameTap;
-  final Future<void> Function(Subscriber) onEdit;
-  final Future<void> Function(Subscriber) onAddAmount;
-  final Future<void> Function(Subscriber) onPartialPayment;
-  final void Function(Subscriber) onReminder;
-  final void Function(Subscriber) onReceipt;
-
-  String _date(DateTime d) =>
-      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
-
-  @override
-  DataRow? getRow(int index) {
-    if (index >= data.length) return null;
-    final subscriber = data[index];
-    return DataRow(
-      cells: [
-        DataCell(
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 48),
-            child: Text('${index + 1}', textAlign: TextAlign.center),
-          ),
-        ),
-        DataCell(
-          InkWell(
-            onTap: () => onNameTap(subscriber),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 220),
-              child: Text(
-                subscriber.name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: Colors.blue,
-                ),
-              ),
-            ),
-          ),
-        ),
-        DataCell(
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 180),
-            child: Text(
-              _sasProfile(subscriber),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ),
-        DataCell(
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 100),
-            child: Text(
-              subscriber.paid.toStringAsFixed(0),
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ),
-        DataCell(
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 100),
-            child: Text(
-              subscriber.remaining.toStringAsFixed(0),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.red,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ),
-        DataCell(
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 120),
-            child: Text(
-              _date(subscriber.startDate),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ),
-        DataCell(
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 120),
-            child: Text(
-              subscriber.paymentDate.isEmpty
-                  ? 'غير مسدد'
-                  : subscriber.paymentDate,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ),
-        DataCell(
-          Wrap(
-            spacing: 4,
-            runSpacing: 4,
-            alignment: WrapAlignment.center,
-            children: [
-              DebtOperationsMenu(
-                subscriber: subscriber,
-                onEdit: onEdit,
-                onAddAmount: onAddAmount,
-                onPartialPayment: onPartialPayment,
-              ),
-              IconButton(
-                tooltip: 'تنبيه',
-                onPressed: () => onReminder(subscriber),
-                icon: const Icon(
-                  Icons.notifications_active,
-                  size: 18,
-                  color: Color(0xFF2E7D32),
-                ),
-              ),
-              IconButton(
-                tooltip: 'وصل',
-                onPressed: () => onReceipt(subscriber),
-                icon: const Icon(Icons.print, size: 18, color: Colors.blue),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  @override
-  bool get isRowCountApproximate => false;
-
-  @override
-  int get rowCount => data.length;
-
-  @override
-  int get selectedRowCount => 0;
-
-  String _sasProfile(Subscriber s) {
-    for (final key in const [
-      'profile_name',
-      'profile',
-      'service_profile',
-      'active_profile',
-    ]) {
-      final v = s.sasData[key];
-      if (v != null && v.toString().trim().isNotEmpty) {
-        return v.toString().trim();
-      }
-    }
-    return s.type.trim().isEmpty ? '—' : s.type;
   }
 }
