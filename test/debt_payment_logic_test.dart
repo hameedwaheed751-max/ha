@@ -170,6 +170,150 @@ void main() {
     expect(subscriber.remaining, 30000);
   });
 
+  group('added debt shown for the month', () {
+    DailyTaskEvent event(
+      String type,
+      double amount,
+      DateTime at, {
+      String category = '',
+    }) => DailyTaskEvent(
+      type: type,
+      subscriberUser: 'u1',
+      subscriberName: 'User 1',
+      at: at,
+      amount: amount,
+      category: category,
+    );
+
+    final first = DateTime(2026, 11, 2, 9);
+    final later = DateTime(2026, 11, 5, 9);
+    final last = DateTime(2026, 11, 8, 9);
+
+    test('each later partial payment lowers it', () {
+      final added = event('debt_added', 35000, first);
+
+      expect(DailyTaskSummary.outstandingAddedDebt([added]), 35000);
+      expect(
+        DailyTaskSummary.outstandingAddedDebt([
+          added,
+          event(DailyTaskEvent.debtEntryCollectionType, 10000, later),
+        ]),
+        25000,
+      );
+      expect(
+        DailyTaskSummary.outstandingAddedDebt([
+          added,
+          event(DailyTaskEvent.debtEntryCollectionType, 10000, later),
+          event('debt_payment', 5000, last),
+        ]),
+        20000,
+      );
+    });
+
+    test('cash entered with the amount is not deducted twice', () {
+      expect(
+        DailyTaskSummary.outstandingAddedDebt([
+          event('debt_added', 20000, first),
+          event(DailyTaskEvent.debtEntryCollectionType, 15000, first),
+          event(DailyTaskEvent.debtEditType, 35000, first),
+        ]),
+        20000,
+      );
+    });
+
+    test('a fully paid amount leaves later debt payments out of it', () {
+      expect(
+        DailyTaskSummary.outstandingAddedDebt([
+          event(DailyTaskEvent.debtEntryCollectionType, 35000, first),
+          event(DailyTaskEvent.debtEditType, 35000, first),
+          event('debt_added', 10000, later),
+        ]),
+        10000,
+      );
+    });
+
+    test('paying above a charge counts the extra as a repayment', () {
+      expect(
+        DailyTaskSummary.outstandingAddedDebt([
+          event('debt_added', 30000, first),
+          event(DailyTaskEvent.debtEntryCollectionType, 25000, later),
+          event(DailyTaskEvent.debtEditType, 10000, later),
+        ]),
+        15000,
+      );
+    });
+
+    test('a paid purchase does not lower it', () {
+      expect(
+        DailyTaskSummary.outstandingAddedDebt([
+          event('debt_added', 30000, first),
+          event(
+            DailyTaskEvent.debtEntryCollectionType,
+            5000,
+            later,
+            category: DailyTaskEvent.purchaseCategory,
+          ),
+        ]),
+        30000,
+      );
+    });
+
+    test('it never goes below zero', () {
+      expect(
+        DailyTaskSummary.outstandingAddedDebt([
+          event('debt_added', 10000, first),
+          event('debt_payment', 30000, later),
+        ]),
+        0,
+      );
+    });
+  });
+
+  group('entering a subscription amount shows only the unpaid part as debt', () {
+    Subscriber newSubscriber() => Subscriber(
+      user: 'u1',
+      name: 'Test User',
+      phone: '',
+      address: '',
+      ip: '',
+      type: 'basic',
+      price: 0,
+      paid: 0,
+      billingMonthKey: '2026-10',
+      startDate: DateTime(2026, 10, 1),
+      endDate: DateTime(2026, 11, 1),
+    );
+
+    DebtAdjustmentResult enter(double paid) => newSubscriber()
+        .adjustDebtAmounts(
+          subscriptionAmount: 35000,
+          paidAmount: paid,
+          at: DateTime(2026, 10, 13),
+        );
+
+    test('fully paid adds no debt', () {
+      final adjustment = enter(35000);
+
+      expect(adjustment.unpaidAddedDebt, 0);
+      expect(adjustment.appliedToCurrentCharge, 35000);
+    });
+
+    test('partly paid adds only the remainder', () {
+      final adjustment = enter(15000);
+
+      expect(adjustment.unpaidAddedDebt, 20000);
+      expect(adjustment.appliedToCurrentCharge, 15000);
+    });
+
+    test('unpaid adds the whole amount', () {
+      expect(enter(0).unpaidAddedDebt, 35000);
+    });
+
+    test('the ledger still receives the full charge', () {
+      expect(enter(15000).addedDebt, 35000);
+    });
+  });
+
   test(
     'legacy payment history does not restore previous months paid amount',
     () {
@@ -473,7 +617,7 @@ void main() {
   });
 
   test(
-    'fully paid activation records the charge and cash with zero balance',
+    'fully paid activation records only the cash and adds no debt',
     () {
       final events = DailyTaskEvent.activationSettlement(
         subscriberUser: 'u1',
@@ -486,10 +630,10 @@ void main() {
 
       final summary = DailyTaskSummary.fromEvents(events);
 
-      expect(events, hasLength(2));
+      expect(events.single.type, 'activation');
       expect(summary.activationCollected, 35000);
       expect(summary.debtPaymentsCollected, 0);
-      expect(summary.debtAddedTotal, 35000);
+      expect(summary.debtAddedTotal, 0);
       expect(summary.netDebtMovement, 0);
       expect(summary.totalCollected, 35000);
     },
@@ -665,7 +809,7 @@ void main() {
 
     expect(summary.activationCollected, 20000);
     expect(summary.debtPaymentsCollected, 5000);
-    expect(summary.debtAddedTotal, 35000);
+    expect(summary.debtAddedTotal, 15000);
     expect(summary.netDebtMovement, 10000);
     expect(summary.totalCollected, 25000);
   });
@@ -704,7 +848,7 @@ void main() {
     expect(summary.activationCollected, 25000);
     expect(summary.debtPaymentsCollected, 0);
     expect(summary.totalCollected, 25000);
-    expect(summary.debtAddedTotal, 35000);
+    expect(summary.debtAddedTotal, 10000);
     expect(summary.netDebtMovement, 10000);
     expect(subscriber.remaining, 30000);
   });

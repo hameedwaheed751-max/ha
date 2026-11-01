@@ -10,6 +10,162 @@ import 'add_subscriber_screen.dart';
 import 'dashboard_widgets.dart';
 import 'receipt_screen.dart';
 
+typedef ManualEntryResult = ({
+  String category,
+  double amount,
+  double paid,
+  String description,
+});
+
+/// تملك النافذة حقولها حتى تبقى صالحة طوال حركة الإغلاق.
+class ManualEntryDialog extends StatefulWidget {
+  const ManualEntryDialog({super.key, required this.subscriberName});
+
+  final String subscriberName;
+
+  @override
+  State<ManualEntryDialog> createState() => _ManualEntryDialogState();
+}
+
+class _ManualEntryDialogState extends State<ManualEntryDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _descriptionController = TextEditingController();
+  final _amountController = TextEditingController();
+  final _paidController = TextEditingController(text: '0');
+  String _category = DailyTaskEvent.manualDebtCategory;
+
+  bool get _isPurchase => _category == DailyTaskEvent.purchaseCategory;
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    _amountController.dispose();
+    _paidController.dispose();
+    super.dispose();
+  }
+
+  double? _parseAmount(String raw) {
+    var normalized = raw.trim().replaceAll(',', '').replaceAll('٬', '');
+    const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
+    for (var digit = 0; digit < arabicDigits.length; digit++) {
+      normalized = normalized.replaceAll(arabicDigits[digit], '$digit');
+    }
+    return double.tryParse(normalized);
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    final ManualEntryResult result = (
+      category: _category,
+      amount: _parseAmount(_amountController.text)!,
+      paid: _isPurchase ? _parseAmount(_paidController.text)! : 0.0,
+      description: _descriptionController.text.trim(),
+    );
+    Navigator.pop(context, result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        scrollable: true,
+        title: Text('إضافة دين أو مشتريات - ${widget.subscriberName}'),
+        content: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(
+                    value: DailyTaskEvent.manualDebtCategory,
+                    label: Text('دين مضاف'),
+                  ),
+                  ButtonSegment(
+                    value: DailyTaskEvent.purchaseCategory,
+                    label: Text('مشتريات'),
+                  ),
+                ],
+                selected: {_category},
+                showSelectedIcon: false,
+                onSelectionChanged: (selection) =>
+                    setState(() => _category = selection.first),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _descriptionController,
+                autofocus: true,
+                maxLength: 200,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'الوصف',
+                  hintText: 'مثال: راوتر أو كيبل أو مبلغ سابق',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'اكتب الوصف'
+                    : null,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _amountController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'المبلغ',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  final amount = _parseAmount(value ?? '');
+                  if (amount == null || !amount.isFinite || amount <= 0) {
+                    return 'أدخل مبلغاً أكبر من صفر';
+                  }
+                  return null;
+                },
+              ),
+              if (_isPurchase) ...[
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: _paidController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'الواصل منه',
+                    helperText: 'صفر يعني أن المبلغ كله دين',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    final paid = _parseAmount(value ?? '');
+                    final amount = _parseAmount(_amountController.text);
+                    if (paid == null ||
+                        !paid.isFinite ||
+                        paid < 0 ||
+                        (amount != null && paid > amount)) {
+                      return 'الواصل يجب أن يكون بين صفر والمبلغ';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(onPressed: _submit, child: const Text('حفظ')),
+        ],
+      ),
+    );
+  }
+}
+
 class SubscriberDetailsScreen extends StatefulWidget {
   final Subscriber subscriber;
   final Future<void> Function(Subscriber)? onEditDebt;
@@ -33,9 +189,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     with SingleTickerProviderStateMixin {
   late final TabController tabs;
   Subscriber get s => widget.subscriber;
-  String _recordsMonthFilter = 'all';
-  late DateTime _financialMonth;
-  late Future<SubscriberMonthlyLedger> _financialLedgerFuture;
+  String _recordsMonthFilter = Subscriber.monthKeyOf(DateTime.now());
 
   String f(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
@@ -75,13 +229,58 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     return list;
   }
 
+  String _invoiceMonthKey(InvoiceRecord invoice) => invoice.monthKey.isNotEmpty
+      ? invoice.monthKey
+      : Subscriber.monthKeyOf(invoice.at);
+
   List<String> _recordsMonthOptions() {
     final keys = <String>{
-      ...s.invoices.map((invoice) => invoice.monthKey),
+      Subscriber.monthKeyOf(DateTime.now()),
+      ...s.invoices.map(_invoiceMonthKey),
       ...s.payments.map((payment) => Subscriber.monthKeyOf(payment.at)),
-    }..removeWhere((key) => key.trim().isEmpty);
+    };
     final sortedKeys = keys.toList()..sort((a, b) => b.compareTo(a));
     return <String>['all', ...sortedKeys];
+  }
+
+  InvoiceRecord? _invoiceForPayment(PaymentRecord payment) {
+    for (final invoice in s.invoices) {
+      if (invoice.at.isAtSameMomentAs(payment.at) &&
+          (invoice.amount - payment.amount).abs() <= 0.0001) {
+        return invoice;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _openInvoice(InvoiceRecord invoice) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReceiptScreen(subscriber: s, invoice: invoice),
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
+  Widget _recordsTotal(
+    BuildContext context, {
+    required String label,
+    required String monthFilter,
+    required double amount,
+    required int count,
+    required IconData icon,
+  }) {
+    final period = monthFilter == 'all'
+        ? 'كل الأشهر'
+        : _monthLabel(monthFilter);
+    return _balanceSummaryItem(
+      context,
+      label: '$label - $period ($count)',
+      amount: amount,
+      color: Colors.teal,
+      icon: icon,
+    );
   }
 
   Widget _recordsMonthSelector({
@@ -296,36 +495,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
   @override
   void initState() {
     super.initState();
-    tabs = TabController(length: 6, vsync: this);
-    final now = DateTime.now();
-    _financialMonth = DateTime(now.year, now.month);
-    _financialLedgerFuture = _readFinancialLedger();
-  }
-
-  Future<SubscriberMonthlyLedger> _readFinancialLedger() =>
-      SubscriberFinancialLedger().getSubscriberLedger(
-        s.subscriberId,
-        _financialMonth,
-      );
-
-  List<String> _financialMonthOptions() {
-    final now = DateTime.now();
-    return List<String>.generate(
-      24,
-      (index) => Subscriber.monthKeyOf(DateTime(now.year, now.month - index)),
-    );
-  }
-
-  void _selectFinancialMonth(String monthKey) {
-    final parts = monthKey.split('-');
-    if (parts.length != 2) return;
-    final year = int.tryParse(parts[0]);
-    final month = int.tryParse(parts[1]);
-    if (year == null || month == null || month < 1 || month > 12) return;
-    setState(() {
-      _financialMonth = DateTime(year, month);
-      _financialLedgerFuture = _readFinancialLedger();
-    });
+    tabs = TabController(length: 5, vsync: this);
   }
 
   List<DailyTaskEvent> _matchingSubscriberDebtEvents() {
@@ -351,7 +521,9 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
   }
 
   List<DailyTaskEvent> _subscriberDebtOperations() {
-    return _matchingSubscriberDebtEvents();
+    return _matchingSubscriberDebtEvents()
+        .where((event) => event.type != DailyTaskEvent.debtEditType)
+        .toList();
   }
 
   String _formatDebtEditNote(String note) => note
@@ -371,14 +543,200 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     if (mounted) setState(() {});
   }
 
+  Future<void> _addManualEntry() async {
+    final entry = await showDialog<ManualEntryResult>(
+      context: context,
+      builder: (_) => ManualEntryDialog(subscriberName: s.name),
+    );
+    if (entry == null) return;
+
+    final now = DateTime.now();
+    s.rolloverToMonth(now);
+    // يُضاف خارج مبلغ الاشتراك حتى لا يدخل في مبيعات الاشتراكات وربحها.
+    s.carriedDebt += entry.amount;
+    final allocation = s.applyPayment(
+      entry.paid,
+      at: now,
+      note: entry.description,
+    );
+    final collected = allocation.totalApplied;
+    final unpaid = entry.amount - collected;
+
+    int? receiptNumber;
+    if (collected > 0.0001) {
+      receiptNumber = await AppStore.issueReceiptNumber(persist: false);
+      s.registerInvoiceFromPayment(
+        receiptNumber: receiptNumber,
+        amount: collected,
+        at: now,
+        note: entry.description,
+      );
+      s.paymentDate = f(now);
+      await AppStore.addDailyTaskEvent(
+        DailyTaskEvent(
+          type: DailyTaskEvent.debtEntryCollectionType,
+          subscriberUser: s.user,
+          subscriberName: s.name,
+          at: now,
+          amount: collected,
+          remainingAfter: s.remaining,
+          note: entry.description,
+          category: entry.category,
+        ),
+        persist: false,
+      );
+    }
+    if (unpaid > 0.0001) {
+      await AppStore.addDailyTaskEvent(
+        DailyTaskEvent(
+          type: 'debt_added',
+          subscriberUser: s.user,
+          subscriberName: s.name,
+          at: now,
+          amount: unpaid,
+          remainingAfter: s.remaining,
+          note: entry.description,
+          category: entry.category,
+        ),
+        persist: false,
+      );
+    }
+    await AppStore.save();
+
+    final stamp = now.toUtc().toIso8601String();
+    try {
+      final ledger = SubscriberFinancialLedger();
+      await ledger.addTransaction(
+        subscriberId: s.subscriberId,
+        date: now,
+        type: FinancialTransactionType.debt,
+        amount: entry.amount,
+        referenceId: 'manual-entry:${s.subscriberId}:$stamp',
+        note: entry.description,
+      );
+      if (receiptNumber != null) {
+        await ledger.addTransaction(
+          subscriberId: s.subscriberId,
+          date: now,
+          type: FinancialTransactionType.payment,
+          amount: collected,
+          referenceId: 'payment-receipt:$receiptNumber',
+          note: entry.description,
+        );
+      }
+    } catch (error) {
+      debugPrint('Financial ledger write failed: $error');
+    }
+
+    if (!mounted) return;
+    setState(() {});
+    final syncWarning = AppStore.lastSaveSyncError == null
+        ? ''
+        : ' | حُفظ محلياً وتعذرت المزامنة';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'تم الحفظ | المتبقي ${s.remaining.toStringAsFixed(0)} د.ع$syncWarning',
+        ),
+      ),
+    );
+  }
+
+  Widget _addEntryButton() {
+    final colors = Theme.of(context).colorScheme;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: _addManualEntry,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: colors.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Theme.of(context).dividerColor),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.add, color: Colors.blueGrey),
+            const SizedBox(width: 4),
+            Text(
+              'إضافة',
+              style: TextStyle(
+                color: colors.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _manualEntriesSection(List<DailyTaskEvent> entries) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'الديون المضافة والمشتريات',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        const SizedBox(height: 8),
+        if (entries.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('لا توجد ديون مضافة أو مشتريات مسجلة.'),
+          ),
+        ...entries.map((event) {
+          final isPurchase = event.category == DailyTaskEvent.purchaseCategory;
+          final isCollected = event.type != 'debt_added';
+          final color = isCollected ? Colors.green : Colors.red;
+          final title = isPurchase
+              ? (isCollected ? 'مشتريات - واصل' : 'مشتريات - دين')
+              : 'دين مضاف';
+          return Card(
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: color.withValues(alpha: 0.12),
+                child: Icon(
+                  isPurchase
+                      ? Icons.shopping_bag_outlined
+                      : Icons.add_card_outlined,
+                  color: color,
+                ),
+              ),
+              title: Text(title),
+              subtitle: Text('${f(event.at)}\n${event.note.trim()}'),
+              isThreeLine: true,
+              trailing: Text(
+                '${event.amount.toStringAsFixed(0)} د.ع',
+                style: TextStyle(color: color, fontWeight: FontWeight.w800),
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
   Widget _debtOperationsTab() {
     final operations = _subscriberDebtOperations();
-    final allEvents = _matchingSubscriberDebtEvents();
+    final manualEntries = operations
+        .where((event) => event.category.isNotEmpty)
+        .toList();
+    final otherOperations = operations
+        .where((event) => event.category.isEmpty)
+        .toList();
+    final currentMonthKey = Subscriber.monthKeyOf(DateTime.now());
+    final monthEvents = operations.where(
+      (event) => Subscriber.monthKeyOf(event.at) == currentMonthKey,
+    );
 
-    final totalAdded = allEvents
-        .where((event) => event.type == 'debt_added')
-        .fold<double>(0, (total, event) => total + event.amount);
-    final totalCollected = allEvents
+    final totalAdded = DailyTaskSummary.outstandingAddedDebt(
+      _matchingSubscriberDebtEvents().where(
+        (event) => Subscriber.monthKeyOf(event.at) == currentMonthKey,
+      ),
+    );
+    final totalCollected = monthEvents
         .where(
           (event) =>
               event.type == 'debt_payment' ||
@@ -386,7 +744,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
               event.type == 'activation',
         )
         .fold<double>(0, (total, event) => total + event.amount);
-    final totalReduced = allEvents
+    final totalReduced = monthEvents
         .where((event) => event.type == DailyTaskEvent.debtRemovedType)
         .fold<double>(0, (total, event) => total + event.amount);
 
@@ -397,7 +755,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
           children: [
             Expanded(
               child: _debtOperationTotal(
-                label: 'إجمالي الديون المضافة',
+                label: 'الديون المضافة هذا الشهر',
                 amount: totalAdded,
                 color: Colors.red,
               ),
@@ -405,7 +763,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
             const SizedBox(width: 10),
             Expanded(
               child: _debtOperationTotal(
-                label: 'إجمالي الواصل',
+                label: 'الواصل هذا الشهر',
                 amount: totalCollected,
                 color: Colors.green,
               ),
@@ -413,7 +771,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
             const SizedBox(width: 10),
             Expanded(
               child: _debtOperationTotal(
-                label: 'إجمالي تخفيض الدين',
+                label: 'تخفيض الدين هذا الشهر',
                 amount: totalReduced,
                 color: Colors.blueGrey,
               ),
@@ -421,36 +779,39 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
           ],
         ),
         const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerRight,
-          child: DebtOperationsMenu(
-            subscriber: s,
-            onEdit: widget.onEditDebt == null
-                ? null
-                : (subscriber) => _runDebtAction(widget.onEditDebt, subscriber),
-            onAddAmount: widget.onAddDebtAmount == null
-                ? null
-                : (subscriber) =>
-                      _runDebtAction(widget.onAddDebtAmount, subscriber),
-            onPartialPayment: widget.onPartialDebtPayment == null
-                ? null
-                : (subscriber) =>
-                      _runDebtAction(widget.onPartialDebtPayment, subscriber),
-            showLabel: true,
-          ),
+        Row(
+          children: [
+            DebtOperationsMenu(
+              subscriber: s,
+              onEdit: widget.onEditDebt == null
+                  ? null
+                  : (subscriber) =>
+                        _runDebtAction(widget.onEditDebt, subscriber),
+              onAddAmount: (_) => _addManualEntry(),
+              onPartialPayment: widget.onPartialDebtPayment == null
+                  ? null
+                  : (subscriber) =>
+                        _runDebtAction(widget.onPartialDebtPayment, subscriber),
+              showLabel: true,
+            ),
+            const SizedBox(width: 8),
+            _addEntryButton(),
+          ],
         ),
+        const SizedBox(height: 14),
+        _manualEntriesSection(manualEntries),
         const SizedBox(height: 14),
         const Text(
           'سجل العمليات',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
         ),
         const SizedBox(height: 8),
-        if (operations.isEmpty)
+        if (otherOperations.isEmpty)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 18),
             child: Text('لا توجد عمليات سابقة مسجلة لهذا المشترك.'),
           ),
-        ...operations.map((event) {
+        ...otherOperations.map((event) {
           final isDebtAdded = event.type == 'debt_added';
           final isDebtEdit = event.type == DailyTaskEvent.debtEditType;
           final isDebtRemoved = event.type == DailyTaskEvent.debtRemovedType;
@@ -471,9 +832,9 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
               : isDebtRemoved
               ? 'تخفيض دين'
               : isActivation
-              ? 'تفعيل وواصل'
+              ? 'واصل عند التفعيل'
               : event.type == DailyTaskEvent.debtEntryCollectionType
-              ? 'تحصيل عند التفعيل'
+              ? 'واصل عند التفعيل'
               : 'تسديد دين';
           return Card(
             child: ListTile(
@@ -549,165 +910,6 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
       ),
     );
   }
-
-  String _financialTransactionLabel(FinancialTransactionType type) {
-    switch (type) {
-      case FinancialTransactionType.debt:
-        return 'دين/مطالبة';
-      case FinancialTransactionType.payment:
-        return 'تسديد';
-      case FinancialTransactionType.partialPayment:
-        return 'تسديد جزئي';
-      case FinancialTransactionType.openingBalance:
-        return 'رصيد افتتاحي';
-      case FinancialTransactionType.invoice:
-        return 'فاتورة';
-      case FinancialTransactionType.activation:
-        return 'تفعيل';
-      case FinancialTransactionType.credit:
-        return 'رصيد دائن';
-      case FinancialTransactionType.companyDeposit:
-        return 'إيداع للشركة';
-      case FinancialTransactionType.activationCost:
-        return 'كلفة تفعيل';
-      case FinancialTransactionType.expense:
-        return 'مصروف';
-      case FinancialTransactionType.adjustment:
-        return 'تسوية';
-    }
-  }
-
-  Widget _financialLedgerTab() {
-    final selectedMonthKey = Subscriber.monthKeyOf(_financialMonth);
-    final monthOptions = _financialMonthOptions();
-    return FutureBuilder<SubscriberMonthlyLedger>(
-      future: _financialLedgerFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return Center(
-            child: Text('تعذر تحميل الحساب المالي: ${snapshot.error}'),
-          );
-        }
-        final ledger = snapshot.data;
-        if (ledger == null) {
-          return const Center(child: Text('لا توجد بيانات للحساب المالي'));
-        }
-
-        return ListView(
-          padding: const EdgeInsets.all(14),
-          children: [
-            DropdownButtonFormField<String>(
-              initialValue: monthOptions.contains(selectedMonthKey)
-                  ? selectedMonthKey
-                  : monthOptions.first,
-              decoration: const InputDecoration(
-                labelText: 'الشهر',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-              items: monthOptions
-                  .map(
-                    (key) => DropdownMenuItem<String>(
-                      value: key,
-                      child: Text(_monthLabel(key)),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                if (value != null) _selectFinancialMonth(value);
-              },
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'ملخص الشهر',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Theme.of(context).dividerColor),
-              ),
-              child: Column(
-                children: [
-                  _financialSummaryRow(
-                    'الرصيد الافتتاحي',
-                    ledger.openingBalance,
-                  ),
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-                  _financialSummaryRow(
-                    'إجمالي المطالبات/الديون',
-                    ledger.totalCharges,
-                  ),
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-                  _financialSummaryRow(
-                    'إجمالي التسديدات',
-                    ledger.totalPayments,
-                  ),
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-                  _financialSummaryRow(
-                    'الرصيد الختامي',
-                    ledger.closingBalance,
-                    emphasized: true,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'حركات الشهر',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 8),
-            if (ledger.transactions.isEmpty)
-              const Text('لا توجد حركات مالية لهذا الشهر')
-            else
-              ...ledger.transactions.map(
-                (transaction) => Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.account_balance_wallet_outlined),
-                    title: Text(_financialTransactionLabel(transaction.type)),
-                    subtitle: Text(
-                      '${f(transaction.date)}'
-                      '${transaction.note.trim().isEmpty ? '' : ' • ${transaction.note}'}',
-                    ),
-                    trailing: Text(
-                      '${transaction.amount.toStringAsFixed(0)} د.ع',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _financialSummaryRow(
-    String title,
-    double amount, {
-    bool emphasized = false,
-  }) => ListTile(
-    dense: true,
-    title: Text(
-      title,
-      style: TextStyle(
-        fontWeight: emphasized ? FontWeight.w800 : FontWeight.w500,
-      ),
-    ),
-    trailing: Text(
-      '${amount.toStringAsFixed(0)} د.ع',
-      style: TextStyle(
-        fontWeight: FontWeight.w800,
-        color: emphasized ? Theme.of(context).colorScheme.primary : null,
-      ),
-    ),
-  );
 
   @override
   void dispose() {
@@ -923,7 +1125,6 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                   Tab(text: 'عمليات الديون'),
                   Tab(text: 'فواتير'),
                   Tab(text: 'مدفوعات'),
-                  Tab(text: 'الحساب المالي'),
                   Tab(text: 'تعديل'),
                 ],
               ),
@@ -1015,16 +1216,15 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                       final invoices = effectiveFilter == 'all'
                           ? allInvoices
                           : allInvoices
-                                .where((inv) => inv.monthKey == effectiveFilter)
+                                .where(
+                                  (inv) =>
+                                      _invoiceMonthKey(inv) == effectiveFilter,
+                                )
                                 .toList();
-
-                      final monthlyTotals = <String, double>{};
-                      for (final inv in invoices) {
-                        monthlyTotals[inv.monthKey] =
-                            (monthlyTotals[inv.monthKey] ?? 0) + inv.amount;
-                      }
-                      final monthlyInvoices = monthlyTotals.entries.toList()
-                        ..sort((a, b) => b.key.compareTo(a.key));
+                      final invoicesTotal = invoices.fold<double>(
+                        0,
+                        (total, inv) => total + inv.amount,
+                      );
 
                       return ListView(
                         padding: const EdgeInsets.all(14),
@@ -1047,7 +1247,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                           ),
                           if (isSas)
                             infoRow(
-                              'balance',
+                              'رصيد SAS',
                               _formatSasBalance(
                                 _sas(['balance', 'credit', 'user_balance']),
                               ),
@@ -1074,32 +1274,15 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                             ],
                           ),
                           const SizedBox(height: 12),
-                          const Text(
-                            'الفواتير الشهرية',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
+                          _recordsTotal(
+                            context,
+                            label: 'إجمالي الفواتير',
+                            monthFilter: effectiveFilter,
+                            amount: invoicesTotal,
+                            count: invoices.length,
+                            icon: Icons.receipt_long_outlined,
                           ),
-                          const SizedBox(height: 8),
-                          if (monthlyInvoices.isEmpty)
-                            const Text('لا توجد فواتير مسجلة بعد')
-                          else
-                            ...monthlyInvoices.map(
-                              (e) => Card(
-                                child: ListTile(
-                                  leading: const Icon(Icons.calendar_month),
-                                  title: Text(_monthLabel(e.key)),
-                                  trailing: Text(
-                                    '${e.value.toStringAsFixed(0)} د.ع',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 12),
                           const Text(
                             'سجل الفواتير',
                             style: TextStyle(
@@ -1109,7 +1292,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                           ),
                           const SizedBox(height: 8),
                           if (invoices.isEmpty)
-                            const Text('لا يوجد سجل فواتير حتى الآن')
+                            const Text('لا توجد فواتير في هذه الفترة')
                           else
                             ...invoices.map(
                               (inv) => Card(
@@ -1121,7 +1304,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                     'وصل رقم ${inv.receiptNumber.toString().padLeft(6, '0')}',
                                   ),
                                   subtitle: Text(
-                                    '${f(inv.at)} • ${_monthLabel(inv.monthKey)}${inv.note.isEmpty ? '' : ' • ${inv.note}'}',
+                                    '${f(inv.at)}${inv.note.isEmpty ? '' : ' • ${inv.note}'}',
                                   ),
                                   trailing: Text(
                                     '${inv.amount.toStringAsFixed(0)} د.ع',
@@ -1129,18 +1312,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                  onTap: () async {
-                                    await Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => ReceiptScreen(
-                                          subscriber: s,
-                                          invoice: inv,
-                                        ),
-                                      ),
-                                    );
-                                    if (mounted) setState(() {});
-                                  },
+                                  onTap: () => _openInvoice(inv),
                                 ),
                               ),
                             ),
@@ -1165,15 +1337,10 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                       effectiveFilter,
                                 )
                                 .toList();
-
-                      final monthlyTotals = <String, double>{};
-                      for (final p in payments) {
-                        final key = Subscriber.monthKeyOf(p.at);
-                        monthlyTotals[key] =
-                            (monthlyTotals[key] ?? 0) + p.amount;
-                      }
-                      final monthlyPaid = monthlyTotals.entries.toList()
-                        ..sort((a, b) => b.key.compareTo(a.key));
+                      final paymentsTotal = payments.fold<double>(
+                        0,
+                        (total, p) => total + p.amount,
+                      );
 
                       return ListView(
                         padding: const EdgeInsets.all(14),
@@ -1215,34 +1382,15 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                             ],
                           ),
                           const SizedBox(height: 12),
-                          const Text(
-                            'المدفوعات حسب الأشهر',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
+                          _recordsTotal(
+                            context,
+                            label: 'صافي المدفوعات',
+                            monthFilter: effectiveFilter,
+                            amount: paymentsTotal,
+                            count: payments.length,
+                            icon: Icons.payments_outlined,
                           ),
-                          const SizedBox(height: 8),
-                          if (monthlyPaid.isEmpty)
-                            const Text('لا توجد مدفوعات مسجلة بعد')
-                          else
-                            ...monthlyPaid.map(
-                              (e) => Card(
-                                child: ListTile(
-                                  leading: const Icon(
-                                    Icons.calendar_today_outlined,
-                                  ),
-                                  title: Text(_monthLabel(e.key)),
-                                  trailing: Text(
-                                    '${e.value.toStringAsFixed(0)} د.ع',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 12),
                           const Text(
                             'سجل المدفوعات',
                             style: TextStyle(
@@ -1252,31 +1400,47 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                           ),
                           const SizedBox(height: 8),
                           if (payments.isEmpty)
-                            const Text('لا يوجد سجل دفعات حتى الآن')
+                            const Text('لا توجد مدفوعات في هذه الفترة')
                           else
-                            ...payments.map(
-                              (p) => Card(
+                            ...payments.map((p) {
+                              final isCorrection = p.amount < 0;
+                              final invoice = _invoiceForPayment(p);
+                              return Card(
                                 child: ListTile(
-                                  leading: const CircleAvatar(
-                                    child: Icon(Icons.payments_outlined),
+                                  leading: CircleAvatar(
+                                    child: Icon(
+                                      isCorrection
+                                          ? Icons.undo_rounded
+                                          : Icons.payments_outlined,
+                                    ),
                                   ),
                                   title: Text(
-                                    '${p.amount.toStringAsFixed(0)} د.ع',
-                                    style: const TextStyle(
+                                    isCorrection
+                                        ? 'تصحيح واصل ${p.amount.abs().toStringAsFixed(0)} د.ع'
+                                        : '${p.amount.toStringAsFixed(0)} د.ع',
+                                    style: TextStyle(
                                       fontWeight: FontWeight.bold,
+                                      color: isCorrection ? Colors.red : null,
                                     ),
                                   ),
                                   subtitle: Text(
-                                    '${f(p.at)} • ${_monthLabel(Subscriber.monthKeyOf(p.at))}${p.note.isEmpty ? '' : ' • ${p.note}'}',
+                                    '${f(p.at)}'
+                                    '${invoice == null ? '' : ' • وصل ${invoice.receiptNumber.toString().padLeft(6, '0')}'}'
+                                    '${p.note.isEmpty ? '' : ' • ${p.note}'}',
                                   ),
+                                  trailing: invoice == null
+                                      ? null
+                                      : const Icon(Icons.receipt_long_outlined),
+                                  onTap: invoice == null
+                                      ? null
+                                      : () => _openInvoice(invoice),
                                 ),
-                              ),
-                            ),
+                              );
+                            }),
                         ],
                       );
                     },
                   ),
-                  _financialLedgerTab(),
                   Center(
                     child: FilledButton.icon(
                       onPressed: () async {

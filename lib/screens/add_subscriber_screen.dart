@@ -723,16 +723,16 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                           : paymentDate.text.trim();
                     }
                     AppStore.subscribers.add(subscriber);
-                    if (p > 0.0001) {
+                    if (p - pd > 0.0001) {
                       await AppStore.addDailyTaskEvent(
                         DailyTaskEvent(
                           type: 'debt_added',
                           subscriberUser: subscriber.user,
                           subscriberName: subscriber.name,
                           at: createdAt,
-                          amount: p,
+                          amount: p - pd,
                           remainingAfter: subscriber.remaining,
-                          note: 'قيمة الاشتراك عند إنشاء المشترك',
+                          note: 'المتبقي من مبلغ الاشتراك عند إنشاء المشترك',
                         ),
                         persist: false,
                       );
@@ -865,6 +865,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                     final delta = adjustment.paymentDelta;
                     final subscriptionDelta = adjustment.subscriptionDelta;
                     final addedDebt = adjustment.addedDebt;
+                    final unpaidDebt = adjustment.unpaidAddedDebt;
                     final reducedDebt = adjustment.reducedDebt;
                     InvoiceRecord? invoice;
                     if (delta > 0.0001) {
@@ -881,16 +882,16 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                     }
                     final entryCollection = adjustment.appliedToCurrentCharge;
                     final debtRepayment = adjustment.appliedToCarriedDebt;
-                    if (addedDebt > 0.0001) {
+                    if (unpaidDebt > 0.0001) {
                       await AppStore.addDailyTaskEvent(
                         DailyTaskEvent(
                           type: 'debt_added',
                           subscriberUser: s.user,
                           subscriberName: s.name,
                           at: now,
-                          amount: addedDebt,
+                          amount: unpaidDebt,
                           remainingAfter: s.remaining,
-                          note: 'زيادة مبلغ الاشتراك',
+                          note: 'المتبقي من زيادة مبلغ الاشتراك',
                         ),
                         persist: false,
                       );

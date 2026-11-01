@@ -151,7 +151,8 @@ class DailyTaskEvent {
     this.amount = 0,
     this.remainingAfter = 0,
     this.note = '',
-  });
+    String category = '',
+  }) : _category = category;
 
   String type;
   String subscriberUser;
@@ -160,6 +161,13 @@ class DailyTaskEvent {
   double amount;
   double remainingAfter;
   String note;
+  String? _category;
+
+  String get category => _category ?? '';
+  set category(String value) => _category = value;
+
+  static const manualDebtCategory = 'manual_debt';
+  static const purchaseCategory = 'purchase';
 
   static const debtEntryCollectionType = 'debt_entry_collection';
   static const debtRemovedType = 'debt_removed';
@@ -181,6 +189,7 @@ class DailyTaskEvent {
     'amount': amount,
     'remainingAfter': remainingAfter,
     'note': note,
+    if (category.isNotEmpty) 'category': category,
   };
 
   factory DailyTaskEvent.fromJson(Map<String, dynamic> j) => DailyTaskEvent(
@@ -191,6 +200,7 @@ class DailyTaskEvent {
     amount: (j['amount'] ?? 0).toDouble(),
     remainingAfter: (j['remainingAfter'] ?? 0).toDouble(),
     note: (j['note'] ?? '').toString(),
+    category: (j['category'] ?? '').toString(),
   );
 
   static List<DailyTaskEvent> activationSettlement({
@@ -211,6 +221,10 @@ class DailyTaskEvent {
     final safeCharge = chargedAmount != null && chargedAmount.isFinite
         ? chargedAmount.clamp(0, double.infinity).toDouble()
         : safeCollected + safeRemaining;
+    // الدين هو ما لم يُدفع من هذا التفعيل فقط، لا مبلغ الاشتراك كاملاً.
+    final unpaidCharge = (safeCharge - safeCollected)
+        .clamp(0, safeRemaining)
+        .toDouble();
     return [
       if (safeCollected > 0.0001)
         DailyTaskEvent(
@@ -222,15 +236,15 @@ class DailyTaskEvent {
           remainingAfter: safeRemaining,
           note: note,
         ),
-      if (addRemainingDebtEvent && safeCharge > 0.0001)
+      if (addRemainingDebtEvent && unpaidCharge > 0.0001)
         DailyTaskEvent(
           type: 'debt_added',
           subscriberUser: subscriberUser,
           subscriberName: subscriberName,
           at: at,
-          amount: safeCharge,
+          amount: unpaidCharge,
           remainingAfter: safeRemaining,
-          note: 'قيمة الاشتراك المستحقة عند التفعيل',
+          note: 'المتبقي من مبلغ الاشتراك عند التفعيل',
         ),
     ];
   }
@@ -449,10 +463,41 @@ class DailyTaskSummary {
   double get totalCollected => activationCollected + debtPaymentsCollected;
 
   double get netDebtMovement =>
-      debtAddedTotal -
-      debtRepaymentsTotal -
-      debtReducedTotal -
-      activationCollected;
+      debtAddedTotal - debtRepaymentsTotal - debtReducedTotal;
+
+  /// الديون المضافة بعد خصم التسديدات اللاحقة. الواصل المسجل مع المبلغ في
+  /// العملية نفسها لا يُخصم لأن الدين المضاف سُجل أصلاً بعد طرحه.
+  static double outstandingAddedDebt(Iterable<DailyTaskEvent> events) {
+    final operations = <int, List<DailyTaskEvent>>{};
+    for (final event in events) {
+      operations
+          .putIfAbsent(event.at.microsecondsSinceEpoch, () => [])
+          .add(event);
+    }
+
+    var added = 0.0;
+    var repaid = 0.0;
+    for (final operation in operations.values) {
+      var collected = 0.0;
+      var chargeIncrease = 0.0;
+      var hasAddedDebt = false;
+      for (final event in operation) {
+        if (event.type == 'debt_added') {
+          hasAddedDebt = true;
+          added += event.amount;
+        } else if (event.type == DailyTaskEvent.debtEditType) {
+          if (event.amount > chargeIncrease) chargeIncrease = event.amount;
+        } else if ((event.type == 'debt_payment' ||
+                event.type == DailyTaskEvent.debtEntryCollectionType) &&
+            event.category.isEmpty) {
+          collected += event.amount;
+        }
+      }
+      if (chargeIncrease <= 0 && hasAddedDebt) continue;
+      if (collected > chargeIncrease) repaid += collected - chargeIncrease;
+    }
+    return added > repaid ? added - repaid : 0;
+  }
 
   factory DailyTaskSummary.fromEvents(
     Iterable<DailyTaskEvent> events, {
@@ -518,6 +563,14 @@ class DebtAdjustmentResult {
   final double reducedDebt;
   final double appliedToCarriedDebt;
   final double appliedToCurrentCharge;
+
+  /// ما يظهر للوكيل كدين مضاف. [addedDebt] يبقى كاملاً لأن السجل المالي
+  /// يقيّد المبلغ والدفعة كحركتين منفصلتين.
+  double get unpaidAddedDebt {
+    final paid = paymentDelta > 0 ? paymentDelta : 0.0;
+    final unpaid = addedDebt - paid;
+    return unpaid > 0 ? unpaid : 0;
+  }
 }
 
 class Subscriber {

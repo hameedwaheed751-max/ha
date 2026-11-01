@@ -34,6 +34,7 @@ import 'subscription_requests_admin_screen.dart';
 import 'chat_screen.dart';
 import 'add_subscriber_screen.dart';
 import 'dashboard_widgets.dart';
+import 'partial_payment_flow.dart';
 import 'speed_test_screen.dart';
 import 'ping_screen.dart';
 import 'accounting_reports_screen.dart';
@@ -3405,6 +3406,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
       final delta = adjustment.paymentDelta;
       final subscriptionDelta = adjustment.subscriptionDelta;
       final addedDebt = adjustment.addedDebt;
+      final unpaidDebt = adjustment.unpaidAddedDebt;
       final reducedDebt = adjustment.reducedDebt;
       InvoiceRecord? invoice;
 
@@ -3454,16 +3456,16 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
         }
         if (delta > 0) paymentDate = _date(now);
       }
-      if (addedDebt > 0.0001) {
+      if (unpaidDebt > 0.0001) {
         await AppStore.addDailyTaskEvent(
           DailyTaskEvent(
             type: 'debt_added',
             subscriberUser: s.user,
             subscriberName: s.name,
             at: now,
-            amount: addedDebt,
+            amount: unpaidDebt,
             remainingAfter: s.remaining,
-            note: 'إضافة مبلغ من تعديل الديون',
+            note: 'المتبقي من مبلغ الاشتراك',
           ),
           persist: false,
         );
@@ -3491,9 +3493,9 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
           (oldRemaining - s.remaining).abs() > 0.0001) {
         final operationDate = _date(now);
         final editDetails = <String>[];
-        if (addedDebt > 0.0001) {
+        if (unpaidDebt > 0.0001) {
           editDetails.add(
-            'بتاريخ $operationDate تم إضافة مبلغ دين ${addedDebt.toStringAsFixed(0)} د.ع',
+            'بتاريخ $operationDate تم إضافة مبلغ دين ${unpaidDebt.toStringAsFixed(0)} د.ع',
           );
         }
         if (reducedDebt > 0.0001) {
@@ -3697,124 +3699,8 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
   }
 
   Future<void> _partialPayment(Subscriber s) async {
-    final amountC = TextEditingController();
-    final before = s.remaining;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: AlertDialog(
-          title: Text('تسديد جزئي - ${s.name}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'المتبقي الحالي: ${before.toStringAsFixed(0)} د.ع',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: amountC,
-                autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: const InputDecoration(
-                  labelText: 'مبلغ الدفعة',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('تسديد'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (ok != true) return;
-    final amount = _parseAmount(amountC.text.trim()) ?? 0;
-    if (amount <= 0 || amount > before) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('مبلغ الدفعة غير صحيح')));
-      }
-      return;
-    }
-    final now = DateTime.now();
-    final allocation = s.applyPayment(amount, at: now);
-    final applied = allocation.totalApplied;
-    if (applied <= 0) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('تعذر تسجيل الدفعة')));
-      }
-      return;
-    }
-
-    final receiptNumber = await AppStore.issueReceiptNumber(persist: false);
-    s.registerInvoiceFromPayment(
-      receiptNumber: receiptNumber,
-      amount: applied,
-      at: now,
-      note: s.remaining <= 0.0001 ? 'فاتورة تسديد كامل' : 'فاتورة تسديد جزئي',
-    );
-    if (allocation.appliedToCarriedDebt > 0.0001) {
-      await AppStore.addDailyTaskEvent(
-        DailyTaskEvent(
-          type: 'debt_payment',
-          subscriberUser: s.user,
-          subscriberName: s.name,
-          at: now,
-          amount: allocation.appliedToCarriedDebt,
-          remainingAfter: s.remaining,
-          note: 'تسديد دين مرحّل من الأشهر السابقة',
-        ),
-        persist: false,
-      );
-    }
-    if (allocation.appliedToCurrentCharge > 0.0001) {
-      await AppStore.addDailyTaskEvent(
-        DailyTaskEvent(
-          type: DailyTaskEvent.debtEntryCollectionType,
-          subscriberUser: s.user,
-          subscriberName: s.name,
-          at: now,
-          amount: allocation.appliedToCurrentCharge,
-          remainingAfter: s.remaining,
-          note: 'واصل من اشتراك الشهر الحالي',
-        ),
-        persist: false,
-      );
-    }
-    s.paymentDate = _date(now);
-    await AppStore.save();
-    await _recordLedgerTransaction(
-      subscriber: s,
-      type: FinancialTransactionType.payment,
-      amount: applied,
-      date: now,
-      referenceId: 'payment-receipt:$receiptNumber',
-      note: s.remaining <= 0.0001 ? 'تسديد كامل' : 'تسديد جزئي',
-    );
+    await recordPartialPayment(context, s);
     if (mounted) setState(() {});
-    if (mounted && AppStore.lastSaveSyncError != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم حفظ الدفعة محلياً، لكن تعذرت المزامنة'),
-        ),
-      );
-    }
   }
 
   Future<void> _showPaymentHistory(Subscriber s) async {

@@ -26,8 +26,18 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
   String _money(double amount) => '${amount.toStringAsFixed(0)} د.ع';
 
   List<DailyTaskEvent> _eventsOfDay(DateTime day) {
+    // تعديل المبالغ وأحداث المشترك تبقى في سجل النشاط: كل حركة مالية لها سطرها.
+    const movementTypes = {
+      'activation',
+      'debt_payment',
+      'debt_added',
+      DailyTaskEvent.debtEntryCollectionType,
+      DailyTaskEvent.debtRemovedType,
+    };
     final events = AppStore.dailyTaskEvents
-        .where((e) => AppStore.isSameDay(e.at, day))
+        .where(
+          (e) => AppStore.isSameDay(e.at, day) && movementTypes.contains(e.type),
+        )
         .toList();
     events.sort((a, b) => b.at.compareTo(a.at));
     return events;
@@ -395,8 +405,12 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
         ? 'تخفيض دين'
         : isPayment
         ? isEntryCollection
-              ? 'واصل الاشتراك'
+              ? event.category == DailyTaskEvent.purchaseCategory
+                    ? 'واصل المشتريات'
+                    : 'واصل الاشتراك'
               : 'تسديد دين'
+        : event.category == DailyTaskEvent.purchaseCategory
+        ? 'مشتريات بالدين'
         : 'إضافة دين';
     final amountLabel = isActivation
         ? 'الواصل'

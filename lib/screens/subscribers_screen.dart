@@ -10,6 +10,7 @@ import '../services/render_whatsapp_service.dart';
 import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
 import 'add_subscriber_screen.dart';
+import 'partial_payment_flow.dart';
 import 'receipt_screen.dart';
 import 'subscriber_details_screen.dart';
 
@@ -2054,6 +2055,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   );
                   final delta = adjustment.paymentDelta;
                   final addedDebt = adjustment.addedDebt;
+                  final unpaidDebt = adjustment.unpaidAddedDebt;
                   final reducedDebt = adjustment.reducedDebt;
                   final subscriptionDelta = adjustment.subscriptionDelta;
                   if (delta.abs() <= 0.0001 &&
@@ -2116,16 +2118,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     );
                   }
 
-                  if (addedDebt > 0.0001) {
+                  if (unpaidDebt > 0.0001) {
                     await AppStore.addDailyTaskEvent(
                       DailyTaskEvent(
                         type: 'debt_added',
                         subscriberUser: s.user,
                         subscriberName: s.name,
                         at: now,
-                        amount: addedDebt,
+                        amount: unpaidDebt,
                         remainingAfter: s.remaining,
-                        note: 'إضافة مبلغ من شاشة ديون المشترك',
+                        note: 'المتبقي من مبلغ الاشتراك',
                       ),
                       persist: false,
                     );
@@ -2152,9 +2154,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       (oldRemaining - s.remaining).abs() > 0.0001) {
                     final operationDate = fmt(now);
                     final editDetails = <String>[];
-                    if (addedDebt > 0.0001) {
+                    if (unpaidDebt > 0.0001) {
                       editDetails.add(
-                        'بتاريخ $operationDate تم إضافة مبلغ دين ${addedDebt.toStringAsFixed(0)} د.ع',
+                        'بتاريخ $operationDate تم إضافة مبلغ دين ${unpaidDebt.toStringAsFixed(0)} د.ع',
                       );
                     }
                     if (reducedDebt > 0.0001) {
@@ -2645,7 +2647,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               subscriber: s,
               onEditDebt: (subscriber) => _debt(subscriber),
               onAddDebtAmount: (subscriber) => _debt(subscriber),
-              onPartialDebtPayment: (subscriber) => _debt(subscriber),
+              onPartialDebtPayment: (subscriber) =>
+                  recordPartialPayment(context, subscriber),
             ),
           ),
         );
@@ -2800,7 +2803,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   subscriber: s,
                   onEditDebt: (subscriber) => _debt(subscriber),
                   onAddDebtAmount: (subscriber) => _debt(subscriber),
-                  onPartialDebtPayment: (subscriber) => _debt(subscriber),
+                  onPartialDebtPayment: (subscriber) =>
+                      recordPartialPayment(context, subscriber),
                 ),
               ),
             );
