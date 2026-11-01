@@ -332,6 +332,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       builder: (_) => ActivationPaymentDialog(
         subscriber: subscriber,
         suggestedPrice: AppStore.suggestedActivationPrice(subscriber),
+        recordedAmount: AppStore.recordedActivationAmount(subscriber),
       ),
     );
   }
@@ -344,6 +345,32 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     required DateTime at,
     required String note,
   }) async {
+    if (payment.alreadyRecorded) {
+      final merged = AppStore.mergeRecordedSaleIntoActivation(s);
+      await AppStore.addAccountingActivation(
+        AccountingActivationRecord(
+          subscriberUser: s.user,
+          subscriberName: s.name,
+          packageName: s.packageDisplay,
+          saleAmount: merged,
+          sasDeduction: sasDeduction,
+          at: at,
+        ),
+        persist: false,
+      );
+      for (final event in DailyTaskEvent.activationSettlement(
+        subscriberUser: s.user,
+        subscriberName: s.name,
+        at: at,
+        collected: merged,
+        remaining: s.remaining,
+        note: note,
+        addRemainingDebtEvent: false,
+      )) {
+        await AppStore.addDailyTaskEvent(event, persist: false);
+      }
+      return (collected: merged, invoice: null);
+    }
     final debtAlreadyRecorded =
         s.currentMonthRemaining > 0.0001 && AppStore.hasRecordedCurrentDebt(s);
     s.chargeActivation(payment.saleAmount, at: at);
@@ -396,6 +423,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     required ({double collected, InvoiceRecord? invoice}) sale,
     required DateTime at,
   }) async {
+    // المبلغ والواصل المسجلان قبل التفعيل قُيّدا في السجل المالي وقتها.
+    if (payment.alreadyRecorded) return;
     await _recordLedgerTransaction(
       subscriber: s,
       type: FinancialTransactionType.activation,

@@ -183,6 +183,12 @@ class DailyTaskEvent {
 
   bool get isCancelled => cancelReason.isNotEmpty;
 
+  /// واصل سُجل قبل التفعيل ثم صار جزءاً من حركة التفعيل، فلا يظهر سطراً ثانياً.
+  /// يُحفظ كإلغاء لأن المزامنة تعيد الأحداث المحذوفة ولا تعكس الإلغاء.
+  bool get isMergedIntoActivation => cancelReason == mergedIntoActivationReason;
+
+  static const mergedIntoActivationReason = 'دُمجت مع واصل عند التفعيل';
+
   static const manualDebtCategory = 'manual_debt';
   static const purchaseCategory = 'purchase';
 
@@ -3295,6 +3301,72 @@ class AppStore {
       }
     }
     return subscriber.price;
+  }
+
+  /// حركات الواصل التي سجلت مبلغ هذا الاشتراك بالكامل قبل تفعيله. فارغة إذا
+  /// بقي من المبلغ شيء أو كان الواصل تسديداً لبيع تفعيل سابق.
+  static List<DailyTaskEvent> _recordedSaleCollections(Subscriber subscriber) {
+    if (subscriber.currentMonthRemaining > 0.0001) return const [];
+    final user = subscriber.user.trim().toLowerCase();
+    if (user.isEmpty) return const [];
+    final month = subscriber.billingMonthKey;
+    final sold = accountingActivations
+        .where(
+          (record) =>
+              record.subscriberUser.trim().toLowerCase() == user &&
+              Subscriber.monthKeyOf(record.at) == month,
+        )
+        .fold<double>(0, (sum, record) => sum + record.saleAmount);
+    final unsold = subscriber.paid - sold;
+    if (unsold <= 0.0001) return const [];
+
+    final collections =
+        dailyTaskEvents
+            .where(
+              (event) =>
+                  !event.isCancelled &&
+                  event.category.isEmpty &&
+                  event.type == DailyTaskEvent.debtEntryCollectionType &&
+                  event.subscriberUser.trim().toLowerCase() == user &&
+                  Subscriber.monthKeyOf(event.at) == month,
+            )
+            .toList()
+          ..sort((a, b) => b.at.compareTo(a.at));
+    final matched = <DailyTaskEvent>[];
+    var total = 0.0;
+    for (final event in collections) {
+      if (total >= unsold - 0.0001) break;
+      matched.add(event);
+      total += event.amount;
+    }
+    return (total - unsold).abs() <= 0.0001 ? matched : const [];
+  }
+
+  static double recordedActivationAmount(Subscriber subscriber) =>
+      _recordedSaleCollections(subscriber).fold<double>(
+        0,
+        (sum, event) => sum + event.amount,
+      );
+
+  /// يدمج الواصل المسجل قبل التفعيل في حركة التفعيل دون مساس بالمبالغ.
+  static double mergeRecordedSaleIntoActivation(Subscriber subscriber) {
+    final collections = _recordedSaleCollections(subscriber);
+    final moments = collections.map((event) => event.at).toList();
+    final user = subscriber.user.trim().toLowerCase();
+    final edits = dailyTaskEvents.where(
+      (event) =>
+          event.type == DailyTaskEvent.debtEditType &&
+          event.subscriberUser.trim().toLowerCase() == user &&
+          moments.any(event.at.isAtSameMomentAs),
+    );
+    var merged = 0.0;
+    for (final event in collections) {
+      merged += event.amount;
+    }
+    for (final event in [...collections, ...edits]) {
+      event.cancelReason = DailyTaskEvent.mergedIntoActivationReason;
+    }
+    return merged;
   }
 
   static bool hasRecordedActivation(Subscriber subscriber) {

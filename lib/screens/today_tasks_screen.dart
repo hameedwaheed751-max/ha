@@ -36,7 +36,10 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
     };
     final events = AppStore.dailyTaskEvents
         .where(
-          (e) => AppStore.isSameDay(e.at, day) && movementTypes.contains(e.type),
+          (e) =>
+              AppStore.isSameDay(e.at, day) &&
+              movementTypes.contains(e.type) &&
+              !e.isMergedIntoActivation,
         )
         .toList();
     events.sort((a, b) => b.at.compareTo(a.at));
@@ -400,7 +403,7 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
         ? Icons.payments_outlined
         : Icons.add_card_outlined;
     final label = isActivation
-        ? 'تفعيل'
+        ? 'واصل عند التفعيل'
         : isDebtRemoved
         ? 'تخفيض دين'
         : isPayment

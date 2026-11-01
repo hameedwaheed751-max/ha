@@ -6,6 +6,7 @@ typedef ActivationPayment = ({
   double saleAmount,
   double collected,
   ActivationSettlement settlement,
+  bool alreadyRecorded,
 });
 
 class ActivationPaymentDialog extends StatefulWidget {
@@ -13,10 +14,14 @@ class ActivationPaymentDialog extends StatefulWidget {
     super.key,
     required this.subscriber,
     required this.suggestedPrice,
+    this.recordedAmount = 0,
   });
 
   final Subscriber subscriber;
   final double suggestedPrice;
+
+  /// مبلغ الاشتراك المسجل وواصله كاملاً قبل التفعيل.
+  final double recordedAmount;
 
   @override
   State<ActivationPaymentDialog> createState() =>
@@ -28,10 +33,12 @@ class _ActivationPaymentDialogState extends State<ActivationPaymentDialog> {
   late final TextEditingController _priceController;
   final _partialController = TextEditingController();
   ActivationSettlement _settlement = ActivationSettlement.paidOnActivation;
+  late bool _useRecorded;
 
   @override
   void initState() {
     super.initState();
+    _useRecorded = widget.recordedAmount > 0.0001;
     _priceController = TextEditingController(
       text: widget.suggestedPrice > 0
           ? widget.suggestedPrice.toStringAsFixed(0)
@@ -67,9 +74,12 @@ class _ActivationPaymentDialogState extends State<ActivationPaymentDialog> {
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
     final ActivationPayment payment = (
-      saleAmount: _price,
-      collected: _collected,
-      settlement: _settlement,
+      saleAmount: _useRecorded ? widget.recordedAmount : _price,
+      collected: _useRecorded ? widget.recordedAmount : _collected,
+      settlement: _useRecorded
+          ? ActivationSettlement.paidOnActivation
+          : _settlement,
+      alreadyRecorded: _useRecorded,
     );
     Navigator.pop(context, payment);
   }
@@ -106,65 +116,83 @@ class _ActivationPaymentDialogState extends State<ActivationPaymentDialog> {
                   'دين سابق: ${subscriber.carriedDebt.toStringAsFixed(0)} د.ع',
                   style: TextStyle(color: Colors.orange.shade800),
                 ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _priceController,
-                autofocus: widget.suggestedPrice <= 0,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+              if (_useRecorded) ...[
+                const SizedBox(height: 12),
+                _summaryRow(
+                  'واصل عند التفعيل',
+                  widget.recordedAmount,
+                  Colors.green.shade700,
                 ),
-                decoration: const InputDecoration(
-                  labelText: 'مبلغ الاشتراك',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 6),
+                const Text('المبلغ مسجل مسبقاً، ولن يُضاف مرة ثانية.'),
+                TextButton(
+                  onPressed: () => setState(() => _useRecorded = false),
+                  child: const Text('هذا اشتراك جديد بمبلغ آخر'),
                 ),
-                onChanged: (_) => setState(() {}),
-                validator: (_) =>
-                    _price <= 0 ? 'أدخل مبلغ الاشتراك' : null,
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'كيف دفع المشترك؟',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: [
-                  for (final settlement in ActivationSettlement.values)
-                    ChoiceChip(
-                      label: Text(settlement.label),
-                      selected: _settlement == settlement,
-                      onSelected: (_) =>
-                          setState(() => _settlement = settlement),
-                    ),
-                ],
-              ),
-              if (_settlement == ActivationSettlement.partialPayment) ...[
-                const SizedBox(height: 10),
+              ] else ...[
+                const SizedBox(height: 12),
                 TextFormField(
-                  controller: _partialController,
-                  autofocus: true,
+                  controller: _priceController,
+                  autofocus: widget.suggestedPrice <= 0,
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
                   decoration: const InputDecoration(
-                    labelText: 'المبلغ الواصل',
+                    labelText: 'مبلغ الاشتراك',
                     border: OutlineInputBorder(),
                   ),
                   onChanged: (_) => setState(() {}),
-                  validator: (_) {
-                    final partial = _amount(_partialController.text);
-                    if (partial <= 0 || partial >= _price) {
-                      return 'أدخل مبلغاً أقل من مبلغ الاشتراك';
-                    }
-                    return null;
-                  },
+                  validator: (_) => _price <= 0 ? 'أدخل مبلغ الاشتراك' : null,
                 ),
+                const SizedBox(height: 12),
+                const Text(
+                  'كيف دفع المشترك؟',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final settlement in ActivationSettlement.values)
+                      ChoiceChip(
+                        label: Text(settlement.label),
+                        selected: _settlement == settlement,
+                        onSelected: (_) =>
+                            setState(() => _settlement = settlement),
+                      ),
+                  ],
+                ),
+                if (_settlement == ActivationSettlement.partialPayment) ...[
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _partialController,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'المبلغ الواصل',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                    validator: (_) {
+                      final partial = _amount(_partialController.text);
+                      if (partial <= 0 || partial >= _price) {
+                        return 'أدخل مبلغاً أقل من مبلغ الاشتراك';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+                const SizedBox(height: 12),
+                _summaryRow(
+                  'يُسجل في الواصل',
+                  _collected,
+                  Colors.green.shade700,
+                ),
+                _summaryRow('يُسجل في الديون', newDebt, Colors.red.shade700),
               ],
-              const SizedBox(height: 12),
-              _summaryRow('يُسجل في الواصل', _collected, Colors.green.shade700),
-              _summaryRow('يُسجل في الديون', newDebt, Colors.red.shade700),
             ],
           ),
         ),

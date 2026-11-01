@@ -423,6 +423,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     final subscriberUser = s.user.trim().toLowerCase();
     final subscriberName = s.name.trim().toLowerCase();
     final operations = AppStore.dailyTaskEvents.where((event) {
+      if (event.isMergedIntoActivation) return false;
       if (event.type != 'debt_added' &&
           event.type != DailyTaskEvent.debtRemovedType &&
           event.type != 'debt_payment' &&

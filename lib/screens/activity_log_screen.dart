@@ -50,6 +50,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
   List<DailyTaskEvent> _filteredEvents() {
     final query = _searchController.text.trim().toLowerCase();
     final events = AppStore.dailyTaskEvents.where((event) {
+      if (event.isMergedIntoActivation) return false;
       if (_typeFilter != 'all' && event.type != _typeFilter) return false;
       if (_dateFilter != null && !AppStore.isSameDay(event.at, _dateFilter!)) {
         return false;

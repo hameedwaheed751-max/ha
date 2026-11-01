@@ -20,6 +20,7 @@ void main() {
   Future<ActivationPayment? Function()> open(
     WidgetTester tester, {
     double suggestedPrice = 35000,
+    double recordedAmount = 0,
   }) async {
     ActivationPayment? result;
     await tester.pumpWidget(
@@ -33,6 +34,7 @@ void main() {
                   builder: (_) => ActivationPaymentDialog(
                     subscriber: subscriber,
                     suggestedPrice: suggestedPrice,
+                    recordedAmount: recordedAmount,
                   ),
                 );
               },
@@ -93,6 +95,35 @@ void main() {
 
     expect(result()?.saleAmount, 35000);
     expect(result()?.collected, 0);
+  });
+
+  testWidgets('an amount recorded earlier is not asked for or charged again', (
+    tester,
+  ) async {
+    final result = await open(tester, recordedAmount: 35000);
+
+    expect(find.byType(TextFormField), findsNothing);
+    await confirm(tester);
+
+    expect(result()?.alreadyRecorded, isTrue);
+    expect(result()?.saleAmount, 35000);
+    expect(result()?.collected, 35000);
+  });
+
+  testWidgets('the agent can still enter a new sale over a recorded amount', (
+    tester,
+  ) async {
+    final result = await open(tester, recordedAmount: 35000);
+
+    await tester.tap(find.text('هذا اشتراك جديد بمبلغ آخر'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '45000');
+    await tester.pumpAndSettle();
+    await confirm(tester);
+
+    expect(result()?.alreadyRecorded, isFalse);
+    expect(result()?.saleAmount, 45000);
+    expect(result()?.collected, 45000);
   });
 
   testWidgets('activation needs a subscription amount', (tester) async {
