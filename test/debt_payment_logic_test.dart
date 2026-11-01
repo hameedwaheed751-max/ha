@@ -170,6 +170,93 @@ void main() {
     expect(subscriber.remaining, 30000);
   });
 
+  group('activation charge', () {
+    final at = DateTime(2026, 11, 1, 10);
+
+    Subscriber subscriber({double price = 0, double paid = 0}) => Subscriber(
+      user: 'u1',
+      name: 'Test User',
+      phone: '',
+      address: '',
+      ip: '',
+      type: 'باقة 35',
+      price: price,
+      paid: paid,
+      billingMonthKey: '2026-11',
+      startDate: DateTime(2026, 10, 1),
+      endDate: DateTime(2026, 11, 1),
+    );
+
+    test('a subscriber with no amount can be charged and paid', () {
+      final s = subscriber();
+
+      s.chargeActivation(35000, at: at);
+      final allocation = s.applyPayment(15000, at: at);
+
+      expect(allocation.totalApplied, 15000);
+      expect(s.remaining, 20000);
+    });
+
+    test('a second activation in the month is charged again', () {
+      final s = subscriber(price: 35000, paid: 35000);
+
+      s.chargeActivation(35000, at: at);
+
+      expect(s.remaining, 35000);
+      expect(s.paid, 35000);
+    });
+
+    test('a pending amount is not charged twice', () {
+      final s = subscriber(price: 35000, paid: 10000);
+
+      s.chargeActivation(
+        AppStore.suggestedActivationPrice(s),
+        at: at,
+      );
+
+      expect(s.price, 35000);
+      expect(s.remaining, 25000);
+    });
+
+    test('the price comes from the package, then the last sale', () {
+      AppStore.packages
+        ..clear()
+        ..add(PackagePlan(name: 'باقة 35', price: 35000));
+      AppStore.accountingActivations.clear();
+      addTearDown(AppStore.packages.clear);
+      addTearDown(AppStore.accountingActivations.clear);
+
+      expect(AppStore.suggestedActivationPrice(subscriber()), 35000);
+
+      AppStore.packages.clear();
+      AppStore.accountingActivations.add(
+        AccountingActivationRecord(
+          subscriberUser: 'u1',
+          subscriberName: 'Test User',
+          packageName: 'باقة 35',
+          saleAmount: 40000,
+          sasDeduction: 30000,
+          at: at,
+        ),
+      );
+
+      expect(AppStore.suggestedActivationPrice(subscriber()), 40000);
+    });
+
+    test('a raised price with the same paid amount adds no payment', () {
+      final s = subscriber(price: 35000);
+
+      final adjustment = s.adjustDebtAmounts(
+        subscriptionAmount: 45000,
+        paidAmount: s.paid,
+        at: at,
+      );
+
+      expect(adjustment.paymentDelta, 0);
+      expect(s.remaining, 45000);
+    });
+  });
+
   group('added debt shown for the month', () {
     DailyTaskEvent event(
       String type,

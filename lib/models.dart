@@ -709,6 +709,17 @@ class Subscriber {
     return tentative.clamp(0, safePrice).toDouble();
   }
 
+  /// [saleAmount] هو المستحق عن هذا التفعيل. ما دُفع سابقاً هذا الشهر يبقى
+  /// مسجلاً، لذلك لا يضيع مبلغ تفعيل ثانٍ في الشهر نفسه.
+  void chargeActivation(double saleAmount, {DateTime? at}) {
+    if (!saleAmount.isFinite || saleAmount <= 0) {
+      throw ArgumentError.value(saleAmount, 'saleAmount');
+    }
+    rolloverToMonth(at ?? DateTime.now());
+    price = paid + saleAmount;
+    normalizeDebtFields();
+  }
+
   void setDebtAmounts({
     required double subscriptionAmount,
     required double paidAmount,
@@ -3047,6 +3058,26 @@ class AppStore {
 
   static bool isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  static double suggestedActivationPrice(Subscriber subscriber) {
+    if (subscriber.currentMonthRemaining > 0.0001) {
+      return subscriber.currentMonthRemaining;
+    }
+    final package = subscriber.packageDisplay.trim().toLowerCase();
+    for (final plan in packages) {
+      if (plan.name.trim().toLowerCase() == package && plan.price > 0) {
+        return plan.price;
+      }
+    }
+    final user = subscriber.user.trim().toLowerCase();
+    for (final record in accountingActivations) {
+      if (record.subscriberUser.trim().toLowerCase() == user &&
+          record.saleAmount > 0) {
+        return record.saleAmount;
+      }
+    }
+    return subscriber.price;
   }
 
   static bool hasRecordedActivation(Subscriber subscriber) {

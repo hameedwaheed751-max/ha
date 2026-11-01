@@ -9,6 +9,7 @@ import '../sas_sync_service.dart';
 import '../services/render_whatsapp_service.dart';
 import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
+import 'activation_payment_dialog.dart';
 import 'add_subscriber_screen.dart';
 import 'partial_payment_flow.dart';
 import 'receipt_screen.dart';
@@ -324,70 +325,96 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     return n;
   }
 
-  Future<double?> _confirmActivation(Subscriber subscriber) async {
-    final amountController = TextEditingController(text: '0');
-    try {
-      return await showDialog<double>(
-        context: context,
-        builder: (dialogContext) => Directionality(
-          textDirection: TextDirection.rtl,
-          child: AlertDialog(
-            title: const Text('تأكيد تفعيل المشترك'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'مبلغ الاشتراك: ${subscriber.price.toStringAsFixed(0)} د.ع'
-                  '\nالمتبقي قبل التفعيل: ${subscriber.remaining.toStringAsFixed(0)} د.ع'
-                  '\nهل تريد تفعيل اشتراك ${subscriber.name}؟',
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: amountController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: 'المبلغ الواصل من التفعيل',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('إلغاء'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  final amount = _parseAmount(amountController.text);
-                  if (amount == null ||
-                      !amount.isFinite ||
-                      amount < 0 ||
-                      amount > subscriber.remaining) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'المبلغ يجب أن يكون بين صفر والمتبقي '
-                          '(${subscriber.remaining.toStringAsFixed(0)} د.ع).',
-                        ),
-                      ),
-                    );
-                    return;
-                  }
-                  Navigator.pop(dialogContext, amount);
-                },
-                child: const Text('تفعيل'),
-              ),
-            ],
-          ),
-        ),
+  Future<ActivationPayment?> _confirmActivation(Subscriber subscriber) {
+    subscriber.rolloverToMonth(DateTime.now());
+    return showDialog<ActivationPayment>(
+      context: context,
+      builder: (_) => ActivationPaymentDialog(
+        subscriber: subscriber,
+        suggestedPrice: AppStore.suggestedActivationPrice(subscriber),
+      ),
+    );
+  }
+
+  /// يسجل بيع الاشتراك والواصل بعد نجاح التفعيل في SAS.
+  Future<({double collected, InvoiceRecord? invoice})> _recordActivationSale(
+    Subscriber s, {
+    required ActivationPayment payment,
+    required double sasDeduction,
+    required DateTime at,
+    required String note,
+  }) async {
+    final debtAlreadyRecorded =
+        s.currentMonthRemaining > 0.0001 && AppStore.hasRecordedCurrentDebt(s);
+    s.chargeActivation(payment.saleAmount, at: at);
+    final allocation = s.applyPayment(
+      payment.collected,
+      at: at,
+      note: payment.settlement.label,
+    );
+    final collected = allocation.totalApplied;
+    InvoiceRecord? invoice;
+    if (collected > 0.0001) {
+      final receiptNumber = await AppStore.issueReceiptNumber(persist: false);
+      invoice = s.registerInvoiceFromPayment(
+        receiptNumber: receiptNumber,
+        amount: collected,
+        at: at,
+        note: 'فاتورة ${payment.settlement.label}',
       );
-    } finally {
-      amountController.dispose();
+      s.paymentDate = fmt(at);
     }
+    await AppStore.addAccountingActivation(
+      AccountingActivationRecord(
+        subscriberUser: s.user,
+        subscriberName: s.name,
+        packageName: s.packageDisplay,
+        saleAmount: payment.saleAmount,
+        sasDeduction: sasDeduction,
+        at: at,
+      ),
+      persist: false,
+    );
+    for (final event in DailyTaskEvent.activationSettlement(
+      subscriberUser: s.user,
+      subscriberName: s.name,
+      at: at,
+      collected: collected,
+      remaining: s.remaining,
+      note: note,
+      addRemainingDebtEvent: !debtAlreadyRecorded,
+      chargedAmount: payment.saleAmount,
+    )) {
+      await AppStore.addDailyTaskEvent(event, persist: false);
+    }
+    return (collected: collected, invoice: invoice);
+  }
+
+  Future<void> _recordActivationLedger(
+    Subscriber s, {
+    required ActivationPayment payment,
+    required ({double collected, InvoiceRecord? invoice}) sale,
+    required DateTime at,
+  }) async {
+    await _recordLedgerTransaction(
+      subscriber: s,
+      type: FinancialTransactionType.activation,
+      amount: payment.saleAmount,
+      date: at,
+      referenceId:
+          'activation:${s.subscriberId}:${at.toUtc().toIso8601String()}',
+      note: s.packageDisplay,
+    );
+    final invoice = sale.invoice;
+    if (invoice == null) return;
+    await _recordLedgerTransaction(
+      subscriber: s,
+      type: FinancialTransactionType.payment,
+      amount: sale.collected,
+      date: at,
+      referenceId: 'payment-receipt:${invoice.receiptNumber}',
+      note: invoice.note,
+    );
   }
 
   double? _parseAmount(String raw) {
@@ -785,8 +812,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       return;
     }
 
-    final activationCollectedAmount = await _confirmActivation(s);
-    if (activationCollectedAmount == null) return;
+    final activationPayment = await _confirmActivation(s);
+    if (activationPayment == null) return;
     try {
       final settings = await SasSettings.load();
       if (settings.username.trim().isEmpty || settings.password.isEmpty) {
@@ -862,47 +889,13 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         }
       }
 
-      final debtAlreadyRecorded = AppStore.hasRecordedCurrentDebt(s);
-      final paymentAllocation = s.applyPayment(
-        activationCollectedAmount,
+      final sale = await _recordActivationSale(
+        s,
+        payment: activationPayment,
+        sasDeduction: activationAmount,
         at: recordedAt,
-        note: 'واصل عند التفعيل',
-      );
-      final collected = paymentAllocation.totalApplied;
-      InvoiceRecord? activationInvoice;
-      if (collected > 0.0001) {
-        final receiptNumber = await AppStore.issueReceiptNumber(persist: false);
-        activationInvoice = s.registerInvoiceFromPayment(
-          receiptNumber: receiptNumber,
-          amount: collected,
-          at: recordedAt,
-          note: 'فاتورة واصل عند التفعيل',
-        );
-        s.paymentDate = fmt(recordedAt);
-      }
-      await AppStore.addAccountingActivation(
-        AccountingActivationRecord(
-          subscriberUser: s.user,
-          subscriberName: s.name,
-          packageName: s.packageDisplay,
-          saleAmount: s.price,
-          sasDeduction: activationAmount,
-          at: recordedAt,
-        ),
-        persist: false,
-      );
-      for (final event in DailyTaskEvent.activationSettlement(
-        subscriberUser: s.user,
-        subscriberName: s.name,
-        at: recordedAt,
-        collected: collected,
-        remaining: s.remaining,
         note: 'تفعيل من قائمة المشتركين',
-        addRemainingDebtEvent: !debtAlreadyRecorded,
-        chargedAmount: s.price,
-      )) {
-        await AppStore.addDailyTaskEvent(event, persist: false);
-      }
+      );
 
       // تحديث بيانات SAS إذا تم جلبها
       if (userData is Map) {
@@ -919,16 +912,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
       // حفظ البيانات المحلية أولاً
       await AppStore.save();
-      if (activationInvoice != null) {
-        await _recordLedgerTransaction(
-          subscriber: s,
-          type: FinancialTransactionType.payment,
-          amount: collected,
-          date: recordedAt,
-          referenceId: 'payment-receipt:${activationInvoice.receiptNumber}',
-          note: activationInvoice.note,
-        );
-      }
+      await _recordActivationLedger(
+        s,
+        payment: activationPayment,
+        sale: sale,
+        at: recordedAt,
+      );
 
       if (mounted) {
         if (loadingDialogShown && Navigator.of(context).canPop()) {
@@ -936,7 +925,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           loadingDialogShown = false;
         }
 
-        await _sendActivationWhatsApp(s, paidAmount: collected);
+        await _sendActivationWhatsApp(s, paidAmount: sale.collected);
         if (!mounted) return;
 
         setState(() {
@@ -1816,7 +1805,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             ),
           ),
         );
-        if (activate == true && mounted) {
+        final activationPayment = activate == true && mounted
+            ? await _confirmActivation(s)
+            : null;
+        if (activationPayment != null && mounted) {
           showDialog(
             context: context,
             barrierDismissible: false,
@@ -1857,34 +1849,22 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           final activationAmount = _activationReceivedAmount(
             activationResponse,
           );
-          await AppStore.addAccountingActivation(
-            AccountingActivationRecord(
-              subscriberUser: s.user,
-              subscriberName: s.name,
-              packageName: s.packageDisplay,
-              saleAmount: 0,
-              sasDeduction: activationAmount,
-              at: recordedAt,
-            ),
-            persist: false,
-          );
-          final debtAlreadyRecorded = AppStore.hasRecordedCurrentDebt(s);
-          for (final event in DailyTaskEvent.activationSettlement(
-            subscriberUser: s.user,
-            subscriberName: s.name,
+          final sale = await _recordActivationSale(
+            s,
+            payment: activationPayment,
+            sasDeduction: activationAmount,
             at: recordedAt,
-            collected: 0,
-            remaining: s.remaining,
             note: 'تفعيل بعد تغيير الباقة',
-            addRemainingDebtEvent: !debtAlreadyRecorded,
-            isReactivation: true,
-            chargedAmount: s.price,
-          )) {
-            await AppStore.addDailyTaskEvent(event, persist: false);
-          }
+          );
           await AppStore.save();
+          await _recordActivationLedger(
+            s,
+            payment: activationPayment,
+            sale: sale,
+            at: recordedAt,
+          );
           if (mounted) Navigator.pop(context);
-          await _sendActivationWhatsApp(s);
+          await _sendActivationWhatsApp(s, paidAmount: sale.collected);
           if (!mounted) return;
           if (mounted) {
             setState(() {});

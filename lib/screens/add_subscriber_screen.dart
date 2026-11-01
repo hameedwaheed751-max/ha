@@ -803,7 +803,6 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                     final oldPackage = s.packageDisplay;
                     final oldPrice = s.price;
                     final oldPaid = s.paid;
-                    final oldRemaining = s.remaining;
                     final oldStartDate = s.startDate;
                     final oldEndDate = s.endDate;
                     final oldNotes = s.notes;
@@ -847,15 +846,8 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                     s.address = address.text.trim();
                     s.ip = ip.text.trim();
                     s.type = type.text.trim();
-                    double targetPaid;
-                    if ((pd - oldPaid).abs() > 0.0001) {
-                      targetPaid = pd.clamp(0, p).toDouble();
-                    } else if ((p - oldPrice).abs() > 0.0001 ||
-                        ((p - pd) - oldRemaining).abs() > 0.0001) {
-                      targetPaid = (p - pd).clamp(0, p).toDouble();
-                    } else {
-                      targetPaid = oldPaid.clamp(0, p).toDouble();
-                    }
+                    // حقل الواصل هو المرجع: تغيير السعر لا يعني أن المشترك دفع.
+                    final targetPaid = pd.clamp(0, p).toDouble();
                     final now = DateTime.now();
                     final adjustment = s.adjustDebtAmounts(
                       subscriptionAmount: p,
