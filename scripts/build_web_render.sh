@@ -27,7 +27,26 @@ flutter build web --release --pwa-strategy=none \
   --dart-define=NETAGENT_WHATSAPP_PROVIDER=meta \
   --dart-define=WAHA_GATEWAY_URL="${WAHA_GATEWAY_URL}"
 
-cp web/runtime_config.js build/web/runtime_config.js
+if [ -z "${SAS_PROXY_TOKEN:-}" ]; then
+  echo "SAS_PROXY_TOKEN must be set in the Render environment." >&2
+  exit 1
+fi
+
+case "$SAS_PROXY_TOKEN" in
+  *\"* | *\\*)
+    echo "SAS_PROXY_TOKEN must not contain quotes or backslashes." >&2
+    exit 1
+    ;;
+esac
+
+escaped_token=$(printf '%s' "$SAS_PROXY_TOKEN" | sed -e 's/[&|]/\\&/g')
+sed "s|sasProxyToken: \"[^\"]*\"|sasProxyToken: \"${escaped_token}\"|" \
+  web/runtime_config.js > build/web/runtime_config.js
+
+if ! grep -Fq "sasProxyToken: \"${SAS_PROXY_TOKEN}\"" build/web/runtime_config.js; then
+  echo "SAS_PROXY_TOKEN was not written to runtime_config.js." >&2
+  exit 1
+fi
 
 if [ ! -s build/web/index.html ] ||
   [ ! -s build/web/flutter_bootstrap.js ] ||
