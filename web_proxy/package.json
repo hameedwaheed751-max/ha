@@ -5,7 +5,8 @@
   "description": "Simple SAS CORS proxy for NetAgent web",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/security.test.js test/routes.test.js"
   },
   "engines": {
     "node": ">=18"

@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+const dns = require('dns');
 const http = require('http');
 const https = require('https');
 const net = require('net');
@@ -11,6 +13,7 @@ const WHATSAPP_TOKEN = String(process.env.WHATSAPP_TOKEN || '').trim();
 const PHONE_NUMBER_ID = String(process.env.PHONE_NUMBER_ID || '').trim();
 const WHATSAPP_PHONE_NUMBER_ID = String(process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim();
 const WHATSAPP_VERIFY_TOKEN = String(process.env.WHATSAPP_VERIFY_TOKEN || '').trim();
+const WHATSAPP_APP_SECRET = String(process.env.WHATSAPP_APP_SECRET || '').trim();
 const WHATSAPP_API_VERSION = String(process.env.WHATSAPP_API_VERSION || 'v22.0').trim();
 const WHATSAPP_BUSINESS_ACCOUNT_ID = String(
   process.env.WHATSAPP_BUSINESS_ACCOUNT_ID ||
@@ -105,9 +108,25 @@ function sendJson(req, res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+function maskPhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  return digits.length > 4 ? `***${digits.slice(-4)}` : '***';
+}
+
+function hasValidWebhookSignature(rawBody, signatureHeader) {
+  const received = Buffer.from(String(signatureHeader || ''));
+  const expected = Buffer.from(
+    `sha256=${crypto
+      .createHmac('sha256', WHATSAPP_APP_SECRET)
+      .update(rawBody, 'utf8')
+      .digest('hex')}`
+  );
+  return received.length === expected.length && crypto.timingSafeEqual(received, expected);
+}
+
 function hasValidProxyToken(req) {
   if (CONFIGURED_PROXY_TOKENS.length === 0) {
-    return true;
+    return NODE_ENV !== 'production';
   }
 
   const xToken = String(req.headers['x-proxy-token'] || '').trim();
@@ -135,12 +154,29 @@ function isPrivateIp(ip) {
   }
   if (net.isIPv6(ip)) {
     const normalized = ip.toLowerCase();
-    if (normalized === '::1') return true;
+    if (normalized === '::' || normalized === '::1') return true;
+    if (normalized.startsWith('::ffff:')) return true;
     if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
     if (normalized.startsWith('fe80')) return true;
     return false;
   }
   return true;
+}
+
+// يفحص العنوان الناتج عن DNS وقت الاتصال، فلا يتجاوز اسم نطاق فحص العناوين الخاصة.
+function publicOnlyLookup(hostname, options, callback) {
+  dns.lookup(hostname, options, (error, address, family) => {
+    if (error) {
+      callback(error);
+      return;
+    }
+    const addresses = Array.isArray(address) ? address.map((item) => item.address) : [address];
+    if (!ALLOW_PRIVATE_TARGETS && addresses.some(isPrivateIp)) {
+      callback(Object.assign(new Error('Private address blocked'), {code: 'EPRIVATE'}));
+      return;
+    }
+    callback(null, address, family);
+  });
 }
 
 function isLocalHostname(hostname) {
@@ -182,7 +218,8 @@ function validateTarget(targetBaseUrl) {
     return 'Localhost targets are not allowed';
   }
 
-  const parsedIp = net.isIP(hostname) ? hostname : null;
+  const bareHost = hostname.replace(/^\[|\]$/g, '');
+  const parsedIp = net.isIP(bareHost) ? bareHost : null;
   if (!ALLOW_PRIVATE_TARGETS && parsedIp && isPrivateIp(parsedIp)) {
     return 'Private IP targets are not allowed';
   }
@@ -526,7 +563,7 @@ async function sendWhatsAppText(to, message) {
 
   const endpoint = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phoneNumberId}/messages`;
   console.log('[whatsapp] outbound text payload:', JSON.stringify({
-    to: cleanTo,
+    to: maskPhone(cleanTo),
     type: 'text',
     textLength: body.length,
   }));
@@ -547,7 +584,7 @@ async function sendWhatsAppText(to, message) {
   });
 
   const raw = await response.text();
-  console.log(`[whatsapp] text response status=${response.status} body=${raw || '<empty>'}`);
+  console.log(`[whatsapp] text response status=${response.status}`);
   let parsed;
   try {
     parsed = raw ? JSON.parse(raw) : {};
@@ -819,7 +856,12 @@ async function sendWhatsAppTemplate(
     },
   };
 
-  console.log('[whatsapp] outbound template payload:', JSON.stringify(payload));
+  console.log('[whatsapp] outbound template payload:', JSON.stringify({
+    to: maskPhone(cleanTo),
+    template: name,
+    language: lang,
+    parametersCount: bodyParameters.length,
+  }));
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -831,7 +873,7 @@ async function sendWhatsAppTemplate(
   });
 
   const raw = await response.text();
-  console.log(`[whatsapp] template response status=${response.status} body=${raw || '<empty>'}`);
+  console.log(`[whatsapp] template response status=${response.status}`);
   let parsed;
   try {
     parsed = raw ? JSON.parse(raw) : {};
@@ -938,13 +980,22 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
     }
 
     if (req.method === 'POST') {
-      console.log('[webhook] event received');
-      res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'});
-      res.end('OK');
-
       (async () => {
         try {
           const rawBody = await readRawBody(req, MAX_BODY_BYTES);
+          if (!WHATSAPP_APP_SECRET) {
+            console.warn('[webhook] rejected: WHATSAPP_APP_SECRET is not configured');
+            sendJson(req, res, 503, {error: 'Webhook is not configured'});
+            return;
+          }
+          if (!hasValidWebhookSignature(rawBody, req.headers['x-hub-signature-256'])) {
+            console.warn('[webhook] rejected: invalid signature');
+            sendJson(req, res, 401, {error: 'Invalid signature'});
+            return;
+          }
+
+          res.writeHead(200, {'Content-Type': 'text/plain; charset=utf-8'});
+          res.end('OK');
           try {
             const parsed = rawBody ? JSON.parse(rawBody) : {};
             const webhookAccountId = String(parsed?.entry?.[0]?.id || '').trim();
@@ -952,12 +1003,15 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
               discoveredWhatsAppBusinessAccountId = webhookAccountId;
             }
             captureWhatsAppWebhookStatuses(parsed);
-            console.log('[webhook] WhatsApp event body JSON:', JSON.stringify(parsed));
+            console.log('[webhook] event accepted');
           } catch (_) {
-            console.log('[webhook] WhatsApp event body RAW:', rawBody);
+            console.warn('[webhook] event body is not valid JSON');
           }
         } catch (error) {
           console.error('[webhook] Failed to read body:', error && error.message ? error.message : error);
+          if (!res.headersSent) {
+            sendJson(req, res, Number(error?.statusCode) || 400, {error: 'Invalid request'});
+          }
         }
       })();
 
@@ -993,6 +1047,11 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
 
   // تشخيص: اختبار الوصول لسيرفر SAS بدون إرسال بيانات
   if (parsedHealthUrl.pathname === '/ping-target') {
+    if (!DISABLE_PROXY_AUTH && !hasValidProxyToken(req)) {
+      sendJson(req, res, 401, {error: 'Unauthorized'});
+      return;
+    }
+
     const pingTarget = String(
       parsedHealthUrl.searchParams.get('target') ||
       req.headers['x-sas-target'] ||
@@ -1018,6 +1077,12 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
       return;
     }
 
+    const pingTargetError = validateTarget(pingUrl);
+    if (pingTargetError) {
+      sendJson(req, res, 403, {error: pingTargetError});
+      return;
+    }
+
     const pingClient = pingUrl.protocol === 'https:' ? https : http;
     const started = Date.now();
 
@@ -1030,6 +1095,7 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
         method: 'OPTIONS',
         headers: {'user-agent': 'NetAgent-Proxy-PingTest/1.0'},
         timeout: 8000,
+        lookup: publicOnlyLookup,
       },
       (pingRes) => {
         pingRes.resume();
@@ -1061,6 +1127,10 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
       sendJson(req, res, 405, {error: 'Method Not Allowed'});
       return;
     }
+    if (!DISABLE_PROXY_AUTH && !hasValidProxyToken(req)) {
+      sendJson(req, res, 401, {success: false, error: 'Unauthorized'});
+      return;
+    }
 
     (async () => {
       try {
@@ -1076,7 +1146,7 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
           : {};
 
         console.log('[send-message] incoming payload:', JSON.stringify({
-          to,
+          to: maskPhone(to),
           hasMessage: message.length > 0,
           templateName,
           language,
@@ -1138,8 +1208,7 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
     const hasBearer = String(req.headers.authorization || '').toLowerCase().startsWith('bearer ');
     const isLoginRequest =
       parsedHealthUrl.pathname === '/login' ||
-      parsedHealthUrl.pathname === '/sas/login' ||
-      parsedHealthUrl.pathname.split('/').last === 'login';
+      parsedHealthUrl.pathname === '/sas/login';
     if (!isLoginRequest) {
       console.warn(
         `[auth] 401 ${req.method} ${req.url} tokenHeaders: x-proxy-token=${hasXProxy} x-sas-proxy-token=${hasXSasProxy} x-api-key=${hasApiKey} bearer=${hasBearer}`
@@ -1245,7 +1314,7 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
           : {};
 
         console.log('[whatsapp/send] incoming payload:', JSON.stringify({
-          to,
+          to: maskPhone(to),
           hasMessage: message.length > 0,
           templateName,
           language,
@@ -1380,6 +1449,7 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
         method: req.method,
         headers,
         timeout: 30000,
+        lookup: publicOnlyLookup,
       };
       if (
         targetBaseUrl.protocol === 'https:' &&
@@ -1443,9 +1513,9 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
 
               try {
                 await sendWhatsApp(waPhoneHeader, waMessage);
-                console.log(`[proxy] activation WhatsApp sent to ${waPhoneHeader}`);
+                console.log(`[proxy] activation WhatsApp sent to ${maskPhone(waPhoneHeader)}`);
               } catch (err) {
-                console.error(`[proxy] activation WhatsApp failed for ${waPhoneHeader}: ${err.message}`);
+                console.error(`[proxy] activation WhatsApp failed for ${maskPhone(waPhoneHeader)}: ${err.message}`);
               }
             });
             return;
@@ -1462,7 +1532,9 @@ if (parsedHealthUrl.pathname === '/' || parsedHealthUrl.pathname === '/health' |
 
       upstream.on('error', (error) => {
         console.error(`[proxy] upstream error → ${targetBaseUrl.origin}${currentPath}: ${error.message}`);
-        const canRetry = index + 1 < pathCandidates.length;
+        // بعد انقطاع الاتصال قد يكون الخادم نفذ الطلب، فلا نكرر عمليات الكتابة مثل التفعيل.
+        const canRetry =
+          index + 1 < pathCandidates.length && ['GET', 'HEAD'].includes(req.method);
         if (canRetry) {
           forwardAttempt(index + 1);
           return;
