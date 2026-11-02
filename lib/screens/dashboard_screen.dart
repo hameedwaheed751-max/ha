@@ -1796,6 +1796,23 @@ class _DashboardScreenState extends State<DashboardScreen>
                   },
                 ),
                 _drawerTile(
+                  icon: Icons.analytics_outlined,
+                  title: 'تشخيص الاتصال',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showConnectionDiagnostic();
+                  },
+                ),
+                _drawerTile(
+                  icon: Icons.contrast_rounded,
+                  title: 'تغيير المظهر',
+                  onTap: () {
+                    Navigator.pop(context);
+                    AppStore.toggleTheme();
+                    setState(() {});
+                  },
+                ),
+                _drawerTile(
                   icon: Icons.info_outline,
                   title: 'حول التطبيق',
                   onTap: () {
@@ -1929,7 +1946,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final active = AppStore.subscribers.where((s) => s.isActive).length;
     final expired = AppStore.subscribers.where((s) => s.expired).length;
-    final debts = AppStore.subscribers.where((s) => s.remaining > 0).length;
     final daySummary = AppStore.summaryOfDay(_dashboardDate);
     final renewalNotice = AppStore.renewalNotice(DateTime.now());
     final alertsCount = AppNotifications.unreadCount(
@@ -1943,68 +1959,67 @@ class _DashboardScreenState extends State<DashboardScreen>
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF4F9F4),
+        backgroundColor: isDark
+            ? const Color(0xFF0F172A)
+            : const Color(0xFFF1F8F3),
         drawer: _mainDrawer(),
         appBar: AppBar(
-          backgroundColor: const Color(0xFF2E7D32),
+          backgroundColor: const Color(0xFF0B5D2E),
           foregroundColor: Colors.white,
           elevation: 3,
           shadowColor: const Color(0x330F5D2A),
-          toolbarHeight: 88,
+          toolbarHeight: 84,
+          clipBehavior: Clip.antiAlias,
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(bottom: Radius.circular(18)),
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(26)),
           ),
-          flexibleSpace: DecoratedBox(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF2E7D32), Color(0xFF1D5E2C)],
-              ),
-            ),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Positioned.fill(
-                  child: Opacity(
-                    opacity: 0.25,
-                    child: Image.asset(
-                      _referenceAssetPath(
-                        'assets/reference/NetAgent_Glossy_Green_3D.png',
-                      ),
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                ),
-              ],
+          flexibleSpace: SizedBox.expand(
+            child: Image.asset(
+              _referenceAssetPath('assets/dashboard/waves.jpg'),
+              fit: BoxFit.cover,
             ),
           ),
-          title: Column(
+          title: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                AppStore.effectiveAgentName.isEmpty
-                    ? 'اسم الوكيل'
-                    : AppStore.effectiveAgentName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: screenWidth < 400
-                      ? 15
-                      : screenWidth < 600
-                      ? 18
-                      : 21,
-                  fontWeight: FontWeight.w900,
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'وكيل نت',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: screenWidth < 400 ? 22 : 25,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    Text(
+                      AppStore.effectiveAgentName.isEmpty
+                          ? 'وكيل لخدمات الإنترنت'
+                          : AppStore.effectiveAgentName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                'وكيل نت',
-                style: TextStyle(
+              const SizedBox(width: 8),
+              ShaderMask(
+                shaderCallback: (bounds) => const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFFE8FFE9), Color(0xFF4CD964)],
+                ).createShader(bounds),
+                child: const Icon(
+                  Icons.wifi_rounded,
                   color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
+                  size: 44,
                 ),
               ),
             ],
@@ -2018,18 +2033,23 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
           actions: [
+            IconButton(
+              tooltip: 'مزامنة المشتركين',
+              onPressed: _syncSubscribersFromDashboard,
+              icon: const Icon(Icons.sync_rounded),
+            ),
             Stack(
               alignment: Alignment.center,
               children: [
                 IconButton(
                   tooltip: 'الإشعارات',
                   onPressed: _openNotifications,
-                  icon: const Icon(Icons.notifications_none_rounded),
+                  icon: const Icon(Icons.notifications_none_rounded, size: 27),
                 ),
                 if (alertsCount > 0)
                   Positioned(
-                    top: 12,
-                    left: 8,
+                    top: 20,
+                    left: 6,
                     child: Container(
                       constraints: const BoxConstraints(
                         minWidth: 17,
@@ -2039,7 +2059,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: const Color(0xFFE53935),
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(9),
                         border: Border.all(color: Colors.white, width: 1.5),
                       ),
                       child: Text(
@@ -2054,94 +2074,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                   ),
               ],
             ),
-            IconButton(
-              tooltip: 'مزامنة المشتركين',
-              onPressed: _syncSubscribersFromDashboard,
-              icon: const Icon(Icons.sync_rounded),
-            ),
-            PopupMenuButton<String>(
-              tooltip: 'أدوات إضافية',
-              icon: const Icon(Icons.more_vert_rounded),
-              onSelected: _openDashboardTool,
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: 'sas',
-                  child: ListTile(
-                    leading: Icon(Icons.cloud_sync_outlined),
-                    title: Text('الاتصال بـ SAS'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'tasks',
-                  child: ListTile(
-                    leading: Icon(Icons.task_alt_outlined),
-                    title: Text('المهام اليومية'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'chat',
-                  child: ListTile(
-                    leading: Icon(Icons.chat_outlined),
-                    title: Text('الدردشة'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'expiring',
-                  child: ListTile(
-                    leading: Icon(Icons.event_available_outlined),
-                    title: Text('ينتهون قريباً'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'diagnostic',
-                  child: ListTile(
-                    leading: Icon(Icons.analytics_outlined),
-                    title: Text('تشخيص الاتصال'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'theme',
-                  child: ListTile(
-                    leading: Icon(Icons.contrast_rounded),
-                    title: Text('تغيير المظهر'),
-                  ),
-                ),
-              ],
-            ),
+            const SizedBox(width: 6),
           ],
         ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: 0,
-          height: 68,
-          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-          indicatorColor: isDark
-              ? const Color(0xFF245B31)
-              : const Color(0xFFDDF1E2),
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          onDestinationSelected: _onBottomNavigation,
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.home_outlined),
-              selectedIcon: Icon(Icons.home_rounded),
-              label: 'الرئيسية',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.groups_outlined),
-              label: 'المشتركين',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.add_circle, size: 34, color: Color(0xFF2E7D32)),
-              label: 'إضافة',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.bar_chart_rounded),
-              label: 'التقارير',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.settings_outlined),
-              label: 'الإعدادات',
-            ),
-          ],
+        bottomNavigationBar: DashboardBottomBar(
+          onSelected: _onBottomNavigation,
         ),
         body: RefreshIndicator(
           onRefresh: _syncSubscribersFromDashboard,
@@ -2167,12 +2104,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                         if (widget.isAgentMode && renewalNotice != null)
                           _renewalBanner(renewalNotice),
                         _todayReportCard(daySummary),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 12),
                         _subscribersOverview(
                           total: AppStore.subscribers.length,
                           active: active,
                           expired: expired,
-                          debts: debts,
                         ),
                         const SizedBox(height: 16),
                         _sectionTitle('الوصول السريع', Icons.bolt_rounded),
@@ -2182,6 +2118,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                           builder: (context, _, __) => _quickActionsGrid(),
                         ),
                         const SizedBox(height: 16),
+                        _financialStatus(daySummary),
+                        const SizedBox(height: 12),
                         _sasInformationSection(),
                         const SizedBox(height: 16),
                         _latestSubscribersSection(
@@ -2238,162 +2176,157 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  void _openDashboardTool(String value) {
-    switch (value) {
-      case 'sas':
-        _pushDashboard(const SasSettingsScreen());
-      case 'tasks':
-        _pushDashboard(const TodayTasksScreen());
-      case 'chat':
-        _pushDashboard(const ChatScreen());
-      case 'expiring':
-        _pushDashboard(const SubscribersScreen(filter: 'expiring3Days'));
-      case 'diagnostic':
-        _showConnectionDiagnostic();
-      case 'theme':
-        AppStore.toggleTheme();
-        setState(() {});
-    }
-  }
-
-  Widget _todayCollectionTile({
-    required String label,
-    required String value,
-    String? cases,
-  }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.13),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white70, fontSize: 11),
-            ),
-            const SizedBox(height: 3),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                value,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            if (cases != null) ...[
-              const SizedBox(height: 2),
-              Text(
-                cases,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white70, fontSize: 10.5),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
+  String _dashboardIcon(String name) => 'assets/dashboard/$name.png';
 
   Widget _todayReportCard(DailyTaskSummary summary) {
+    final radius = BorderRadius.circular(22);
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: radius,
         onTap: () => _pushDashboard(const TodayTasksScreen()),
         child: Ink(
-          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            gradient: const LinearGradient(
-              colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
-              begin: Alignment.topRight,
-              end: Alignment.bottomLeft,
+            borderRadius: radius,
+            border: Border.all(color: const Color(0xFF2FAE63)),
+            image: DecorationImage(
+              image: AssetImage(
+                _referenceAssetPath('assets/dashboard/waves.jpg'),
+              ),
+              fit: BoxFit.cover,
             ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x330B5D2E),
+                blurRadius: 14,
+                offset: Offset(0, 6),
+              ),
+            ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'تقرير اليوم',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: _pickDashboardDate,
-                    icon: const Icon(Icons.calendar_month_outlined, size: 15),
-                    label: Text(_dashboardDateText(_dashboardDate)),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      backgroundColor: Colors.white.withValues(alpha: 0.13),
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      textStyle: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'إجمالي النقد الواصل خلال اليوم',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                _money(summary.totalCollected),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  _todayCollectionTile(
-                    label: 'الواصل من التفعيل',
-                    value: _money(summary.activationCollected),
-                    cases: 'حالات التفعيل: ${summary.activationCases}',
-                  ),
-                  const SizedBox(width: 8),
-                  _todayCollectionTile(
-                    label: 'الواصل من التسديد',
-                    value: _money(summary.debtPaymentsCollected),
-                    cases: 'حالات التسديد: ${summary.debtPaymentCases}',
-                  ),
-                ],
-              ),
-              if (summary.otherCollected > 0.0001) ...[
-                const SizedBox(height: 8),
-                Row(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final walletWidth = (constraints.maxWidth * 0.38).clamp(
+                110.0,
+                190.0,
+              );
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(10, 14, 16, 14),
+                child: Row(
                   children: [
-                    _todayCollectionTile(
-                      label: 'واصل آخر',
-                      value: _money(summary.otherCollected),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          InkWell(
+                            onTap: _pickDashboardDate,
+                            borderRadius: BorderRadius.circular(10),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.calendar_month_rounded,
+                                  color: Colors.white,
+                                  size: 30,
+                                ),
+                                const SizedBox(width: 8),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'تقرير اليوم',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                    Text(
+                                      _dashboardDateText(_dashboardDate),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          const Text(
+                            'إجمالي النقد الواصل خلال اليوم',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: AlignmentDirectional.centerStart,
+                            child: Text(
+                              _money(summary.totalCollected),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 30,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.45),
+                              ),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.bar_chart_rounded,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
+                                SizedBox(width: 6),
+                                Text(
+                                  'تفاصيل التقرير',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                SizedBox(width: 4),
+                                Icon(
+                                  Icons.chevron_left_rounded,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Image.asset(
+                      _referenceAssetPath('assets/dashboard/wallet.png'),
+                      width: walletWidth,
+                      fit: BoxFit.contain,
                     ),
                   ],
                 ),
-              ],
-            ],
+              );
+            },
           ),
         ),
       ),
@@ -2404,65 +2337,176 @@ class _DashboardScreenState extends State<DashboardScreen>
     required int total,
     required int active,
     required int expired,
-    required int debts,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Expanded(child: _sectionTitle('المشتركون', Icons.groups_outlined)),
-            TextButton(
-              onPressed: () => _pushDashboard(const SubscribersScreen()),
-              child: Text('الكل ($total)'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Row(
-          children: [
+    final cards = <(String, int, String, Color, String?)>[
+      (
+        'إجمالي المشتركين',
+        total,
+        'subscribers_count',
+        const Color(0xFF1565C0),
+        null,
+      ),
+      (
+        'المشتركين الفعالين',
+        active,
+        'active_subscribers',
+        const Color(0xFF1B8A4B),
+        'active',
+      ),
+      (
+        'تنتهي خلال 3 أيام',
+        _expiring3Days,
+        'expiring_3_days',
+        const Color(0xFFE67E00),
+        'expiring3Days',
+      ),
+      (
+        'المنتهية',
+        expired,
+        'expired_subscriptions',
+        const Color(0xFFD32F2F),
+        'expired',
+      ),
+    ];
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < cards.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
             Expanded(
-              child: DashboardStatTile(
-                label: 'فعّال',
-                value: '$active',
-                color: const Color(0xFF22A447),
-                onTap: () =>
-                    _pushDashboard(const SubscribersScreen(filter: 'active')),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DashboardStatTile(
-                label: 'خلال 3 أيام',
-                value: '$_expiring3Days',
-                color: const Color(0xFFF57C00),
+              child: DashboardStatCard(
+                label: cards[i].$1,
+                value: '${cards[i].$2}',
+                assetName: _dashboardIcon(cards[i].$3),
+                color: cards[i].$4,
                 onTap: () => _pushDashboard(
-                  const SubscribersScreen(filter: 'expiring3Days'),
+                  cards[i].$5 == null
+                      ? const SubscribersScreen()
+                      : SubscribersScreen(filter: cards[i].$5!),
                 ),
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DashboardStatTile(
-                label: 'منتهي',
-                value: '$expired',
-                color: const Color(0xFFE53935),
-                onTap: () =>
-                    _pushDashboard(const SubscribersScreen(filter: 'expired')),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _dashboardPanel({
+    required String title,
+    required String assetName,
+    required Widget child,
+    Widget? trailing,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: isDark
+              ? const [Color(0xFF17352B), Color(0xFF16233A)]
+              : const [Color(0xFFDFF3E5), Color(0xFFF3FAF5)],
+        ),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : const Color(0xFFD3E8D9),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Image.asset(
+                _referenceAssetPath(assetName),
+                width: 32,
+                height: 32,
+                fit: BoxFit.contain,
               ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              if (trailing != null) trailing,
+            ],
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _financialStatus(DailyTaskSummary summary) {
+    return _dashboardPanel(
+      title: 'الحالة المالية',
+      assetName: _dashboardIcon('balance'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: DashboardStatCard(
+                    label: 'حالات التفعيل',
+                    value: '${summary.activationCases}',
+                    assetName: _dashboardIcon('activation_status'),
+                    color: const Color(0xFF1B8A4B),
+                    tinted: false,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: DashboardStatCard(
+                    label: 'الواصل من التسديد',
+                    value: _money(summary.debtPaymentsCollected),
+                    caption: 'حالات التسديد: ${summary.debtPaymentCases}',
+                    assetName: _dashboardIcon('payment_contact'),
+                    color: const Color(0xFFE67E00),
+                    tinted: false,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: DashboardStatCard(
+                    label: 'الواصل من التفعيل',
+                    value: _money(summary.activationCollected),
+                    assetName: _dashboardIcon('wallet'),
+                    color: const Color(0xFF1B8A4B),
+                    tinted: false,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DashboardStatTile(
-                label: 'مدينون',
-                value: '$debts',
-                color: const Color(0xFF7446D7),
-                onTap: _openDebtsTable,
+          ),
+          if (summary.otherCollected > 0.0001) ...[
+            const SizedBox(height: 6),
+            Text(
+              'واصل آخر: ${_money(summary.otherCollected)}',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -2478,52 +2522,52 @@ class _DashboardScreenState extends State<DashboardScreen>
     final chatUnreadCount = AppStore.unreadChatCount;
     final actions = <(String, String, Color, VoidCallback)>[
       (
+        'تسديد الديون',
+        'debt_payment',
+        const Color(0xFFE53935),
+        _openDebtsTable,
+      ),
+      (
         'مشترك جديد',
-        'assets/reference/new_subscriber.png',
+        'new_subscriber',
         const Color(0xFF22A447),
         () => _pushDashboard(const AddSubscriberScreen()),
       ),
       (
         'المهام اليومية',
-        'assets/reference/daily_tasks.png',
+        'daily_tasks',
         const Color(0xFF0877F9),
         () => _pushDashboard(const TodayTasksScreen()),
       ),
       (
         'الدردشة',
-        'assets/reference/chat.png',
+        'chat',
         const Color(0xFFF57C00),
         () => _pushDashboard(const ChatScreen()),
       ),
       (
         'واتساب',
         '',
-        const Color(0xFF25D366),
+        const Color(0xFF22B14C),
         () => _pushDashboard(const WhatsAppLinkingScreen()),
       ),
       (
         'التقارير الحسابية',
-        'assets/reference/reports.png',
+        'reports',
         const Color(0xFF1B7F5C),
         () => _pushDashboard(const AccountingReportsScreen()),
       ),
       (
-        'الديون',
-        'assets/reference/debts.png',
-        const Color(0xFFE53935),
-        _openDebtsTable,
+        'فحص الاتصال',
+        'ping',
+        const Color(0xFF00897B),
+        () => _pushDashboard(const PingScreen()),
       ),
       (
         'اختبار السرعة',
-        'assets/reference/speed_test.png',
+        'speed_test',
         const Color(0xFF1261A6),
         () => _pushDashboard(const SpeedTestScreen()),
-      ),
-      (
-        'فحص الاتصال',
-        'assets/reference/ping.png',
-        const Color(0xFF00897B),
-        () => _pushDashboard(const PingScreen()),
       ),
     ];
     return LayoutBuilder(
@@ -2539,9 +2583,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                 width: width,
                 child: InkWell(
                   onTap: action.$4,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(16),
                   child: Container(
-                    constraints: const BoxConstraints(minHeight: 84),
+                    constraints: const BoxConstraints(minHeight: 102),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 4,
                       vertical: 9,
@@ -2550,12 +2594,19 @@ class _DashboardScreenState extends State<DashboardScreen>
                       color: isDark
                           ? const Color(0xFF1E293B)
                           : const Color(0xFFFFFFFF),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: isDark
                             ? Colors.white.withValues(alpha: 0.08)
                             : const Color(0xFFE3EDE5),
                       ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x140B5D2E),
+                          blurRadius: 8,
+                          offset: Offset(0, 3),
+                        ),
+                      ],
                     ),
                     child: Stack(
                       clipBehavior: Clip.none,
@@ -2565,15 +2616,15 @@ class _DashboardScreenState extends State<DashboardScreen>
                           children: [
                             if (action.$2.isEmpty)
                               Icon(
-                                Icons.forum_rounded,
+                                Icons.qr_code_2_rounded,
                                 color: action.$3,
-                                size: 32,
+                                size: 42,
                               )
                             else
                               Image.asset(
-                                _referenceAssetPath(action.$2),
-                                width: 32,
-                                height: 32,
+                                _referenceAssetPath(_dashboardIcon(action.$2)),
+                                width: 42,
+                                height: 42,
                                 fit: BoxFit.contain,
                               ),
                             const SizedBox(height: 6),
@@ -2584,7 +2635,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: colors.onSurface,
-                                fontSize: 10.5,
+                                fontSize: 11,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -2641,51 +2692,47 @@ class _DashboardScreenState extends State<DashboardScreen>
         ? '...'
         : (sasRewardPointsText ?? '--');
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
+    return _dashboardPanel(
+      title: 'معلومات الساس',
+      assetName: _dashboardIcon('speed_test'),
+      trailing: IconButton(
+        tooltip: 'تحديث معلومات SAS',
+        visualDensity: VisualDensity.compact,
+        onPressed: sasWalletLoading ? null : _loadSasWallet,
+        icon: sasWalletLoading
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.refresh_rounded, size: 20),
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: _sectionTitle('معلومات الساس', Icons.speed_rounded),
-            ),
-            IconButton(
-              tooltip: 'تحديث معلومات SAS',
-              visualDensity: VisualDensity.compact,
-              onPressed: sasWalletLoading ? null : _loadSasWallet,
-              icon: sasWalletLoading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.refresh_rounded, size: 20),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            Expanded(
-              child: DashboardStatTile(
+              child: DashboardStatCard(
                 label: 'الرصيد',
                 value: balance,
-                color: const Color(0xFF00897B),
+                assetName: _dashboardIcon('balance'),
+                color: const Color(0xFF00796B),
                 onTap: _loadSasWallet,
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: DashboardStatTile(
+              child: DashboardStatCard(
                 label: 'النقاط التشجيعية',
                 value: points,
+                assetName: _dashboardIcon('points'),
                 color: const Color(0xFF7446D7),
                 onTap: _loadSasWallet,
               ),
             ),
           ],
         ),
-      ],
+      ),
     );
   }
 

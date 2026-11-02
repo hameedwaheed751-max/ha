@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models.dart';
@@ -11,8 +12,11 @@ import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
 import 'activation_payment_dialog.dart';
 import 'add_subscriber_screen.dart';
+import 'dashboard_widgets.dart';
 import 'partial_payment_flow.dart';
+import 'quick_reports_screen.dart';
 import 'receipt_screen.dart';
+import 'settings_screen.dart';
 import 'subscriber_details_screen.dart';
 
 class SubscribersScreen extends StatefulWidget {
@@ -38,6 +42,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     text: widget.initialSearch,
   );
   bool syncing = false;
+  late String _filter = widget.filter;
+  bool? _cardView;
   int _visibleCards = 50;
   bool _isRefreshing = false;
   String _sortBy = 'name';
@@ -111,14 +117,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     final z = q.toLowerCase().trim();
     final now = DateTime.now();
     final filtered = AppStore.subscribers.where((s) {
-      if (widget.filter == 'active' && !s.isActive) return false;
-      if (widget.filter == 'expired' && !s.expired) return false;
-      if (widget.filter == 'debts' && s.remaining <= 0) return false;
-      if (widget.filter == 'expiring3Days') {
-        if (s.disabled || s.expired) return false;
-        final days = s.endDate.difference(now).inDays;
-        if (days < 0 || days > 3) return false;
-      }
+      if (!_matchesFilter(s, _filter, now)) return false;
 
       final basicMatch =
           s.user.toLowerCase().contains(z) ||
@@ -253,10 +252,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   }
 
   String get pageTitle {
-    if (widget.filter == 'active') return 'المشتركين الفعالين';
-    if (widget.filter == 'expired') return 'المنتهي اشتراكهم';
-    if (widget.filter == 'debts') return 'الديون';
-    if (widget.filter == 'expiring3Days') return 'ينتهون خلال 3 أيام';
+    if (_filter == 'active') return 'المشتركين الفعالين';
+    if (_filter == 'expired') return 'المنتهي اشتراكهم';
+    if (_filter == 'debts') return 'الديون';
+    if (_filter == 'expiring3Days') return 'ينتهون خلال 3 أيام';
     return 'المشتركين';
   }
 
@@ -2638,33 +2637,339 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
   }
 
-  Widget _summaryChip({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
+  bool _matchesFilter(Subscriber s, String filter, DateTime now) {
+    switch (filter) {
+      case 'active':
+        return s.isActive;
+      case 'expired':
+        return s.expired;
+      case 'debts':
+        return s.remaining > 0;
+      case 'expiring3Days':
+        if (s.disabled || s.expired) return false;
+        final days = s.endDate.difference(now).inDays;
+        return days >= 0 && days <= 3;
+      default:
+        return true;
+    }
+  }
+
+  int _countOf(String filter) {
+    final now = DateTime.now();
+    return AppStore.subscribers
+        .where((s) => _matchesFilter(s, filter, now))
+        .length;
+  }
+
+  void _setFilter(String filter) {
+    setState(() {
+      _filter = filter;
+      selected = null;
+      _visibleCards = 50;
+      _filteredSubscribers = _buildFilteredSubscribers();
+    });
+  }
+
+  void _onBottomNavigation(int index) {
+    switch (index) {
+      case 0:
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      case DashboardBottomBar.addIndex:
+        add();
+      case 3:
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const QuickReportsScreen()),
+        );
+      case 4:
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const SettingsScreen()),
+        );
+    }
+  }
+
+  String get _sortLabel => switch (_sortBy) {
+    'date' => 'تاريخ الانتهاء',
+    'debt' => 'الدين',
+    'user' => 'اسم المستخدم',
+    'package' => 'الباقة',
+    'status' => 'الحالة',
+    _ => 'الاسم',
+  };
+
+  Widget _filterChip(String value, String label) {
+    const green = Color(0xFF0E6B39);
+    final colors = Theme.of(context).colorScheme;
+    final active = _filter == value;
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(end: 6),
+      child: Material(
+        color: active ? green : colors.surface,
+        shape: StadiumBorder(
+          side: BorderSide(color: active ? green : colors.outlineVariant),
+        ),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: () => _setFilter(value),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+            child: Text(
+              '$label (${_countOf(value)})',
+              style: TextStyle(
+                color: active ? Colors.white : colors.onSurface,
+                fontSize: 12,
+                fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    );
+  }
+
+  Widget _viewButton(bool cards, IconData icon, String tooltip, bool active) {
+    const green = Color(0xFF0E6B39);
+    return IconButton(
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      onPressed: () => setState(() {
+        _cardView = cards;
+        selected = null;
+      }),
+      style: IconButton.styleFrom(
+        backgroundColor: active ? green : Colors.transparent,
+        foregroundColor: active
+            ? Colors.white
+            : Theme.of(context).colorScheme.onSurfaceVariant,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      icon: Icon(icon, size: 20),
+    );
+  }
+
+  Widget _listHeader({required bool useCards, required int shownCount}) {
+    const green = Color(0xFF0E6B39);
+    final colors = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final stats = <(String, String, String, Color)>[
+      ('الإجمالي', 'all', 'subscribers_count', const Color(0xFF1565C0)),
+      ('نشط', 'active', 'active_subscribers', const Color(0xFF1B8A4B)),
+      (
+        'قرب الانتهاء',
+        'expiring3Days',
+        'expiring_3_days',
+        const Color(0xFFE67E00),
+      ),
+      ('ديون', 'debts', 'debts', const Color(0xFFD32F2F)),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(color: color, fontWeight: FontWeight.w600),
+          Row(
+            children: [
+              const Icon(Icons.groups_rounded, color: green, size: 26),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'قائمة المشتركين',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: green.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: green.withValues(alpha: 0.28)),
+                ),
+                child: Text(
+                  '$shownCount مشترك',
+                  style: TextStyle(
+                    color: isDark ? const Color(0xFF7BE0A0) : green,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 6),
-          Text(
-            value,
-            style: TextStyle(color: color, fontWeight: FontWeight.bold),
+          const SizedBox(height: 10),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < stats.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 7),
+                  Expanded(
+                    child: DashboardStatCard(
+                      label: stats[i].$1,
+                      value: '${_countOf(stats[i].$2)}',
+                      assetName: 'assets/dashboard/${stats[i].$3}.png',
+                      color: stats[i].$4,
+                      iconSize: 34,
+                      onTap: () => _setFilter(stats[i].$2),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _searchController,
+            onChanged: (v) {
+              q = v;
+              selected = null;
+              _visibleCards = 50;
+              _reloadSubscribers();
+            },
+            decoration: InputDecoration(
+              hintText: 'ابحث بالاسم أو اسم المستخدم أو IP...',
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: q.isEmpty
+                  ? null
+                  : IconButton(
+                      onPressed: () {
+                        q = '';
+                        _searchController.clear();
+                        selected = null;
+                        _reloadSubscribers();
+                      },
+                      icon: const Icon(Icons.clear_rounded),
+                    ),
+              filled: true,
+              fillColor: colors.surface,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(26),
+                borderSide: BorderSide(color: colors.outlineVariant),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(26),
+                borderSide: BorderSide(color: colors.outlineVariant),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(26),
+                borderSide: const BorderSide(color: green, width: 1.5),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _filterChip('all', 'الكل'),
+                      _filterChip('active', 'النشط'),
+                      _filterChip('expiring3Days', 'قرب الانتهاء'),
+                      _filterChip('expired', 'المنتهي'),
+                      _filterChip('debts', 'الديون'),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton.outlined(
+                tooltip: 'تصفية متقدمة',
+                visualDensity: VisualDensity.compact,
+                onPressed: _showAdvancedSearch,
+                icon: const Icon(Icons.filter_alt_outlined, size: 20),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              PopupMenuButton<String>(
+                tooltip: 'ترتيب',
+                onSelected: _sort,
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'name', child: Text('الاسم')),
+                  PopupMenuItem(value: 'date', child: Text('تاريخ الانتهاء')),
+                  PopupMenuItem(value: 'debt', child: Text('الدين')),
+                ],
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: colors.outlineVariant),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'ترتيب: $_sortLabel',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        _sortAsc
+                            ? Icons.arrow_upward_rounded
+                            : Icons.arrow_downward_rounded,
+                        size: 15,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Spacer(),
+              _viewButton(
+                false,
+                Icons.table_rows_rounded,
+                'عرض الجدول',
+                !useCards,
+              ),
+              const SizedBox(width: 4),
+              _viewButton(
+                true,
+                Icons.view_agenda_rounded,
+                'عرض البطاقات',
+                useCards,
+              ),
+            ],
+          ),
+          if (!useCards) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: selected == null ? null : operations,
+                    icon: const Icon(Icons.settings_outlined, size: 18),
+                    label: const Text('عمليات سريعة'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _showColumnSelector,
+                  icon: const Icon(Icons.view_column_outlined, size: 18),
+                  label: const Text('المزيد'),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -2673,19 +2978,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   @override
   Widget build(BuildContext context) {
     final data = _filteredSubscribers;
-    final useCards = MediaQuery.sizeOf(context).width < 520;
-    final colorScheme = Theme.of(context).colorScheme;
+    final useCards = _cardView ?? MediaQuery.sizeOf(context).width < 520;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final green = const Color(0xFF2E7D32);
     final greenSoft = const Color(0xFFD8F3DC);
-    final activeCount = data
-        .where((s) => s.isActive && !s.disabled && !s.expired)
-        .length;
-    final expiringSoonCount = data.where((s) {
-      if (s.disabled || s.expired) return false;
-      return s.endDate.difference(DateTime.now()).inDays <= 3;
-    }).length;
-    final debtCount = data.where((s) => s.remaining > 0).length;
     final dataSource = _SubscribersDataSource(
       context: context,
       data: data,
@@ -2873,21 +3168,28 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
+        backgroundColor: isDark
+            ? const Color(0xFF0F172A)
+            : const Color(0xFFF1F8F3),
+        bottomNavigationBar: DashboardBottomBar(
+          selectedIndex: 1,
+          onSelected: _onBottomNavigation,
+        ),
         appBar: AppBar(
           title: Text(pageTitle),
           centerTitle: true,
-          backgroundColor: Colors.transparent,
+          backgroundColor: const Color(0xFF0B5D2E),
+          foregroundColor: Colors.white,
           elevation: 0,
-          flexibleSpace: Stack(
-            fit: StackFit.expand,
-            children: [
-              const ColoredBox(color: Color(0xFF2E7D32)),
-              Image.asset(
-                'assets/reference/NetAgent_Glossy_Green_3D.png',
-                fit: BoxFit.cover,
-                alignment: Alignment.center,
-              ),
-            ],
+          clipBehavior: Clip.antiAlias,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(22)),
+          ),
+          flexibleSpace: SizedBox.expand(
+            child: Image.asset(
+              dashboardReferenceAssetPath('assets/dashboard/waves.jpg'),
+              fit: BoxFit.cover,
+            ),
           ),
           actions: [
             IconButton(
@@ -2921,290 +3223,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             controller: _verticalScrollController,
             child: Column(
               children: [
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        greenSoft.withValues(alpha: 0.9),
-                        Theme.of(context).colorScheme.surface,
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                    ),
-                    border: Border(
-                      bottom: BorderSide(color: Colors.grey.shade200, width: 1),
-                    ),
-                  ),
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'قائمة المشتركين',
-                                  style: Theme.of(context).textTheme.titleLarge
-                                      ?.copyWith(fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'إدارة وتنظيم المشتركين',
-                                  style: Theme.of(context).textTheme.bodySmall
-                                      ?.copyWith(color: Colors.grey.shade600),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: greenSoft.withValues(alpha: 0.85),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: green.withValues(alpha: 0.3),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.people_alt_outlined,
-                                  size: 18,
-                                  color: green,
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  '${data.length}',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: green,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _summaryChip(
-                            icon: Icons.check_circle_outline,
-                            label: 'نشط',
-                            value: activeCount.toString(),
-                            color: green,
-                          ),
-                          _summaryChip(
-                            icon: Icons.warning_amber_rounded,
-                            label: 'خلال 3 أيام',
-                            value: expiringSoonCount.toString(),
-                            color: const Color(0xFFB8860B),
-                          ),
-                          _summaryChip(
-                            icon: Icons.account_balance_wallet_outlined,
-                            label: 'ديون',
-                            value: debtCount.toString(),
-                            color: const Color(0xFFC62828),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _searchController,
-                        onChanged: (v) {
-                          q = v;
-                          selected = null;
-                          _reloadSubscribers();
-                        },
-                        decoration: InputDecoration(
-                          hintText: 'ابحث عن مشترك...',
-                          prefixIcon: const Icon(Icons.search_rounded),
-                          suffixIcon: q.isEmpty
-                              ? null
-                              : IconButton(
-                                  onPressed: () {
-                                    q = '';
-                                    _searchController.clear();
-                                    selected = null;
-                                    _reloadSubscribers();
-                                  },
-                                  icon: const Icon(Icons.clear_rounded),
-                                ),
-                          filled: true,
-                          fillColor: colorScheme.surfaceContainerHighest,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey.shade300),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                              color: colorScheme.outlineVariant,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: green, width: 2),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          final isPhone = constraints.maxWidth < 520;
-                          final availableWidth = constraints.maxWidth - 16;
-                          final secondaryWidth = isPhone
-                              ? (constraints.maxWidth - 8) / 2
-                              : availableWidth * 2 / 6;
-                          final moreWidth = isPhone
-                              ? secondaryWidth
-                              : availableWidth / 6;
-
-                          return Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              if (!useCards)
-                                SizedBox(
-                                  width: isPhone
-                                      ? constraints.maxWidth
-                                      : availableWidth * 3 / 6,
-                                  height: 48,
-                                  child: FilledButton.icon(
-                                    onPressed: selected == null
-                                        ? null
-                                        : operations,
-                                    icon: const Icon(
-                                      Icons.settings_outlined,
-                                      size: 18,
-                                    ),
-                                    label: const Text('عمليات سريعة'),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: green,
-                                      foregroundColor: Colors.white,
-                                      minimumSize: const Size(0, 48),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 12,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              SizedBox(
-                                width: secondaryWidth,
-                                height: 48,
-                                child: OutlinedButton.icon(
-                                  onPressed: _showAdvancedSearch,
-                                  icon: const Icon(
-                                    Icons.filter_alt_outlined,
-                                    size: 18,
-                                  ),
-                                  label: const Text('تصفية'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: green,
-                                    side: BorderSide(
-                                      color: green.withValues(alpha: 0.35),
-                                    ),
-                                    backgroundColor: greenSoft.withValues(
-                                      alpha: 0.2,
-                                    ),
-                                    minimumSize: const Size(0, 48),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 12,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              if (useCards)
-                                SizedBox(
-                                  width: moreWidth,
-                                  height: 48,
-                                  child: PopupMenuButton<String>(
-                                    tooltip: 'ترتيب',
-                                    onSelected: _sort,
-                                    itemBuilder: (_) => const [
-                                      PopupMenuItem(
-                                        value: 'name',
-                                        child: Text('الاسم'),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'date',
-                                        child: Text('تاريخ الانتهاء'),
-                                      ),
-                                      PopupMenuItem(
-                                        value: 'debt',
-                                        child: Text('الدين'),
-                                      ),
-                                    ],
-                                    child: IgnorePointer(
-                                      child: OutlinedButton.icon(
-                                        onPressed: () {},
-                                        icon: const Icon(
-                                          Icons.swap_vert_rounded,
-                                          size: 18,
-                                        ),
-                                        label: const Text('ترتيب'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: green,
-                                          side: BorderSide(
-                                            color: green.withValues(
-                                              alpha: 0.35,
-                                            ),
-                                          ),
-                                          minimumSize: const Size(0, 48),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              else
-                                SizedBox(
-                                  width: moreWidth,
-                                  height: 48,
-                                  child: OutlinedButton.icon(
-                                    onPressed: _showColumnSelector,
-                                    icon: const Icon(
-                                      Icons.view_column_outlined,
-                                      size: 18,
-                                    ),
-                                    label: const Text('المزيد'),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: green,
-                                      side: BorderSide(
-                                        color: green.withValues(alpha: 0.35),
-                                      ),
-                                      backgroundColor: greenSoft.withValues(
-                                        alpha: 0.2,
-                                      ),
-                                      minimumSize: const Size(0, 48),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 12,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
+                _listHeader(useCards: useCards, shownCount: data.length),
                 const SizedBox(height: 8),
                 if (data.isEmpty)
                   Padding(
@@ -3541,6 +3560,10 @@ class _SubscriberCard extends StatelessWidget {
     required this.onMore,
   });
 
+  static const _green = Color(0xFF1B8A4B);
+  static const _amber = Color(0xFFE67E00);
+  static const _red = Color(0xFFD32F2F);
+
   final Subscriber subscriber;
   final bool selected;
   final VoidCallback onOpen;
@@ -3548,137 +3571,306 @@ class _SubscriberCard extends StatelessWidget {
   final VoidCallback onPay;
   final VoidCallback onMore;
 
+  (String, Color, IconData) _status(int days) {
+    final s = subscriber;
+    if (s.disabled) {
+      return ('معطل', _amber, Icons.pause_circle_rounded);
+    }
+    if (s.expired) return ('منتهي', _red, Icons.cancel_rounded);
+    if (days <= 3) {
+      return ('قرب الانتهاء', _amber, Icons.warning_amber_rounded);
+    }
+    if (s.isActive) return ('نشط', _green, Icons.check_circle_rounded);
+    return ('غير فعال', Colors.blueGrey, Icons.radio_button_unchecked_rounded);
+  }
+
+  Widget _pill(String text, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _copyIp(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: subscriber.ip.trim()));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('تم نسخ عنوان IP')));
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = subscriber;
     final colors = Theme.of(context).colorScheme;
-    final statusColor = _SubscribersDataSource._statusColor(s);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final days = s.endDate.difference(DateTime.now()).inDays;
     final hasDebt = s.remaining > 0.0001;
-    final daysColor = s.expired
-        ? const Color(0xFFE53935)
-        : days < 7
-        ? const Color(0xFFF57C00)
-        : const Color(0xFF22A447);
+    final hasIp = s.ip.trim().isNotEmpty;
+    final status = _status(days);
     final end =
         '${s.endDate.day.toString().padLeft(2, '0')}/${s.endDate.month.toString().padLeft(2, '0')}/${s.endDate.year}';
+    final radius = BorderRadius.circular(16);
 
-    return Card(
+    return Container(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      elevation: 0,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(
-          color: selected ? const Color(0xFF2E7D32) : colors.outlineVariant,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: radius,
+        border: Border.all(
+          color: selected
+              ? _green
+              : colors.outlineVariant.withValues(alpha: 0.6),
           width: selected ? 1.5 : 1,
         ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x120B5D2E),
+            blurRadius: 8,
+            offset: Offset(0, 3),
+          ),
+        ],
       ),
-      child: InkWell(
-        onTap: onOpen,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    _SubscribersDataSource._statusIcon(s),
-                    size: 16,
-                    color: statusColor,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      s.name.trim().isEmpty ? s.user : s.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onOpen,
+          borderRadius: radius,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            status.$2.withValues(alpha: 0.55),
+                            status.$2,
+                          ],
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.person_rounded,
+                        color: Colors.white,
+                        size: 28,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _SubscribersDataSource._statusLabel(s),
-                    style: TextStyle(
-                      color: statusColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            s.name.trim().isEmpty ? s.user : s.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${s.user} • ${s.packageDisplay}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: colors.onSurfaceVariant,
+                              fontSize: 11.5,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${s.user} • ${s.packageDisplay}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Icon(
-                    Icons.event_outlined,
-                    size: 14,
-                    color: colors.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(end, style: const TextStyle(fontSize: 12)),
-                  const SizedBox(width: 8),
-                  Text(
-                    s.expired ? 'منتهي' : 'متبقي ${days < 0 ? 0 : days} يوم',
-                    style: TextStyle(
-                      color: daysColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                    const SizedBox(width: 6),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _pill(status.$1, status.$3, status.$2),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              s.isOnline
+                                  ? Icons.wifi_rounded
+                                  : Icons.wifi_off_rounded,
+                              size: 14,
+                              color: s.isOnline
+                                  ? const Color(0xFF1E88E5)
+                                  : colors.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              s.isOnline ? 'متصل' : 'غير متصل',
+                              style: TextStyle(
+                                color: s.isOnline
+                                    ? const Color(0xFF1E88E5)
+                                    : colors.onSurfaceVariant,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    hasDebt ? moneyText(s.remaining) : 'مسدد',
-                    style: TextStyle(
-                      color: hasDebt
-                          ? const Color(0xFFC62828)
-                          : const Color(0xFF2E7D32),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
+                  ],
+                ),
+                const SizedBox(height: 7),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (hasDebt)
+                      _pill(
+                        'دين: ${moneyText(s.remaining)}',
+                        Icons.payments_rounded,
+                        _red,
+                      ),
+                    if (!s.expired && days <= 7)
+                      _pill(
+                        'متبقي ${days < 0 ? 0 : days} يوم',
+                        Icons.hourglass_bottom_rounded,
+                        _amber,
+                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.event_rounded,
+                          size: 14,
+                          color: colors.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(end, style: const TextStyle(fontSize: 11.5)),
+                      ],
                     ),
-                  ),
-                ],
-              ),
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: onActivate,
-                    icon: const Icon(Icons.bolt_rounded, size: 17),
-                    label: const Text('تفعيل'),
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
+                  ],
+                ),
+                Divider(
+                  height: 13,
+                  color: colors.outlineVariant.withValues(alpha: 0.5),
+                ),
+                Row(
+                  children: [
+                    if (!hasDebt) ...[
+                      const Icon(
+                        Icons.check_circle_outline_rounded,
+                        size: 15,
+                        color: _green,
+                      ),
+                      const SizedBox(width: 3),
+                      const Text(
+                        'مسدد',
+                        style: TextStyle(
+                          color: _green,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              hasIp ? 'IP ${s.ip.trim()}' : 'IP —',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textDirection: TextDirection.ltr,
+                              style: TextStyle(
+                                color: colors.onSurfaceVariant,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                          if (hasIp)
+                            IconButton(
+                              tooltip: 'نسخ IP',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 30,
+                                minHeight: 30,
+                              ),
+                              onPressed: () => _copyIp(context),
+                              icon: const Icon(Icons.copy_rounded, size: 15),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                  if (hasDebt)
-                    TextButton.icon(
-                      onPressed: onPay,
-                      icon: const Icon(Icons.payments_outlined, size: 17),
-                      label: const Text('تسديد'),
-                      style: TextButton.styleFrom(
+                    if (hasDebt)
+                      TextButton(
+                        onPressed: onPay,
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: const Size(0, 34),
+                        ),
+                        child: const Text('تسديد'),
+                      ),
+                    FilledButton.icon(
+                      onPressed: onActivate,
+                      icon: Icon(
+                        s.expired
+                            ? Icons.play_arrow_rounded
+                            : Icons.bolt_rounded,
+                        size: 16,
+                      ),
+                      label: Text(
+                        s.expired ? 'تفعيل' : 'تجديد',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF12873F),
+                        foregroundColor: Colors.white,
                         visualDensity: VisualDensity.compact,
+                        minimumSize: const Size(0, 34),
+                        padding: const EdgeInsets.symmetric(horizontal: 11),
                       ),
                     ),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: 'عمليات سريعة',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: onMore,
-                    icon: const Icon(Icons.more_horiz_rounded),
-                  ),
-                ],
-              ),
-            ],
+                    IconButton(
+                      tooltip: 'عمليات سريعة',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: onMore,
+                      icon: const Icon(Icons.more_horiz_rounded),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),

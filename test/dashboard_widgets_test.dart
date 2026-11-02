@@ -19,16 +19,18 @@ void main() {
     expect(find.byIcon(Icons.bolt_rounded), findsOneWidget);
   });
 
-  testWidgets('DashboardStatTile shows its value and reacts to a tap', (
+  testWidgets('DashboardStatCard shows its value and reacts to a tap', (
     tester,
   ) async {
     var tapped = 0;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: DashboardStatTile(
-            label: 'منتهي',
+          body: DashboardStatCard(
+            label: 'المنتهية',
             value: '45',
+            caption: 'حالات: 2',
+            assetName: 'assets/dashboard/expired_subscriptions.png',
             color: Colors.red,
             onTap: () => tapped++,
           ),
@@ -36,9 +38,26 @@ void main() {
       ),
     );
 
-    expect(find.text('منتهي'), findsOneWidget);
+    expect(find.text('المنتهية'), findsOneWidget);
+    expect(find.text('حالات: 2'), findsOneWidget);
     await tester.tap(find.text('45'));
     expect(tapped, 1);
+  });
+
+  testWidgets('DashboardBottomBar reports each destination', (tester) async {
+    final selected = <int>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          bottomNavigationBar: DashboardBottomBar(onSelected: selected.add),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('المشتركين'));
+    await tester.tap(find.byIcon(Icons.add_rounded));
+    await tester.tap(find.text('الإعدادات'));
+    expect(selected, [1, DashboardBottomBar.addIndex, 4]);
   });
 
   testWidgets('DashboardMetricCard renders value and title', (tester) async {
