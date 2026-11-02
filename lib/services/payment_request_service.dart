@@ -100,7 +100,7 @@ class PaymentPlanCatalog {
   static void _requireAdmin() {
     final user = FirebaseAuth.instance.currentUser;
     if (user?.uid != SubscriptionRequestService.trustedAdminUid) {
-      throw StateError('Only the administrator may change payment settings.');
+      throw StateError('هذه العملية للمدير فقط');
     }
   }
 
@@ -274,21 +274,15 @@ class PaymentRequestService {
     String renewalForUid = '',
   }) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw StateError('Sign in before creating a request.');
+    if (user == null) throw StateError('سجّل الدخول قبل إرسال الطلب');
     if (user.uid == SubscriptionRequestService.trustedAdminUid) {
-      throw StateError(
-        'The administrator account cannot submit an agent subscription request.',
-      );
+      throw StateError('لا يرسل حساب المدير طلب اشتراك');
     }
     if (uid.trim().isNotEmpty && uid.trim() != user.uid) {
-      throw StateError(
-        'A request can only be created for the signed-in account.',
-      );
+      throw StateError('يمكن إرسال الطلب للحساب المسجل فقط');
     }
     if (isRenewal && renewalForUid.trim() != user.uid) {
-      throw StateError(
-        'A renewal request can only target the signed-in account.',
-      );
+      throw StateError('يمكن تجديد الحساب المسجل فقط');
     }
 
     final normalizedPlan = PaymentPlanCatalog.normalize(selectedPlan);
@@ -340,7 +334,7 @@ class PaymentRequestService {
     required XFile file,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw StateError('Sign in before uploading a receipt.');
+    if (user == null) throw StateError('سجّل الدخول قبل رفع الوصل');
     final extension = file.name.split('.').last.toLowerCase();
     final contentType = switch (extension) {
       'png' => 'image/png',

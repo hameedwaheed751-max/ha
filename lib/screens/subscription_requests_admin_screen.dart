@@ -43,6 +43,11 @@ class _SubscriptionRequestsAdminScreenState
   String _safeEventId(String value) =>
       value.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
 
+  String _amountText(String amount) {
+    final value = num.tryParse(amount);
+    return value == null ? (amount.isEmpty ? '—' : amount) : moneyText(value);
+  }
+
   String _dateText(DateTime? date) {
     if (date == null) return '—';
     final local = date.toLocal();
@@ -103,7 +108,7 @@ class _SubscriptionRequestsAdminScreenState
             : 'تم قبول الطلب وتفعيل الاشتراك، لكن تعذر إرسال رسالة واتساب للوكيل',
       );
     } catch (e) {
-      _showMessage('فشل قبول الطلب: $e');
+      _showMessage('فشل قبول الطلب: ${errorText(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -169,7 +174,7 @@ class _SubscriptionRequestsAdminScreenState
             : 'تم رفض الطلب، لكن تعذر إرسال رسالة واتساب للوكيل',
       );
     } catch (e) {
-      _showMessage('فشل رفض الطلب: $e');
+      _showMessage('فشل رفض الطلب: ${errorText(e)}');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -206,7 +211,7 @@ class _SubscriptionRequestsAdminScreenState
     try {
       _showMessage(await action());
     } catch (e) {
-      _showMessage('$failurePrefix: $e');
+      _showMessage('$failurePrefix: ${errorText(e)}');
     }
   }
 
@@ -459,7 +464,7 @@ class _SubscriptionRequestsAdminScreenState
             '${SubscriptionRequestService.planLabelFor(request.selectedPlan)} • ${_statusLabel(request.status)}',
           ),
           subtitle: Text(
-            '${_dateText(request.createdAt)} • ${request.amount.isEmpty ? '—' : request.amount}'
+            '${_dateText(request.createdAt)} • ${_amountText(request.amount)}'
             '${request.transferNumber.isEmpty ? '' : ' • تحويل ${request.transferNumber}'}',
           ),
           trailing: _canDelete(request)
@@ -507,9 +512,10 @@ class _SubscriptionRequestsAdminScreenState
       'reviewedAt': request.reviewedAt,
     });
     final createdAt = request.createdAt;
-    final createdText = createdAt == null
+    final createdLocal = createdAt?.toLocal();
+    final createdText = createdLocal == null
         ? '—'
-        : createdAt.toLocal().toString().split('.').first;
+        : '${_dateText(createdLocal)} ${createdLocal.hour.toString().padLeft(2, '0')}:${createdLocal.minute.toString().padLeft(2, '0')}';
     final isFree = SubscriptionRequestService.isTrialPlan(request.selectedPlan);
 
     return Card(
@@ -568,7 +574,7 @@ class _SubscriptionRequestsAdminScreenState
             Text(
               'الباقة: ${SubscriptionRequestService.planLabelFor(request.selectedPlan)}',
             ),
-            Text('السعر: ${request.amount.isEmpty ? '—' : request.amount}'),
+            Text('السعر: ${_amountText(request.amount)}'),
             Text('الهاتف: ${request.phone.isEmpty ? '—' : request.phone}'),
             Text('البريد: ${request.email.isEmpty ? '—' : request.email}'),
             Text(

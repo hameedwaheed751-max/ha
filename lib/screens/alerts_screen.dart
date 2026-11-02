@@ -242,7 +242,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
       SnackBar(
         content: Text(
           [
-            if (rateLimited) 'توقف الإرسال بطلب من بوابة WhatsApp',
+            if (rateLimited) 'توقف الإرسال بطلب من بوابة واتساب',
             summary,
             ?firstError,
           ].join('\n'),
@@ -577,7 +577,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                     SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'اختر مجموعة المستلمين، راجع نص الرسالة، ثم أكد ليتم الإرسال عبر حساب WhatsApp المرتبط، برسالة كل 15 ثانية.',
+                        'اختر مجموعة المستلمين، راجع نص الرسالة، ثم أكد ليتم الإرسال عبر حساب واتساب المرتبط، برسالة كل 15 ثانية.',
                       ),
                     ),
                   ],

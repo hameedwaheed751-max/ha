@@ -5,8 +5,7 @@ class MessageTemplatesScreen extends StatefulWidget {
   const MessageTemplatesScreen({super.key});
 
   @override
-  State<MessageTemplatesScreen> createState() =>
-      _MessageTemplatesScreenState();
+  State<MessageTemplatesScreen> createState() => _MessageTemplatesScreenState();
 }
 
 class _MessageTemplatesScreenState extends State<MessageTemplatesScreen> {
@@ -83,29 +82,25 @@ class _MessageTemplatesScreenState extends State<MessageTemplatesScreen> {
               child: Padding(
                 padding: EdgeInsets.all(12),
                 child: Text(
-                  'رسائل التفعيل وقرب الانتهاء وانتهاء الاشتراك وتذكير الدين تُعدَّل من "أحداث رسائل WhatsApp" في الشاشة السابقة.',
+                  'رسائل التفعيل وقرب الانتهاء وانتهاء الاشتراك وتذكير الدين تُعدَّل من "أحداث رسائل واتساب" في الشاشة السابقة.',
                 ),
               ),
             ),
-            ...items.entries
-              .map(
-                (entry) => Card(
-                  child: ListTile(
-                    leading: const Icon(
-                      Icons.chat_outlined,
-                      color: Colors.green,
-                    ),
-                    title: Text(entry.value),
-                    subtitle: Text(
-                      AppStore.messageTemplates[entry.key] ?? '',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: const Icon(Icons.edit_outlined),
-                    onTap: () => edit(entry.key, entry.value),
+            ...items.entries.map(
+              (entry) => Card(
+                child: ListTile(
+                  leading: const Icon(Icons.chat_outlined, color: Colors.green),
+                  title: Text(entry.value),
+                  subtitle: Text(
+                    AppStore.messageTemplates[entry.key] ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
+                  trailing: const Icon(Icons.edit_outlined),
+                  onTap: () => edit(entry.key, entry.value),
                 ),
               ),
+            ),
           ],
         ),
       ),

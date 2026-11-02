@@ -79,7 +79,7 @@ void main() {
     await tester.enterText(find.byType(TextFormField).at(1), '١٥٠٠٠');
     await tester.pumpAndSettle();
 
-    expect(find.text('20000 د.ع'), findsOneWidget);
+    expect(find.text('20,000 د.ع'), findsOneWidget);
     await confirm(tester);
 
     expect(result()?.saleAmount, 35000);

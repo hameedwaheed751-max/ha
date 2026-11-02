@@ -30,14 +30,14 @@ class WhatsAppDispatchResult {
       }.contains(error);
 
   String get friendlyError => switch (error) {
-    'notification_disabled' => 'هذا النوع من الرسائل متوقف من قائمة الواتساب',
+    'notification_disabled' => 'هذا النوع من الرسائل متوقف من قائمة واتساب',
     'notification_settings_unavailable' =>
       'تعذر قراءة إعدادات الرسائل، تحقق من الاتصال',
     'Subscriber has no valid phone number.' => 'لا يوجد رقم هاتف صالح للمشترك',
     'Recipient and message are required.' => 'رقم المشترك أو نص الرسالة فارغ',
     _ when statusCode == 429 =>
-      'بوابة WhatsApp طلبت التوقف مؤقتاً بسبب كثرة الرسائل',
-    _ => 'تعذر الإرسال عبر WhatsApp، تأكد من اتصال الحساب في قائمة الواتساب',
+      'بوابة واتساب طلبت التوقف مؤقتاً بسبب كثرة الرسائل',
+    _ => 'تعذر الإرسال عبر واتساب، تأكد من اتصال الحساب في قائمة واتساب',
   };
 }
 

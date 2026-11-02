@@ -454,8 +454,8 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
               Align(
                 alignment: Alignment.centerRight,
                 child: Text(
-                  'الدين المرحّل: ${widget.subscriber!.carriedDebt.toStringAsFixed(0)} د.ع • '
-                  'إجمالي المتبقي: ${widget.subscriber!.remaining.toStringAsFixed(0)} د.ع',
+                  'الدين المرحّل: ${moneyText(widget.subscriber!.carriedDebt)} • '
+                  'إجمالي المتبقي: ${moneyText(widget.subscriber!.remaining)}',
                   style: TextStyle(color: Colors.orange.shade800),
                 ),
               ),

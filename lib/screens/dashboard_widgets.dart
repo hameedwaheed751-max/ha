@@ -25,7 +25,9 @@ class DebtOperationsMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
       tooltip: 'العمليات',
-      icon: showLabel ? null : const Icon(Icons.more_vert, color: Colors.blueGrey),
+      icon: showLabel
+          ? null
+          : const Icon(Icons.more_vert, color: Colors.blueGrey),
       child: showLabel
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -63,18 +65,16 @@ class DebtOperationsMenu extends StatelessWidget {
       itemBuilder: (context) => [
         PopupMenuItem<String>(
           enabled: false,
-          child: Text(
-            'مبلغ الاشتراك: ${subscriber.price.toStringAsFixed(0)} د.ع',
-          ),
+          child: Text('مبلغ الاشتراك: ${moneyText(subscriber.price)}'),
         ),
         PopupMenuItem<String>(
           enabled: false,
-          child: Text('الواصل: ${subscriber.paid.toStringAsFixed(0)} د.ع'),
+          child: Text('الواصل: ${moneyText(subscriber.paid)}'),
         ),
         PopupMenuItem<String>(
           enabled: false,
           child: Text(
-            'المتبقي: ${subscriber.remaining.toStringAsFixed(0)} د.ع',
+            'المتبقي: ${moneyText(subscriber.remaining)}',
             style: const TextStyle(
               color: Colors.red,
               fontWeight: FontWeight.bold,
@@ -259,6 +259,73 @@ class DashboardMetricCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class DashboardStatTile extends StatelessWidget {
+  const DashboardStatTile({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.color,
+    this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Material(
+      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 11),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : const Color(0xFFE3EDE5),
+            ),
+          ),
+          child: Column(
+            children: [
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  value,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colors.onSurfaceVariant,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

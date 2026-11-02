@@ -99,9 +99,8 @@ class _ManualEntryDialogState extends State<ManualEntryDialog> {
                   hintText: 'مثال: راوتر أو كيبل أو مبلغ سابق',
                   border: OutlineInputBorder(),
                 ),
-                validator: (value) => value == null || value.trim().isEmpty
-                    ? 'اكتب الوصف'
-                    : null,
+                validator: (value) =>
+                    value == null || value.trim().isEmpty ? 'اكتب الوصف' : null,
               ),
               const SizedBox(height: 10),
               TextFormField(
@@ -253,9 +252,7 @@ Future<void> recordManualEntry(BuildContext context, Subscriber s) async {
       : ' | حُفظ محلياً وتعذرت المزامنة';
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text(
-        'تم الحفظ | المتبقي ${s.remaining.toStringAsFixed(0)} د.ع$syncWarning',
-      ),
+      content: Text('تم الحفظ | المتبقي ${moneyText(s.remaining)}$syncWarning'),
     ),
   );
 }

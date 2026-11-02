@@ -53,11 +53,11 @@ class _CancelEntryDialogState extends State<CancelEntryDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                '${widget.description} - ${widget.amount.toStringAsFixed(0)} د.ع',
-              ),
+              Text('${widget.description} - ${moneyText(widget.amount)}'),
               const SizedBox(height: 4),
-              const Text('تبقى العملية ظاهرة بعلامة ملغاة، ويعود الدين كما كان.'),
+              const Text(
+                'تبقى العملية ظاهرة بعلامة ملغاة، ويعود الدين كما كان.',
+              ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _reasonController,
@@ -289,7 +289,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
           ),
           const SizedBox(height: 6),
           Text(
-            '${amount.toStringAsFixed(0)} د.ع',
+            '${moneyText(amount)}',
             style: TextStyle(
               color: color,
               fontSize: 17,
@@ -545,7 +545,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
         ? Colors.red
         : Colors.green;
     TextSpan amountSpan(double amount, Color amountColor) => TextSpan(
-      text: '${amount.toStringAsFixed(0)} د.ع',
+      text: '${moneyText(amount)}',
       style: TextStyle(
         color: isCancelled ? Colors.blueGrey : amountColor,
         fontWeight: FontWeight.w800,
@@ -600,7 +600,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
             ),
             const SizedBox(width: 8),
             Text(
-              '${total.toStringAsFixed(0)} د.ع',
+              '${moneyText(total)}',
               style: TextStyle(
                 color: color,
                 fontWeight: FontWeight.w800,
@@ -668,7 +668,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'أُلغي التسديد | المتبقي ${s.remaining.toStringAsFixed(0)} د.ع$syncWarning',
+          'أُلغي التسديد | المتبقي ${moneyText(s.remaining)}$syncWarning',
         ),
       ),
     );
@@ -736,7 +736,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'أُلغيت العملية | المتبقي ${s.remaining.toStringAsFixed(0)} د.ع$syncWarning',
+          'أُلغيت العملية | المتبقي ${moneyText(s.remaining)}$syncWarning',
         ),
       ),
     );
@@ -901,8 +901,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                           if (event.remainingAfter > 0) ...[
                             const TextSpan(text: ' • المتبقي '),
                             TextSpan(
-                              text:
-                                  '${event.remainingAfter.toStringAsFixed(0)} د.ع',
+                              text: '${moneyText(event.remainingAfter)}',
                               style: TextStyle(
                                 color: Colors.red.shade700,
                                 fontWeight: FontWeight.w700,
@@ -923,9 +922,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    isDebtEdit
-                        ? 'تم التعديل'
-                        : '${event.amount.toStringAsFixed(0)} د.ع',
+                    isDebtEdit ? 'تم التعديل' : '${moneyText(event.amount)}',
                     style: TextStyle(
                       color: event.isCancelled ? Colors.blueGrey : color,
                       fontWeight: FontWeight.w800,
@@ -970,7 +967,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
           ),
           const SizedBox(height: 6),
           Text(
-            '${amount.toStringAsFixed(0)} د.ع',
+            '${moneyText(amount)}',
             style: TextStyle(
               color: color,
               fontSize: 16,
@@ -1294,10 +1291,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                 .toList();
                       final invoicesTotal = invoices
                           .where((inv) => !inv.cancelled)
-                          .fold<double>(
-                            0,
-                            (total, inv) => total + inv.amount,
-                          );
+                          .fold<double>(0, (total, inv) => total + inv.amount);
 
                       return ListView(
                         padding: const EdgeInsets.all(14),
@@ -1381,7 +1375,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                     '${f(inv.at)}${inv.note.isEmpty ? '' : ' • ${inv.note}'}',
                                   ),
                                   trailing: Text(
-                                    '${inv.amount.toStringAsFixed(0)} د.ع',
+                                    '${moneyText(inv.amount)}',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -1490,8 +1484,8 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                   ),
                                   title: Text(
                                     isCorrection
-                                        ? 'تصحيح واصل ${p.amount.abs().toStringAsFixed(0)} د.ع'
-                                        : '${p.amount.toStringAsFixed(0)} د.ع',
+                                        ? 'تصحيح واصل ${moneyText(p.amount.abs())}'
+                                        : '${moneyText(p.amount)}',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       color: isCorrection ? Colors.red : null,

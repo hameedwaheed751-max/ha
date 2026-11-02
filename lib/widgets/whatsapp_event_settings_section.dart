@@ -72,7 +72,7 @@ class _WhatsAppEventSettingsSectionState
       if (!mounted) return;
       setState(() {
         _loadError =
-            'تعذر تحميل إعدادات أحداث WhatsApp. تحقق من الاتصال ثم أعد المحاولة.';
+            'تعذر تحميل إعدادات أحداث واتساب. تحقق من الاتصال ثم أعد المحاولة.';
         _loading = false;
       });
     }
@@ -164,7 +164,7 @@ class _WhatsAppEventSettingsSectionState
             ),
             const SizedBox(width: 8),
             Text(
-              'أحداث رسائل WhatsApp',
+              'أحداث رسائل واتساب',
               style: Theme.of(
                 context,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),

@@ -41,7 +41,7 @@ Future<void> recordPartialPayment(BuildContext context, Subscriber s) async {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'المتبقي الحالي: ${before.toStringAsFixed(0)} د.ع',
+              'المتبقي الحالي: ${moneyText(before)}',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),

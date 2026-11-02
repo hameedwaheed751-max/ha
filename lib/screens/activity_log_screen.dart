@@ -267,14 +267,14 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                               '${_formatDate(event.at)}'
                               '${event.subscriberUser.isEmpty ? '' : ' • ${event.subscriberUser}'}'
                               '${event.note.trim().isEmpty ? '' : '\n${event.note.trim().replaceAll(' | ', '\n')}'}'
-                              '${event.remainingAfter > 0 ? '\nالمتبقي ${event.remainingAfter.toStringAsFixed(0)} د.ع' : ''}',
+                              '${event.remainingAfter > 0 ? '\nالمتبقي ${moneyText(event.remainingAfter)}' : ''}',
                               maxLines: isEdit ? 5 : 3,
                               overflow: TextOverflow.ellipsis,
                             ),
                             trailing: isEdit || event.amount == 0
                                 ? null
                                 : Text(
-                                    '${event.amount.toStringAsFixed(0)} د.ع',
+                                    '${moneyText(event.amount)}',
                                     style: TextStyle(
                                       color: color,
                                       fontWeight: FontWeight.w800,

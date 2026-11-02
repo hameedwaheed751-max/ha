@@ -138,9 +138,7 @@ class SubscriptionRequestService {
 
   static void _requireTrustedAdmin() {
     if (!_isTrustedAdmin) {
-      throw StateError(
-        'Only the trusted administrator may review subscription requests.',
-      );
+      throw StateError('هذه العملية للمدير فقط');
     }
   }
 
@@ -406,20 +404,16 @@ class SubscriptionRequestService {
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || uid.trim().isEmpty || user.uid != uid.trim()) {
-      throw StateError(
-        'A signed-in account matching the request UID is required.',
-      );
+      throw StateError('سجّل الدخول بالحساب نفسه قبل إرسال الطلب');
     }
     if (isRenewal &&
         user.email?.trim().toLowerCase() != email.trim().toLowerCase()) {
-      throw StateError(
-        'The renewal request email must match the signed-in account.',
-      );
+      throw StateError('بريد طلب التجديد لا يطابق الحساب المسجل');
     }
     final nodeRef = _root.child(_adminCollectionPath).push();
     final requestId = nodeRef.key;
     if (requestId == null) {
-      throw StateError('Could not allocate a subscription request ID.');
+      throw StateError('تعذر إنشاء الطلب، حاول مرة أخرى');
     }
     final names = agentName
         .trim()
@@ -477,7 +471,7 @@ class SubscriptionRequestService {
     }
     final requestId = _root.child(_adminCollectionPath).push().key;
     if (requestId == null) {
-      throw StateError('Could not allocate a subscription request ID.');
+      throw StateError('تعذر إنشاء الطلب، حاول مرة أخرى');
     }
     final names = agentName
         .trim()
@@ -573,7 +567,7 @@ class SubscriptionRequestService {
           return Transaction.success(current);
         }, applyLocally: false);
     if (!result.committed) {
-      throw StateError('Only pending subscription requests can be rejected.');
+      throw StateError('لا يمكن رفض طلب تمت مراجعته');
     }
   }
 
@@ -601,9 +595,7 @@ class SubscriptionRequestService {
       return Transaction.success(null);
     }, applyLocally: false);
     if (!result.committed) {
-      throw StateError(
-        'The request could not be deleted in its current state.',
-      );
+      throw StateError('لا يمكن حذف الطلب أثناء قبوله، حاول بعد قليل');
     }
   }
 
@@ -671,7 +663,7 @@ class SubscriptionRequestService {
       return Transaction.success(current);
     }, applyLocally: false);
     if (!claimResult.committed || claimResult.snapshot.value is! Map) {
-      throw StateError('Only pending subscription requests can be approved.');
+      throw StateError('لا يمكن قبول طلب تمت مراجعته');
     }
     final current = Map<String, dynamic>.from(
       claimResult.snapshot.value as Map,

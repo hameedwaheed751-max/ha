@@ -1292,6 +1292,27 @@ extension PackagePlanListX on List<PackagePlan> {
   }
 }
 
+/// المبالغ بفواصل الآلاف، مثل 35,000 د.ع.
+String moneyText(num amount) {
+  final rounded = amount.round();
+  final digits = rounded.abs().toString().replaceAllMapped(
+    RegExp(r'\B(?=(\d{3})+$)'),
+    (_) => ',',
+  );
+  return '${rounded < 0 ? '-' : ''}$digits د.ع';
+}
+
+/// رسالة تُعرض للمستخدم بدل نص الخطأ الخام.
+String errorText(Object error) {
+  if (error is StateError) return error.message;
+  if (error is FirebaseException) {
+    return error.code == 'permission-denied'
+        ? 'ليس لهذا الحساب صلاحية تنفيذ العملية'
+        : 'تعذر الاتصال بالخادم، حاول مرة أخرى';
+  }
+  return 'حدث خطأ غير متوقع، حاول مرة أخرى';
+}
+
 class AppStore {
   static const int dataVersion = 1;
   static const String subscribersRevisionKey = 'subscribersRevision';
@@ -1331,6 +1352,7 @@ class AppStore {
   static String agentEmail = '';
   static String agentKey = '';
   static final List<ChatMessage> chatMessages = [];
+
   /// يُخطر الشاشات عند حفظ المشتركين أو وصول نسخة أحدث من جهاز آخر.
   static final ValueNotifier<int> subscribersChange = ValueNotifier<int>(0);
   static final ValueNotifier<int> chatMessagesChange = ValueNotifier<int>(0);
@@ -2258,10 +2280,7 @@ class AppStore {
     await p.setString('subscriptionPrice', subscriptionPrice);
     await p.setString('paymentMethod', paymentMethod);
     await p.setBool('subscriptionAutoExpire', subscriptionAutoExpire);
-    await p.setString(
-      'subscriptionLastPaymentId',
-      subscriptionLastPaymentId,
-    );
+    await p.setString('subscriptionLastPaymentId', subscriptionLastPaymentId);
     await p.setString('subscriptionStatus', subscriptionStatus);
     if (subscriptionStartedAt != null) {
       await p.setString(
@@ -3129,7 +3148,9 @@ class AppStore {
     bool Function(Subscriber subscriber) shouldDelete,
   ) async {
     if (_isLoggedIn && !_remoteLoadConfirmed) {
-      throw StateError('لم يكتمل تحميل بيانات الحساب، أعد المحاولة بعد المزامنة');
+      throw StateError(
+        'لم يكتمل تحميل بيانات الحساب، أعد المحاولة بعد المزامنة',
+      );
     }
     final previousSubscribers = List<Subscriber>.from(subscribers);
     subscribers.removeWhere(shouldDelete);
@@ -3288,11 +3309,11 @@ class AppStore {
     final stamp = now ?? DateTime.now();
     subscriber.rolloverToMonth(stamp);
     final total = payments.fold<double>(0, (sum, event) => sum + event.amount);
-    final toCurrentCharge = Subscriber.monthKeyOf(at) == subscriber.billingMonthKey
+    final toCurrentCharge =
+        Subscriber.monthKeyOf(at) == subscriber.billingMonthKey
         ? payments
               .where(
-                (event) =>
-                    event.type == DailyTaskEvent.debtEntryCollectionType,
+                (event) => event.type == DailyTaskEvent.debtEntryCollectionType,
               )
               .fold<double>(0, (sum, event) => sum + event.amount)
         : 0.0;
@@ -3419,10 +3440,9 @@ class AppStore {
   }
 
   static double recordedActivationAmount(Subscriber subscriber) =>
-      _recordedSaleCollections(subscriber).fold<double>(
-        0,
-        (sum, event) => sum + event.amount,
-      );
+      _recordedSaleCollections(
+        subscriber,
+      ).fold<double>(0, (sum, event) => sum + event.amount);
 
   /// يدمج الواصل المسجل قبل التفعيل في حركة التفعيل دون مساس بالمبالغ.
   static double mergeRecordedSaleIntoActivation(Subscriber subscriber) {

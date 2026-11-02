@@ -23,7 +23,7 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
     return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
-  String _money(double amount) => '${amount.toStringAsFixed(0)} د.ع';
+  String _money(double amount) => '${moneyText(amount)}';
 
   List<DailyTaskEvent> _eventsOfDay(DateTime day) {
     // تعديل المبالغ وأحداث المشترك تبقى في سجل النشاط: كل حركة مالية لها سطرها.

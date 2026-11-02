@@ -19,6 +19,28 @@ void main() {
     expect(find.byIcon(Icons.bolt_rounded), findsOneWidget);
   });
 
+  testWidgets('DashboardStatTile shows its value and reacts to a tap', (
+    tester,
+  ) async {
+    var tapped = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DashboardStatTile(
+            label: 'منتهي',
+            value: '45',
+            color: Colors.red,
+            onTap: () => tapped++,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('منتهي'), findsOneWidget);
+    await tester.tap(find.text('45'));
+    expect(tapped, 1);
+  });
+
   testWidgets('DashboardMetricCard renders value and title', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

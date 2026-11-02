@@ -1171,7 +1171,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         : 'لا توجد باقة';
     final statusText = isPlanActive ? 'نشط' : 'منتهي';
     final endDateText = AppStore.subscriptionEndsAt != null
-        ? AppStore.subscriptionEndsAt!.toLocal().toString().split(' ').first
+        ? _dashboardDateText(AppStore.subscriptionEndsAt!.toLocal())
         : '—';
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -1194,7 +1194,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'معلومات SAS',
+            'اشتراكك',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w800,
@@ -2167,27 +2167,23 @@ class _DashboardScreenState extends State<DashboardScreen>
                         if (widget.isAgentMode && renewalNotice != null)
                           _renewalBanner(renewalNotice),
                         _todayReportCard(daySummary),
-                        const SizedBox(height: 12),
-                        _dashboardStats(
+                        const SizedBox(height: 14),
+                        _subscribersOverview(
+                          total: AppStore.subscribers.length,
                           active: active,
                           expired: expired,
                           debts: debts,
-                          summary: daySummary,
                         ),
-                        const SizedBox(height: 22),
+                        const SizedBox(height: 16),
                         _sectionTitle('الوصول السريع', Icons.bolt_rounded),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 8),
                         ValueListenableBuilder<int>(
                           valueListenable: AppStore.chatMessagesChange,
                           builder: (context, _, __) => _quickActionsGrid(),
                         ),
-                        const SizedBox(height: 22),
-                        _sasInformationSection(
-                          active: active,
-                          totalSubscribers: AppStore.subscribers.length,
-                          expired: expired,
-                        ),
-                        const SizedBox(height: 22),
+                        const SizedBox(height: 16),
+                        _sasInformationSection(),
+                        const SizedBox(height: 16),
                         _latestSubscribersSection(
                           latestSubscribers.take(4).toList(),
                         ),
@@ -2206,21 +2202,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   String _dashboardDateText(DateTime date) =>
       '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
 
-  String _money(double amount) => '${amount.toStringAsFixed(0)} د.ع';
+  String _money(double amount) => moneyText(amount);
 
   String _formatSasBalanceText(String raw) {
     final n = double.tryParse(raw.replaceAll(RegExp(r'[^0-9.]'), ''));
     if (n == null || !n.isFinite) return raw;
-    final formatted = n.toStringAsFixed(0);
-    final buffer = StringBuffer();
-    for (int i = 0; i < formatted.length; i++) {
-      final idx = formatted.length - i;
-      if (i > 0 && idx % 3 == 0) {
-        buffer.write(',');
-      }
-      buffer.write(formatted[i]);
-    }
-    return '$buffer د.ع';
+    return moneyText(n);
   }
 
   Future<void> _pickDashboardDate() async {
@@ -2269,218 +2256,213 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  Widget _todayReportCard(DailyTaskSummary summary) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isCompact = constraints.maxWidth < 440;
-        final colors = Theme.of(context).colorScheme;
-        final heading = Column(
-          crossAxisAlignment: isCompact
-              ? CrossAxisAlignment.center
-              : CrossAxisAlignment.start,
+  Widget _todayCollectionTile({
+    required String label,
+    required String value,
+    String? cases,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.13),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'تقرير اليوم',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 17,
-                fontWeight: FontWeight.w900,
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70, fontSize: 11),
+            ),
+            const SizedBox(height: 3),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              _dashboardDateText(_dashboardDate),
-              style: const TextStyle(color: Colors.white, fontSize: 12),
-            ),
+            if (cases != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                cases,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white70, fontSize: 10.5),
+              ),
+            ],
           ],
-        );
-        final changeDateButton = OutlinedButton.icon(
-          onPressed: _pickDashboardDate,
-          icon: const Icon(Icons.calendar_month_outlined, size: 16),
-          label: const Text('تغيير التاريخ'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.white,
-            backgroundColor: colors.primary.withValues(alpha: 0.78),
-            side: BorderSide(color: Colors.white.withValues(alpha: 0.8)),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            textStyle: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        );
-
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: Container(
-            constraints: BoxConstraints(minHeight: isCompact ? 188 : 164),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF1B5E20).withValues(alpha: 0.12),
-                  blurRadius: 18,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Transform.scale(
-                    scale: 1.25,
-                    child: Image.asset(
-                      _referenceAssetPath(
-                        'assets/reference/daily_report_banner.png',
-                      ),
-                      fit: BoxFit.cover,
-                      alignment: Alignment.center,
-                    ),
-                  ),
-                ),
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          const Color(0xB31B5E20),
-                          const Color(0x6B1B5E20),
-                          const Color(0x291B5E20),
-                        ],
-                        begin: Alignment.centerRight,
-                        end: Alignment.centerLeft,
-                      ),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: EdgeInsets.all(isCompact ? 12 : 18),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: isCompact
-                        ? CrossAxisAlignment.center
-                        : CrossAxisAlignment.stretch,
-                    children: [
-                      if (isCompact) ...[
-                        heading,
-                        const SizedBox(height: 4),
-                        changeDateButton,
-                      ] else
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(child: heading),
-                            changeDateButton,
-                          ],
-                        ),
-                      SizedBox(height: isCompact ? 7 : 14),
-                      Text(
-                        'إجمالي النقد الواصل خلال اليوم',
-                        textAlign: isCompact ? TextAlign.center : null,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _money(summary.totalCollected),
-                        textAlign: isCompact ? TextAlign.center : null,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: isCompact ? 23 : 28,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+        ),
+      ),
     );
   }
 
-  Widget _dashboardStats({
+  Widget _todayReportCard(DailyTaskSummary summary) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => _pushDashboard(const TodayTasksScreen()),
+        child: Ink(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: const LinearGradient(
+              colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
+              begin: Alignment.topRight,
+              end: Alignment.bottomLeft,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'تقرير اليوم',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: _pickDashboardDate,
+                    icon: const Icon(Icons.calendar_month_outlined, size: 15),
+                    label: Text(_dashboardDateText(_dashboardDate)),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.white.withValues(alpha: 0.13),
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      textStyle: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'إجمالي النقد الواصل خلال اليوم',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                _money(summary.totalCollected),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _todayCollectionTile(
+                    label: 'الواصل من التفعيل',
+                    value: _money(summary.activationCollected),
+                    cases: 'حالات التفعيل: ${summary.activationCases}',
+                  ),
+                  const SizedBox(width: 8),
+                  _todayCollectionTile(
+                    label: 'الواصل من التسديد',
+                    value: _money(summary.debtPaymentsCollected),
+                    cases: 'حالات التسديد: ${summary.debtPaymentCases}',
+                  ),
+                ],
+              ),
+              if (summary.otherCollected > 0.0001) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    _todayCollectionTile(
+                      label: 'واصل آخر',
+                      value: _money(summary.otherCollected),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _subscribersOverview({
+    required int total,
     required int active,
     required int expired,
     required int debts,
-    required DailyTaskSummary summary,
   }) {
-    final items = <(String, String, String, Color)>[
-      (
-        'حالات التفعيل',
-        '${summary.activationCases}',
-        'assets/reference/activation_status.png',
-        const Color(0xFF22A447),
-      ),
-      (
-        'حالات تسديد الديون',
-        '${summary.debtPaymentCases}',
-        'assets/reference/debt_payment.png',
-        const Color(0xFF0877F9),
-      ),
-      (
-        'الواصل من التفعيل',
-        _money(summary.activationCollected),
-        'assets/reference/activation_contact.png',
-        const Color(0xFF219653),
-      ),
-      (
-        'الواصل من التسديد',
-        _money(summary.debtPaymentsCollected),
-        'assets/reference/payment_contact.png',
-        const Color(0xFFF57C00),
-      ),
-      if (summary.otherCollected > 0.0001)
-        (
-          'واصل آخر',
-          _money(summary.otherCollected),
-          'assets/reference/payment_contact.png',
-          const Color(0xFF3F51B5),
-        ),
-    ];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 720 ? 4 : 2;
-        final width = (constraints.maxWidth - (columns - 1) * 10) / columns;
-        return Wrap(
-          spacing: 10,
-          runSpacing: 10,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
           children: [
-            for (final item in items)
-              SizedBox(
-                width: width,
-                child: _metricCard(
-                  title: item.$1,
-                  subtitle: '',
-                  value: item.$2,
-                  assetName: item.$3,
-                  color: item.$4,
+            Expanded(child: _sectionTitle('المشتركون', Icons.groups_outlined)),
+            TextButton(
+              onPressed: () => _pushDashboard(const SubscribersScreen()),
+              child: Text('الكل ($total)'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: DashboardStatTile(
+                label: 'فعّال',
+                value: '$active',
+                color: const Color(0xFF22A447),
+                onTap: () =>
+                    _pushDashboard(const SubscribersScreen(filter: 'active')),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DashboardStatTile(
+                label: 'خلال 3 أيام',
+                value: '$_expiring3Days',
+                color: const Color(0xFFF57C00),
+                onTap: () => _pushDashboard(
+                  const SubscribersScreen(filter: 'expiring3Days'),
                 ),
               ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DashboardStatTile(
+                label: 'منتهي',
+                value: '$expired',
+                color: const Color(0xFFE53935),
+                onTap: () =>
+                    _pushDashboard(const SubscribersScreen(filter: 'expired')),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DashboardStatTile(
+                label: 'مدينون',
+                value: '$debts',
+                color: const Color(0xFF7446D7),
+                onTap: _openDebtsTable,
+              ),
+            ),
           ],
-        );
-      },
-    );
-  }
-
-  Widget _metricCard({
-    required String title,
-    required String subtitle,
-    required String value,
-    required String assetName,
-    required Color color,
-  }) {
-    return DashboardMetricCard(
-      title: title,
-      subtitle: subtitle,
-      value: value,
-      assetName: assetName,
-      color: color,
+        ),
+      ],
     );
   }
 
@@ -2514,16 +2496,10 @@ class _DashboardScreenState extends State<DashboardScreen>
         () => _pushDashboard(const ChatScreen()),
       ),
       (
-        'الواتساب',
+        'واتساب',
         '',
         const Color(0xFF25D366),
         () => _pushDashboard(const WhatsAppLinkingScreen()),
-      ),
-      (
-        'المشتركين',
-        'assets/reference/subscribers.png',
-        const Color(0xFF7446D7),
-        () => _pushDashboard(const SubscribersScreen()),
       ),
       (
         'التقارير الحسابية',
@@ -2552,7 +2528,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 720 ? 6 : 3;
+        final columns = constraints.maxWidth >= 720 ? 8 : 4;
         final width = (constraints.maxWidth - (columns - 1) * 8) / columns;
         return Wrap(
           spacing: 8,
@@ -2565,31 +2541,21 @@ class _DashboardScreenState extends State<DashboardScreen>
                   onTap: action.$4,
                   borderRadius: BorderRadius.circular(8),
                   child: Container(
-                    constraints: const BoxConstraints(minHeight: 88),
+                    constraints: const BoxConstraints(minHeight: 84),
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 12,
+                      horizontal: 4,
+                      vertical: 9,
                     ),
                     decoration: BoxDecoration(
                       color: isDark
                           ? const Color(0xFF1E293B)
                           : const Color(0xFFFFFFFF),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(14),
                       border: Border.all(
                         color: isDark
                             ? Colors.white.withValues(alpha: 0.08)
-                            : Colors.green.shade100,
-                        width: 1.1,
+                            : const Color(0xFFE3EDE5),
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(
-                            0xFF2E7D32,
-                          ).withValues(alpha: 0.08),
-                          blurRadius: 14,
-                          offset: const Offset(0, 7),
-                        ),
-                      ],
                     ),
                     child: Stack(
                       clipBehavior: Clip.none,
@@ -2599,18 +2565,18 @@ class _DashboardScreenState extends State<DashboardScreen>
                           children: [
                             if (action.$2.isEmpty)
                               Icon(
-                                Icons.qr_code_2_rounded,
+                                Icons.forum_rounded,
                                 color: action.$3,
-                                size: 38,
+                                size: 32,
                               )
                             else
                               Image.asset(
                                 _referenceAssetPath(action.$2),
-                                width: 38,
-                                height: 38,
+                                width: 32,
+                                height: 32,
                                 fit: BoxFit.contain,
                               ),
-                            const SizedBox(height: 9),
+                            const SizedBox(height: 6),
                             Text(
                               action.$1,
                               maxLines: 2,
@@ -2618,8 +2584,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: colors.onSurface,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                           ],
@@ -2665,61 +2631,15 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _sasInformationSection({
-    required int active,
-    required int totalSubscribers,
-    required int expired,
-  }) {
-    final items = <(String, String, String, Color, VoidCallback)>[
-      (
-        'الرصيد',
-        sasWalletLoading && sasBalanceText == null
-            ? '...'
-            : (sasBalanceText != null && sasBalanceText!.trim().isNotEmpty
-                  ? _formatSasBalanceText(sasBalanceText!)
-                  : '--'),
-        'assets/reference/balance.png',
-        const Color(0xFF00897B),
-        _loadSasWallet,
-      ),
-      (
-        'النقاط التشجيعية',
-        sasWalletLoading && sasRewardPointsText == null
-            ? '...'
-            : (sasRewardPointsText ?? '--'),
-        'assets/reference/points.png',
-        const Color(0xFF7446D7),
-        _loadSasWallet,
-      ),
-      (
-        'عدد المشتركين',
-        totalSubscribers.toString(),
-        'assets/reference/subscribers_count.png',
-        const Color(0xFF0877F9),
-        () => _pushDashboard(const SubscribersScreen()),
-      ),
-      (
-        'المشتركين الفعالين',
-        '$active',
-        'assets/reference/active_subscribers.png',
-        const Color(0xFF22A447),
-        () => _pushDashboard(const SubscribersScreen(filter: 'active')),
-      ),
-      (
-        'المنتهية اشتراكاتهم',
-        '$expired',
-        'assets/reference/expired_subscriptions.png',
-        const Color(0xFFE53935),
-        () => _pushDashboard(const SubscribersScreen(filter: 'expired')),
-      ),
-      (
-        'الانتهاء خلال 3 أيام',
-        '$_expiring3Days',
-        'assets/reference/expiring_3_days.png',
-        const Color(0xFFF57C00),
-        () => _pushDashboard(const SubscribersScreen(filter: 'expiring3Days')),
-      ),
-    ];
+  Widget _sasInformationSection() {
+    final balance = sasWalletLoading && sasBalanceText == null
+        ? '...'
+        : (sasBalanceText != null && sasBalanceText!.trim().isNotEmpty
+              ? _formatSasBalanceText(sasBalanceText!)
+              : '--');
+    final points = sasWalletLoading && sasRewardPointsText == null
+        ? '...'
+        : (sasRewardPointsText ?? '--');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2727,48 +2647,43 @@ class _DashboardScreenState extends State<DashboardScreen>
         Row(
           children: [
             Expanded(
-              child: _sectionTitle('قائمة معلومات الساس', Icons.speed_rounded),
+              child: _sectionTitle('معلومات الساس', Icons.speed_rounded),
             ),
             IconButton(
               tooltip: 'تحديث معلومات SAS',
+              visualDensity: VisualDensity.compact,
               onPressed: sasWalletLoading ? null : _loadSasWallet,
               icon: sasWalletLoading
                   ? const SizedBox(
-                      width: 20,
-                      height: 20,
+                      width: 18,
+                      height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.refresh_rounded),
+                  : const Icon(Icons.refresh_rounded, size: 20),
             ),
           ],
         ),
-        const SizedBox(height: 10),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final columns = constraints.maxWidth >= 720 ? 4 : 2;
-            final width = (constraints.maxWidth - (columns - 1) * 10) / columns;
-            return Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                for (final item in items)
-                  SizedBox(
-                    width: width,
-                    child: InkWell(
-                      onTap: item.$5,
-                      borderRadius: BorderRadius.circular(8),
-                      child: _metricCard(
-                        title: item.$1,
-                        subtitle: '',
-                        value: item.$2,
-                        assetName: item.$3,
-                        color: item.$4,
-                      ),
-                    ),
-                  ),
-              ],
-            );
-          },
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: DashboardStatTile(
+                label: 'الرصيد',
+                value: balance,
+                color: const Color(0xFF00897B),
+                onTap: _loadSasWallet,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DashboardStatTile(
+                label: 'النقاط التشجيعية',
+                value: points,
+                color: const Color(0xFF7446D7),
+                onTap: _loadSasWallet,
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -2833,10 +2748,17 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
         const SizedBox(height: 8),
         Container(
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFFE4EAF2)),
+            color: Theme.of(context).brightness == Brightness.dark
+                ? const Color(0xFF1E293B)
+                : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : const Color(0xFFE3EDE5),
+            ),
           ),
           child: subscribers.isEmpty
               ? const Padding(
@@ -2904,10 +2826,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                         : subscriber.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFF172B4D),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontSize: 13,
-                      fontWeight: FontWeight.w900,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -3299,11 +3221,11 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'الدين المرحّل: ${s.carriedDebt.toStringAsFixed(0)} د.ع',
+                  'الدين المرحّل: ${moneyText(s.carriedDebt)}',
                   style: TextStyle(color: Colors.orange.shade800),
                 ),
                 Text(
-                  'إجمالي المتبقي: ${(s.carriedDebt + (_parseAmount(remainingC.text.trim()) ?? s.currentMonthRemaining)).toStringAsFixed(0)} د.ع',
+                  'إجمالي المتبقي: ${moneyText((s.carriedDebt + (_parseAmount(remainingC.text.trim()) ?? s.currentMonthRemaining)))}',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
@@ -3540,26 +3462,26 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
         final editDetails = <String>[];
         if (unpaidDebt > 0.0001) {
           editDetails.add(
-            'بتاريخ $operationDate تم إضافة مبلغ دين ${unpaidDebt.toStringAsFixed(0)} د.ع',
+            'بتاريخ $operationDate تم إضافة مبلغ دين ${moneyText(unpaidDebt)}',
           );
         }
         if (reducedDebt > 0.0001) {
           editDetails.add(
-            'بتاريخ $operationDate تم تخفيض مبلغ الاشتراك ${reducedDebt.toStringAsFixed(0)} د.ع',
+            'بتاريخ $operationDate تم تخفيض مبلغ الاشتراك ${moneyText(reducedDebt)}',
           );
         }
         if (delta > 0.0001) {
           editDetails.add(
-            'بتاريخ $operationDate تم تسديد مبلغ ${delta.toStringAsFixed(0)} د.ع',
+            'بتاريخ $operationDate تم تسديد مبلغ ${moneyText(delta)}',
           );
         } else if (delta < -0.0001) {
           editDetails.add(
-            'بتاريخ $operationDate تم تخفيض الواصل بمبلغ ${delta.abs().toStringAsFixed(0)} د.ع',
+            'بتاريخ $operationDate تم تخفيض الواصل بمبلغ ${moneyText(delta.abs())}',
           );
         }
         if (editDetails.isEmpty) {
           editDetails.add(
-            'بتاريخ $operationDate تم تعديل مبلغ الاشتراك إلى ${s.price.toStringAsFixed(0)} د.ع',
+            'بتاريخ $operationDate تم تعديل مبلغ الاشتراك إلى ${moneyText(s.price)}',
           );
         }
         await AppStore.addDailyTaskEvent(
@@ -3652,15 +3574,15 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('مبلغ الاشتراك: ${s.price.toStringAsFixed(0)} د.ع'),
-              Text('واصل الشهر الحالي: ${s.paid.toStringAsFixed(0)} د.ع'),
+              Text('مبلغ الاشتراك: ${moneyText(s.price)}'),
+              Text('واصل الشهر الحالي: ${moneyText(s.paid)}'),
               if (s.carriedDebt > 0.0001)
                 Text(
-                  'الدين المرحّل: ${s.carriedDebt.toStringAsFixed(0)} د.ع',
+                  'الدين المرحّل: ${moneyText(s.carriedDebt)}',
                   style: TextStyle(color: Colors.orange.shade800),
                 ),
               Text(
-                'المتبقي: ${s.remaining.toStringAsFixed(0)} د.ع',
+                'المتبقي: ${moneyText(s.remaining)}',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
@@ -3736,8 +3658,8 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'تمت إضافة ${amount.toStringAsFixed(0)} د.ع | '
-          'المتبقي ${s.remaining.toStringAsFixed(0)} د.ع$syncWarning',
+          'تمت إضافة ${moneyText(amount)} | '
+          'المتبقي ${moneyText(s.remaining)}$syncWarning',
         ),
       ),
     );
@@ -3779,7 +3701,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                           child: Icon(Icons.payments_outlined),
                         ),
                         title: Text(
-                          '${p.amount.toStringAsFixed(0)} د.ع',
+                          '${moneyText(p.amount)}',
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                         subtitle: Text(
@@ -3824,9 +3746,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
     if (!mounted) return;
     if (!result.success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('فشل إرسال واتساب: ${result.friendlyError}'),
-        ),
+        SnackBar(content: Text('فشل إرسال واتساب: ${result.friendlyError}')),
       );
       return;
     }
@@ -4273,7 +4193,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${totalRemaining.toStringAsFixed(0)} د.ع',
+                          '${moneyText(totalRemaining)}',
                           style: const TextStyle(
                             color: Color(0xFFFFB4AB),
                             fontSize: 28,
@@ -4347,34 +4267,35 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                 child: Row(
-                  children: const {
-                    'largest': 'الأكبر',
-                    'oldest': 'الأقدم',
-                    'name': 'الاسم',
-                  }.entries.map((sort) {
-                    return Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 3),
-                        child: ChoiceChip(
-                          label: SizedBox(
-                            width: double.infinity,
-                            child: Text(
-                              sort.value,
-                              textAlign: TextAlign.center,
+                  children:
+                      const {
+                        'largest': 'الأكبر',
+                        'oldest': 'الأقدم',
+                        'name': 'الاسم',
+                      }.entries.map((sort) {
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 3),
+                            child: ChoiceChip(
+                              label: SizedBox(
+                                width: double.infinity,
+                                child: Text(
+                                  sort.value,
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                              selected: _debtSortBy == sort.key,
+                              selectedColor: greenSoft,
+                              checkmarkColor: green,
+                              labelStyle: TextStyle(
+                                color: _debtSortBy == sort.key ? green : null,
+                              ),
+                              onSelected: (_) =>
+                                  setState(() => _debtSortBy = sort.key),
                             ),
                           ),
-                          selected: _debtSortBy == sort.key,
-                          selectedColor: greenSoft,
-                          checkmarkColor: green,
-                          labelStyle: TextStyle(
-                            color: _debtSortBy == sort.key ? green : null,
-                          ),
-                          onSelected: (_) =>
-                              setState(() => _debtSortBy = sort.key),
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                        );
+                      }).toList(),
                 ),
               ),
               if (sortedDebts.isEmpty)
@@ -4466,7 +4387,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                 ),
                 const SizedBox(width: 10),
                 Text(
-                  '${subscriber.remaining.toStringAsFixed(0)} د.ع',
+                  '${moneyText(subscriber.remaining)}',
                   style: const TextStyle(
                     color: Color(0xFFC2413B),
                     fontWeight: FontWeight.w800,

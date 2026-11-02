@@ -883,7 +883,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (currentUser != null) {
       if (currentUser.email?.trim().toLowerCase() != email) {
         throw StateError(
-          'The signed-in account does not match the registration email.',
+          'الحساب المسجل لا يطابق البريد المكتوب، سجّل الخروج ثم أعد المحاولة',
         );
       }
       return currentUser;
@@ -896,7 +896,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
       final user = credential.user;
       if (user == null) {
-        throw StateError('Firebase Authentication did not return a user.');
+        throw StateError('تعذر إنشاء الحساب، حاول مرة أخرى');
       }
       return user;
     } on FirebaseAuthException catch (error) {
@@ -908,9 +908,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final user = credential.user;
       if (user == null || user.email?.trim().toLowerCase() != email) {
         await auth.signOut();
-        throw StateError(
-          'The existing account could not be verified for this registration.',
-        );
+        throw StateError('تعذر التحقق من هذا الحساب');
       }
       return user;
     }
@@ -978,7 +976,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         if (_receiptFile != null && mounted) {
           await _attachReceiptWithRetry(context, requestId, _receiptFile!);
         }
-        notice = 'تم إرسال طلب الاشتراك بنجاح، وهو الآن بانتظار موافقة الإدارة.';
+        notice =
+            'تم إرسال طلب الاشتراك بنجاح، وهو الآن بانتظار موافقة الإدارة.';
       }
       await FirebaseAuth.instance.signOut();
 
@@ -1007,9 +1006,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('فشل إرسال الطلب: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('فشل إرسال الطلب: ${errorText(e)}')),
+      );
     } finally {
       if (mounted && _isLoading) {
         setState(() => _isLoading = false);
@@ -1483,7 +1482,7 @@ Future<bool> _ensureRenewalAccountAuthenticated(
     );
     if (credential.user?.uid == account.uid) return true;
     await FirebaseAuth.instance.signOut();
-    throw StateError('Signed-in account does not match the renewal account.');
+    throw StateError('الحساب لا يطابق حساب التجديد');
   } on FirebaseAuthException catch (error) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

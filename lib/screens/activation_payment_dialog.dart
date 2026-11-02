@@ -89,7 +89,7 @@ class _ActivationPaymentDialogState extends State<ActivationPaymentDialog> {
     children: [
       Text(label),
       Text(
-        '${amount.toStringAsFixed(0)} د.ع',
+        '${moneyText(amount)}',
         style: TextStyle(fontWeight: FontWeight.w800, color: color),
       ),
     ],
@@ -113,7 +113,7 @@ class _ActivationPaymentDialogState extends State<ActivationPaymentDialog> {
               Text('الباقة: ${subscriber.packageDisplay}'),
               if (subscriber.carriedDebt > 0.0001)
                 Text(
-                  'دين سابق: ${subscriber.carriedDebt.toStringAsFixed(0)} د.ع',
+                  'دين سابق: ${moneyText(subscriber.carriedDebt)}',
                   style: TextStyle(color: Colors.orange.shade800),
                 ),
               if (_useRecorded) ...[

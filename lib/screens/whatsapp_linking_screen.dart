@@ -59,9 +59,9 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
     final shouldDisconnect = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('فصل حساب WhatsApp؟'),
+        title: const Text('فصل حساب واتساب؟'),
         content: const Text(
-          'سيتم تسجيل الخروج من WhatsApp على هذا الجهاز، وستحتاج إلى مسح رمز QR جديد لإعادة الربط.',
+          'سيتم تسجيل الخروج من واتساب على هذا الجهاز، وستحتاج إلى مسح رمز QR جديد لإعادة الربط.',
         ),
         actions: [
           TextButton(
@@ -92,7 +92,7 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
     } on WahaGatewayException catch (error) {
       _setError(error.message);
     } catch (_) {
-      _setError('تعذر الاتصال بخدمة ربط WhatsApp.');
+      _setError('تعذر الاتصال بخدمة ربط واتساب.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -115,28 +115,28 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
   String _friendlyError(String message) => switch (message) {
     'unauthorized' =>
       'تعذر اعتماد جلسة الدخول. حدّث الحالة، وإذا استمرت المشكلة سجّل الخروج ثم أعد تسجيل الدخول.',
-    'forbidden' => 'هذا الحساب غير مخوّل لإدارة جلسة WhatsApp.',
+    'forbidden' => 'هذا الحساب غير مخوّل لإدارة جلسة واتساب.',
     'authorization_unavailable' =>
       'تعذر التحقق من صلاحية الحساب حالياً. حاول لاحقاً.',
     'origin_not_allowed' =>
-      'عنوان التطبيق غير مسموح له بالاتصال ببوابة WhatsApp.',
-    'session_status_unavailable' => 'تعذر جلب حالة جلسة WhatsApp من الخادم.',
-    'session_not_started' => 'لم تبدأ جلسة WhatsApp بعد.',
-    'session_start_failed' => 'تعذر بدء جلسة WhatsApp. حاول مرة أخرى.',
-    'session_reconnect_failed' => 'تعذرت إعادة ربط WhatsApp. حاول مرة أخرى.',
-    'session_disconnect_failed' => 'تعذر فصل حساب WhatsApp. حاول مرة أخرى.',
+      'عنوان التطبيق غير مسموح له بالاتصال ببوابة واتساب.',
+    'session_status_unavailable' => 'تعذر جلب حالة جلسة واتساب من الخادم.',
+    'session_not_started' => 'لم تبدأ جلسة واتساب بعد.',
+    'session_start_failed' => 'تعذر بدء جلسة واتساب. حاول مرة أخرى.',
+    'session_reconnect_failed' => 'تعذرت إعادة ربط واتساب. حاول مرة أخرى.',
+    'session_disconnect_failed' => 'تعذر فصل حساب واتساب. حاول مرة أخرى.',
     'qr_unavailable' => 'انتهت صلاحية رمز QR أو تعذر تحديثه. حدّث الحالة.',
     'qr_not_available' => 'رمز QR غير متاح الآن. حدّث حالة الجلسة.',
     'Could not connect to the WAHA gateway.' =>
-      'تعذر الاتصال ببوابة WhatsApp. تحقق من اتصال الإنترنت وحاول مجدداً.',
+      'تعذر الاتصال ببوابة واتساب. تحقق من اتصال الإنترنت وحاول مجدداً.',
     'Could not authenticate with Firebase.' =>
       'تعذر التحقق من جلسة Firebase. أعد تسجيل الدخول وحاول مجدداً.',
     'A signed-in Firebase user is required.' =>
-      'يجب تسجيل الدخول إلى التطبيق قبل ربط WhatsApp.',
+      'يجب تسجيل الدخول إلى التطبيق قبل ربط واتساب.',
     _
         when message.startsWith('WAHA gateway') ||
             message.startsWith('Gateway returned') =>
-      'تعذر الاتصال ببوابة WhatsApp. حاول مجدداً بعد قليل.',
+      'تعذر الاتصال ببوابة واتساب. حاول مجدداً بعد قليل.',
     _ => message,
   };
 
@@ -196,7 +196,7 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
         stopPolling: error.statusCode == 401 || error.statusCode == 403,
       );
     } catch (_) {
-      _setError('تعذر تحديث حالة جلسة WhatsApp.', stopPolling: false);
+      _setError('تعذر تحديث حالة جلسة واتساب.', stopPolling: false);
     } finally {
       _polling = false;
     }
@@ -246,9 +246,9 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _sectionTitle('ربط WhatsApp للحساب', Icons.qr_code_2),
+        _sectionTitle('ربط واتساب للحساب', Icons.qr_code_2),
         const Text(
-          'اربط حساب WhatsApp الخاص بك لمسح رمز QR. ستُرسل إشعاراتك من جلستك الخاصة.',
+          'اربط حساب واتساب الخاص بك لمسح رمز QR. ستُرسل إشعاراتك من جلستك الخاصة.',
         ),
         const SizedBox(height: 10),
         Text('حالة الاتصال: ${_statusLabel(_status)}'),
@@ -273,7 +273,7 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'امسح الرمز من WhatsApp على هاتفك. لا تشارك هذا الرمز مع الآخرين.',
+            'امسح الرمز من واتساب على هاتفك. لا تشارك هذا الرمز مع الآخرين.',
             textAlign: TextAlign.center,
           ),
         ],
@@ -328,7 +328,7 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
   Widget build(BuildContext context) => Directionality(
     textDirection: TextDirection.rtl,
     child: Scaffold(
-      appBar: AppBar(title: const Text('ربط WhatsApp'), centerTitle: true),
+      appBar: AppBar(title: const Text('ربط واتساب'), centerTitle: true),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
