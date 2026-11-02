@@ -20,6 +20,7 @@ class _SubscriptionRequestsAdminScreenState
   final TextEditingController _searchController = TextEditingController();
   late final Stream<List<SubscriptionRequestModel>> _requests =
       SubscriptionRequestService.watchRequests();
+  final Map<String, Stream<DateTime?>> _subscriptionEnds = {};
   String _searchQuery = '';
   bool _busy = false;
 
@@ -174,10 +175,18 @@ class _SubscriptionRequestsAdminScreenState
     }
   }
 
-  Future<void> _deleteRequest(SubscriptionRequestModel request) async {
+  Future<void> _deleteRequest(
+    SubscriptionRequestModel request, {
+    int olderCount = 0,
+  }) async {
     final confirmed = await _confirm(
-      title: 'حذف البطاقة',
-      content: 'هل تريد حذف بطاقة الطلب الخاصة بـ ${_agentName(request)}؟',
+      title: 'حذف الطلب',
+      content: [
+        'سيُحذف هذا الطلب الخاص بـ ${_agentName(request)} نهائياً.',
+        if (request.status == SubscriptionRequestService.approvedStatus)
+          'يُمحى سجل هذا الدفع، ولا يتغير اشتراك الوكيل.',
+        if (olderCount > 0) 'تبقى طلباته السابقة ($olderCount) في البطاقة.',
+      ].join('\n'),
       confirmLabel: 'حذف',
     );
     if (!confirmed) return;
@@ -405,13 +414,72 @@ class _SubscriptionRequestsAdminScreenState
     ),
   );
 
-  bool _isOpen(SubscriptionRequestModel request) =>
-      request.status == SubscriptionRequestService.pendingStatus ||
-      request.status == SubscriptionRequestService.reviewingStatus;
+  bool _isOpen(AgentRequests agent) =>
+      agent.current.status == SubscriptionRequestService.pendingStatus ||
+      agent.current.status == SubscriptionRequestService.reviewingStatus;
 
-  bool _matchesSearch(SubscriptionRequestModel request) {
+  bool _canDelete(SubscriptionRequestModel request) =>
+      request.collectionPath == SubscriptionRequestService.collectionName &&
+      SubscriptionRequestService.canDelete({
+        'status': request.status,
+        'reviewedAt': request.reviewedAt,
+      });
+
+  Widget _subscriptionEnd(String uid) => StreamBuilder<DateTime?>(
+    stream: _subscriptionEnds.putIfAbsent(
+      uid,
+      () => SubscriptionRequestService.watchSubscriptionEnd(uid),
+    ),
+    builder: (context, snapshot) {
+      if (snapshot.hasError) return const Text('تعذر قراءة تاريخ الانتهاء');
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return const Text('تاريخ الانتهاء: …');
+      }
+      final end = snapshot.data;
+      if (end == null) return const Text('لا يوجد اشتراك مفعّل');
+      final ended = !end.isAfter(DateTime.now());
+      return Text(
+        '${ended ? 'انتهى الاشتراك' : 'ينتهي الاشتراك'}: ${_dateText(end)}',
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          color: ended ? const Color(0xFFC62828) : const Color(0xFF2E7D32),
+        ),
+      );
+    },
+  );
+
+  Widget _olderRequests(List<SubscriptionRequestModel> older) => ExpansionTile(
+    tilePadding: EdgeInsets.zero,
+    title: Text('الطلبات السابقة (${older.length})'),
+    children: [
+      for (final request in older)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(
+            '${SubscriptionRequestService.planLabelFor(request.selectedPlan)} • ${_statusLabel(request.status)}',
+          ),
+          subtitle: Text(
+            '${_dateText(request.createdAt)} • ${request.amount.isEmpty ? '—' : request.amount}'
+            '${request.transferNumber.isEmpty ? '' : ' • تحويل ${request.transferNumber}'}',
+          ),
+          trailing: _canDelete(request)
+              ? IconButton(
+                  tooltip: 'حذف الطلب',
+                  onPressed: () => _deleteRequest(request),
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    color: Color(0xFFC62828),
+                  ),
+                )
+              : null,
+        ),
+    ],
+  );
+
+  bool _matchesSearch(AgentRequests agent) {
     final q = _searchQuery.trim().toLowerCase();
     if (q.isEmpty) return true;
+    final request = agent.current;
     return [
       _agentName(request),
       request.phone,
@@ -422,19 +490,17 @@ class _SubscriptionRequestsAdminScreenState
     ].join(' | ').toLowerCase().contains(q);
   }
 
-  Widget _requestList(
-    List<SubscriptionRequestModel> requests,
-    String emptyText,
-  ) {
-    if (requests.isEmpty) return Center(child: Text(emptyText));
+  Widget _requestList(List<AgentRequests> agents, String emptyText) {
+    if (agents.isEmpty) return Center(child: Text(emptyText));
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: requests.length,
-      itemBuilder: (context, index) => _requestCard(requests[index]),
+      itemCount: agents.length,
+      itemBuilder: (context, index) => _requestCard(agents[index]),
     );
   }
 
-  Widget _requestCard(SubscriptionRequestModel request) {
+  Widget _requestCard(AgentRequests agent) {
+    final request = agent.current;
     final status = request.status;
     final canReview = SubscriptionRequestService.isOpenForReview({
       'status': status,
@@ -485,15 +551,11 @@ class _SubscriptionRequestsAdminScreenState
                   onSelected: (action) => _onAdminAction(action, request),
                   itemBuilder: (_) => _adminActions(request, canReview),
                 ),
-                if (request.collectionPath ==
-                        SubscriptionRequestService.collectionName &&
-                    SubscriptionRequestService.canDelete({
-                      'status': status,
-                      'reviewedAt': request.reviewedAt,
-                    }))
+                if (_canDelete(request))
                   IconButton(
                     tooltip: 'حذف البطاقة',
-                    onPressed: () => _deleteRequest(request),
+                    onPressed: () =>
+                        _deleteRequest(request, olderCount: agent.older.length),
                     icon: const Icon(
                       Icons.delete_outline,
                       color: Color(0xFFC62828),
@@ -502,6 +564,7 @@ class _SubscriptionRequestsAdminScreenState
               ],
             ),
             const SizedBox(height: 8),
+            if (request.uid.isNotEmpty) _subscriptionEnd(request.uid),
             Text(
               'الباقة: ${SubscriptionRequestService.planLabelFor(request.selectedPlan)}',
             ),
@@ -573,6 +636,7 @@ class _SubscriptionRequestsAdminScreenState
                 ],
               ),
             ],
+            if (agent.older.isNotEmpty) _olderRequests(agent.older),
           ],
         ),
       ),
@@ -600,21 +664,21 @@ class _SubscriptionRequestsAdminScreenState
                 return Center(child: Text('خطأ: ${snapshot.error}'));
               }
 
-              final requests = (snapshot.data ?? const [])
-                  .where(_matchesSearch)
-                  .toList();
-              final open = requests.where(_isOpen).toList();
-              final approved = requests
+              final agents = SubscriptionRequestService.groupByAgent(
+                snapshot.data ?? const [],
+              ).where(_matchesSearch).toList();
+              final open = agents.where(_isOpen).toList();
+              final approved = agents
                   .where(
-                    (request) =>
-                        request.status ==
+                    (agent) =>
+                        agent.current.status ==
                         SubscriptionRequestService.approvedStatus,
                   )
                   .toList();
-              final rejected = requests
+              final rejected = agents
                   .where(
-                    (request) =>
-                        request.status ==
+                    (agent) =>
+                        agent.current.status ==
                         SubscriptionRequestService.rejectedStatus,
                   )
                   .toList();

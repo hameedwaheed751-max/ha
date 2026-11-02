@@ -355,11 +355,7 @@ class _LoginScreenState extends State<LoginScreen> {
       await _attachReceiptWithRetry(context, requestId, receiptFile);
     }
 
-    _navigateToRenewalStatusScreen(
-      account: account,
-      successNotice:
-          'تم إرسال طلب تجديد الاشتراك بنجاح.\nيرجى انتظار موافقة الإدارة.',
-    );
+    if (mounted) await _returnToLoginAfterRenewal(context);
   }
 
   Future<void> _openRenewSubscriptionFlow() async {
@@ -1362,6 +1358,35 @@ class ExpiredAccountData {
   final String address;
 }
 
+/// الوكيل المنتهي لا يستطيع فعل شيء حتى تُقبل طلبه، فيعود إلى تسجيل الدخول.
+Future<void> _returnToLoginAfterRenewal(BuildContext context) async {
+  await FirebaseAuth.instance.signOut();
+  if (!context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        content: const Text(
+          'تم إرسال طلب تجديد الاشتراك بنجاح، وهو الآن بانتظار موافقة الإدارة.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('موافق'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (!context.mounted) return;
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => const LoginScreen()),
+    (route) => false,
+  );
+}
+
 /// الطلب مسجل مسبقاً، فلا تُفقد بياناته إذا اختار الوكيل المتابعة دون وصل.
 Future<void> _attachReceiptWithRetry(
   BuildContext context,
@@ -1539,6 +1564,10 @@ class _RenewalRequestStatusScreenState
     }
 
     if (!mounted) return;
+    if (!widget.fromDashboard) {
+      await _returnToLoginAfterRenewal(context);
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
@@ -1561,7 +1590,7 @@ class _RenewalRequestStatusScreenState
               transferNumber: transferNumber,
               receiptFile: receiptFile,
             );
-            if (mounted) {
+            if (mounted && widget.fromDashboard) {
               Navigator.of(context).pop();
             }
           },

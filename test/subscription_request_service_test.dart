@@ -52,15 +52,61 @@ void main() {
       });
     });
 
-    group('deleting a request', () {
-      test('an approved request is the payment record and stays', () {
-        expect(
-          SubscriptionRequestService.canDelete({'status': 'approved'}),
-          isFalse,
-        );
+    group('one card per agent', () {
+      SubscriptionRequestModel request(
+        String id,
+        String status,
+        int day, {
+        String uid = 'u1',
+      }) => SubscriptionRequestModel(
+        requestId: id,
+        uid: uid,
+        firstName: 'A',
+        lastName: '',
+        phone: '',
+        email: '',
+        selectedPlan: 'one_year',
+        amount: '35000',
+        paymentMethod: 'Qi Card',
+        status: status,
+        createdAt: DateTime.utc(2026, 11, day),
+      );
+
+      test('a renewal joins the first request in one card', () {
+        final agents = SubscriptionRequestService.groupByAgent([
+          request('first', 'approved', 1),
+          request('renewal', 'approved', 5),
+        ]);
+
+        expect(agents.single.current.requestId, 'renewal');
+        expect(agents.single.older.single.requestId, 'first');
       });
 
-      test('pending and rejected requests can be deleted', () {
+      test('a waiting request stays on top to be reviewed', () {
+        final agent = SubscriptionRequestService.groupByAgent([
+          request('waiting', 'pending', 1),
+          request('rejected', 'rejected', 5),
+        ]).single;
+
+        expect(agent.current.requestId, 'waiting');
+      });
+
+      test('each agent has a card, newest first', () {
+        final agents = SubscriptionRequestService.groupByAgent([
+          request('a', 'approved', 1, uid: 'u1'),
+          request('b', 'approved', 5, uid: 'u2'),
+        ]);
+
+        expect(agents.map((agent) => agent.current.requestId), ['b', 'a']);
+      });
+    });
+
+    group('deleting a request', () {
+      test('any decided or waiting request can be deleted', () {
+        expect(
+          SubscriptionRequestService.canDelete({'status': 'approved'}),
+          isTrue,
+        );
         expect(
           SubscriptionRequestService.canDelete({'status': 'pending'}),
           isTrue,

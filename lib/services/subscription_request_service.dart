@@ -108,6 +108,13 @@ class SubscriptionRequestModel {
   }
 }
 
+class AgentRequests {
+  const AgentRequests({required this.current, required this.older});
+
+  final SubscriptionRequestModel current;
+  final List<SubscriptionRequestModel> older;
+}
+
 class SubscriptionRequestService {
   static const String adminRootNode = 'admin';
   static const String collectionName = 'subscriptionRequests';
@@ -188,11 +195,46 @@ class SubscriptionRequestService {
         (now ?? DateTime.now()).difference(claimedAt) >= reviewClaimTimeout;
   }
 
-  /// الطلب المقبول هو سجل الدفع، فلا يُحذف.
-  static bool canDelete(Map<String, dynamic> request) {
-    final status = request['status'];
-    if (status == approvedStatus) return false;
-    return status != reviewingStatus || isOpenForReview(request);
+  /// لا يُحذف الطلب أثناء قبوله فقط، لأن القبول قد يكتمل بعد الحذف.
+  static bool canDelete(Map<String, dynamic> request) =>
+      request['status'] != reviewingStatus || isOpenForReview(request);
+
+  /// بطاقة واحدة لكل وكيل: طلبه المفتوح أو الأحدث، والباقي سجل داخلها.
+  static List<AgentRequests> groupByAgent(
+    Iterable<SubscriptionRequestModel> requests,
+  ) {
+    final groups = <String, List<SubscriptionRequestModel>>{};
+    for (final request in requests) {
+      final key = request.uid.isNotEmpty
+          ? request.uid
+          : request.email.isNotEmpty
+          ? request.email.toLowerCase()
+          : request.requestId;
+      groups.putIfAbsent(key, () => []).add(request);
+    }
+    int createdAt(SubscriptionRequestModel request) =>
+        request.createdAt?.millisecondsSinceEpoch ?? 0;
+    bool isOpen(SubscriptionRequestModel request) =>
+        request.status == pendingStatus || request.status == reviewingStatus;
+
+    final agents = groups.values.map((items) {
+      items.sort((a, b) => createdAt(b).compareTo(createdAt(a)));
+      final current = items.firstWhere(isOpen, orElse: () => items.first);
+      return AgentRequests(
+        current: current,
+        older: items.where((item) => !identical(item, current)).toList(),
+      );
+    }).toList();
+    agents.sort((a, b) => createdAt(b.current).compareTo(createdAt(a.current)));
+    return agents;
+  }
+
+  static Stream<DateTime?> watchSubscriptionEnd(String uid) {
+    _requireTrustedAdmin();
+    return _root
+        .child('agents/$uid/subscription/endDate')
+        .onValue
+        .map((event) => _parseDateTime(event.snapshot.value));
   }
 
   /// يُضاف الاشتراك بعد المدة المتبقية حتى لا تضيع بقبول طلب جديد.
