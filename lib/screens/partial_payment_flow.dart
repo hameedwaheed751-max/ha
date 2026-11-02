@@ -81,8 +81,18 @@ Future<void> recordPartialPayment(BuildContext context, Subscriber s) async {
     }
     return;
   }
-  final now = DateTime.now();
-  final allocation = s.applyPayment(amount, at: now);
+  await _savePayment(context, s, amount, DateTime.now(), null);
+}
+
+/// يسجل الدفعة ووصلها، وترجع القيمة المسجلة فعلاً.
+Future<double> _savePayment(
+  BuildContext context,
+  Subscriber s,
+  double amount,
+  DateTime now,
+  String? note,
+) async {
+  final allocation = s.applyPayment(amount, at: now, note: note);
   final applied = allocation.totalApplied;
   if (applied <= 0) {
     if (context.mounted) {
@@ -90,7 +100,7 @@ Future<void> recordPartialPayment(BuildContext context, Subscriber s) async {
         context,
       ).showSnackBar(const SnackBar(content: Text('تعذر تسجيل الدفعة')));
     }
-    return;
+    return 0;
   }
 
   final receiptNumber = await AppStore.issueReceiptNumber(persist: false);
@@ -98,7 +108,9 @@ Future<void> recordPartialPayment(BuildContext context, Subscriber s) async {
     receiptNumber: receiptNumber,
     amount: applied,
     at: now,
-    note: s.remaining <= 0.0001 ? 'فاتورة تسديد كامل' : 'فاتورة تسديد جزئي',
+    note:
+        note ??
+        (s.remaining <= 0.0001 ? 'فاتورة تسديد كامل' : 'فاتورة تسديد جزئي'),
   );
   if (allocation.appliedToCarriedDebt > 0.0001) {
     await AppStore.addDailyTaskEvent(
@@ -109,7 +121,7 @@ Future<void> recordPartialPayment(BuildContext context, Subscriber s) async {
         at: now,
         amount: allocation.appliedToCarriedDebt,
         remainingAfter: s.remaining,
-        note: 'تسديد دين مرحّل من الأشهر السابقة',
+        note: note ?? 'تسديد دين مرحّل من الأشهر السابقة',
       ),
       persist: false,
     );
@@ -137,7 +149,7 @@ Future<void> recordPartialPayment(BuildContext context, Subscriber s) async {
       type: FinancialTransactionType.payment,
       amount: applied,
       referenceId: 'payment-receipt:$receiptNumber',
-      note: s.remaining <= 0.0001 ? 'تسديد كامل' : 'تسديد جزئي',
+      note: note ?? (s.remaining <= 0.0001 ? 'تسديد كامل' : 'تسديد جزئي'),
     );
   } catch (error) {
     debugPrint('Financial ledger write failed: $error');
@@ -147,4 +159,191 @@ Future<void> recordPartialPayment(BuildContext context, Subscriber s) async {
       const SnackBar(content: Text('تم حفظ الدفعة محلياً، لكن تعذرت المزامنة')),
     );
   }
+  return applied;
+}
+
+typedef CarriedDebtCorrection = ({double newAmount, String reason});
+
+/// تملك النافذة حقولها حتى تبقى صالحة طوال حركة الإغلاق.
+class CarriedDebtCorrectionDialog extends StatefulWidget {
+  const CarriedDebtCorrectionDialog({
+    super.key,
+    required this.subscriberName,
+    required this.currentAmount,
+  });
+
+  final String subscriberName;
+  final double currentAmount;
+
+  @override
+  State<CarriedDebtCorrectionDialog> createState() =>
+      _CarriedDebtCorrectionDialogState();
+}
+
+class _CarriedDebtCorrectionDialogState
+    extends State<CarriedDebtCorrectionDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final _amountController = TextEditingController(
+    text: widget.currentAmount.toStringAsFixed(0),
+  );
+  final _reasonController = TextEditingController();
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  String get _effectText {
+    final amount = _parseAmount(_amountController.text);
+    if (amount == null || amount < 0) return '';
+    final difference = amount - widget.currentAmount;
+    if (difference.abs() < 0.5) return 'لا يوجد تغيير';
+    return difference < 0
+        ? 'سيسجل ${moneyText(-difference)} في الواصل ويصدر له وصل'
+        : 'سيضاف ${moneyText(difference)} إلى الديون';
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.pop<CarriedDebtCorrection>(context, (
+      newAmount: _parseAmount(_amountController.text)!,
+      reason: _reasonController.text.trim(),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: Text('تصحيح الدين المرحّل - ${widget.subscriberName}'),
+        content: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'الدين المرحّل الحالي: ${moneyText(widget.currentAmount)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _amountController,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  validator: (value) {
+                    final amount = _parseAmount(value ?? '');
+                    return amount == null || amount < 0
+                        ? 'اكتب مبلغاً صحيحاً'
+                        : null;
+                  },
+                  decoration: const InputDecoration(
+                    labelText: 'الدين المرحّل الصحيح',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _reasonController,
+                  validator: (value) =>
+                      (value ?? '').trim().isEmpty ? 'سبب التصحيح مطلوب' : null,
+                  decoration: const InputDecoration(
+                    labelText: 'سبب التصحيح',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _effectText,
+                  style: TextStyle(color: Colors.orange.shade800),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(onPressed: _submit, child: const Text('حفظ')),
+        ],
+      ),
+    );
+  }
+}
+
+/// تخفيض الدين المرحّل مبلغ واصل له وصل، وزيادته دين مضاف.
+Future<void> recordCarriedDebtCorrection(
+  BuildContext context,
+  Subscriber s,
+) async {
+  final before = s.carriedDebt;
+  final correction = await showDialog<CarriedDebtCorrection>(
+    context: context,
+    builder: (_) => CarriedDebtCorrectionDialog(
+      subscriberName: s.name,
+      currentAmount: before,
+    ),
+  );
+  if (correction == null) return;
+  final difference = correction.newAmount - before;
+  if (difference.abs() < 0.5) return;
+
+  final now = DateTime.now();
+  final note =
+      'تصحيح دين مرحّل من ${moneyText(before)} '
+      'إلى ${moneyText(correction.newAmount)}: ${correction.reason}';
+  if (difference < 0) {
+    final applied = await _savePayment(context, s, -difference, now, note);
+    if (applied <= 0) return;
+  } else {
+    s.carriedDebt += difference;
+    await AppStore.addDailyTaskEvent(
+      DailyTaskEvent(
+        type: 'debt_added',
+        subscriberUser: s.user,
+        subscriberName: s.name,
+        at: now,
+        amount: difference,
+        remainingAfter: s.remaining,
+        note: note,
+        category: DailyTaskEvent.manualDebtCategory,
+      ),
+      persist: false,
+    );
+    await AppStore.save();
+    try {
+      await SubscriberFinancialLedger().addTransaction(
+        subscriberId: s.subscriberId,
+        date: now,
+        type: FinancialTransactionType.debt,
+        amount: difference,
+        referenceId:
+            'carried-debt-correction:${s.subscriberId}:${now.toUtc().toIso8601String()}',
+        note: note,
+      );
+    } catch (error) {
+      debugPrint('Financial ledger write failed: $error');
+    }
+  }
+
+  if (!context.mounted) return;
+  final syncWarning = AppStore.lastSaveSyncError == null
+      ? ''
+      : ' | حُفظ محلياً وتعذرت المزامنة';
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        'تم التصحيح | المتبقي ${moneyText(s.remaining)}$syncWarning',
+      ),
+    ),
+  );
 }

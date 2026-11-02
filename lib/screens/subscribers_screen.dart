@@ -135,12 +135,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         if (_advancedStatus == 'منتهي الصلاحية' && !s.expired) return false;
         if (_advancedStatus == 'معطل' && !s.disabled) return false;
         if (_advancedStatus == 'ينتهي قريباً') {
-          final days = s.endDate.difference(now).inDays;
-          if (days < 0 || days > 7) return false;
+          if (!s.endsWithinDays(7, now)) return false;
         }
         if (_advancedStatus == 'خلال 3 أيام') {
-          final days = s.endDate.difference(now).inDays;
-          if (days < 0 || days > 3) return false;
+          if (!s.endsWithinDays(3, now)) return false;
         }
         if (_advancedStatus == 'ينتهي اشتراكهم اليوم') {
           final sameDay =
@@ -292,6 +290,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _syncAndRefresh() async {
+    final before = AppStore.lastSasSync;
+    await syncNow();
+    if (AppStore.lastSasSync != before) await _refreshSubscribers();
   }
 
   Future<void> syncNow() async {
@@ -2647,8 +2651,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         return s.remaining > 0;
       case 'expiring3Days':
         if (s.disabled || s.expired) return false;
-        final days = s.endDate.difference(now).inDays;
-        return days >= 0 && days <= 3;
+        return s.endsWithinDays(3, now);
       default:
         return true;
     }
@@ -3193,19 +3196,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           ),
           actions: [
             IconButton(
-              tooltip: 'تحديث المتصلين وIP',
-              onPressed: syncing || _isRefreshing ? null : _refreshSubscribers,
-              icon: syncing || _isRefreshing
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.refresh),
-            ),
-            IconButton(
-              tooltip: 'مزامنة SAS الآن',
-              onPressed: syncing || _isRefreshing ? null : syncNow,
+              tooltip: 'مزامنة SAS وتحديث المتصلين',
+              onPressed: syncing || _isRefreshing ? null : _syncAndRefresh,
               icon: syncing || _isRefreshing
                   ? const SizedBox(
                       width: 20,
@@ -3571,13 +3563,13 @@ class _SubscriberCard extends StatelessWidget {
   final VoidCallback onPay;
   final VoidCallback onMore;
 
-  (String, Color, IconData) _status(int days) {
+  (String, Color, IconData) get _status {
     final s = subscriber;
     if (s.disabled) {
       return ('معطل', _amber, Icons.pause_circle_rounded);
     }
     if (s.expired) return ('منتهي', _red, Icons.cancel_rounded);
-    if (days <= 3) {
+    if (s.endsWithinDays(3)) {
       return ('قرب الانتهاء', _amber, Icons.warning_amber_rounded);
     }
     if (s.isActive) return ('نشط', _green, Icons.check_circle_rounded);
@@ -3609,6 +3601,12 @@ class _SubscriberCard extends StatelessWidget {
     );
   }
 
+  static final _arabicText = RegExp(r'[\u0600-\u06FF]');
+
+  /// اليوزر والباقة لاتينيان غالباً، فيجب ألا يعيد السياق العربي ترتيب أجزائهما.
+  TextDirection _textDirectionOf(String text) =>
+      _arabicText.hasMatch(text) ? TextDirection.rtl : TextDirection.ltr;
+
   Future<void> _copyIp(BuildContext context) async {
     await Clipboard.setData(ClipboardData(text: subscriber.ip.trim()));
     if (!context.mounted) return;
@@ -3622,10 +3620,10 @@ class _SubscriberCard extends StatelessWidget {
     final s = subscriber;
     final colors = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final days = s.endDate.difference(DateTime.now()).inDays;
     final hasDebt = s.remaining > 0.0001;
     final hasIp = s.ip.trim().isNotEmpty;
-    final status = _status(days);
+    final status = _status;
+    final title = s.name.trim().isEmpty ? s.user : s.name;
     final end =
         '${s.endDate.day.toString().padLeft(2, '0')}/${s.endDate.month.toString().padLeft(2, '0')}/${s.endDate.year}';
     final radius = BorderRadius.circular(16);
@@ -3687,23 +3685,56 @@ class _SubscriberCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            s.name.trim().isEmpty ? s.user : s.name,
+                            title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
+                            textDirection: _textDirectionOf(title),
+                            textAlign: TextAlign.right,
                             style: const TextStyle(
                               fontSize: 14.5,
                               fontWeight: FontWeight.w900,
                             ),
                           ),
                           const SizedBox(height: 2),
-                          Text(
-                            '${s.user} • ${s.packageDisplay}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: colors.onSurfaceVariant,
-                              fontSize: 11.5,
-                            ),
+                          Row(
+                            children: [
+                              Flexible(
+                                flex: 3,
+                                child: Text(
+                                  s.user,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textDirection: _textDirectionOf(s.user),
+                                  style: TextStyle(
+                                    color: colors.onSurface,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                ' • ',
+                                style: TextStyle(
+                                  color: colors.onSurfaceVariant,
+                                  fontSize: 11.5,
+                                ),
+                              ),
+                              Flexible(
+                                flex: 2,
+                                child: Text(
+                                  s.packageDisplay,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textDirection: _textDirectionOf(
+                                    s.packageDisplay,
+                                  ),
+                                  style: TextStyle(
+                                    color: colors.onSurfaceVariant,
+                                    fontSize: 11.5,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -3755,11 +3786,11 @@ class _SubscriberCard extends StatelessWidget {
                         Icons.payments_rounded,
                         _red,
                       ),
-                    if (!s.expired && days <= 7)
+                    if (!s.expired)
                       _pill(
-                        'متبقي ${days < 0 ? 0 : days} يوم',
+                        remainingTimeText(s.endDate),
                         Icons.hourglass_bottom_rounded,
-                        _amber,
+                        s.endsWithinDays(7) ? _amber : _green,
                       ),
                     Row(
                       mainAxisSize: MainAxisSize.min,
@@ -3807,9 +3838,10 @@ class _SubscriberCard extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               textDirection: TextDirection.ltr,
-                              style: TextStyle(
-                                color: colors.onSurfaceVariant,
+                              style: const TextStyle(
+                                color: Color(0xFF1E88E5),
                                 fontSize: 11,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
@@ -3933,7 +3965,7 @@ class _SubscribersDataSource extends DataTableSource {
     final s = data[index];
     // One-time debug: dump sasData for a specific subscriber to inspect online fields
     final selected = identical(selectedSubscriber, s);
-    final remainingDays = DateTime.now().difference(s.endDate).inDays * -1;
+    final remainingDays = s.endDate.difference(DateTime.now()).inHours / 24;
     final statusColor = _statusColor(s);
     final cells = [
       DataCell(
@@ -4142,7 +4174,7 @@ class _SubscribersDataSource extends DataTableSource {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    '${remainingDays < 0 ? 0 : remainingDays}',
+                    s.expired ? 'منتهي' : remainingTimeText(s.endDate),
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       color: remainingDays < 0

@@ -1858,8 +1858,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     final now = DateTime.now();
     return AppStore.subscribers.where((s) {
       if (s.disabled || s.expired) return false;
-      final days = s.endDate.difference(now).inDays;
-      return days >= 0 && days <= 3;
+      return s.endsWithinDays(3, now);
     }).length;
   }
 
@@ -2547,7 +2546,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       ),
       (
         'واتساب',
-        '',
+        'whatsapp',
         const Color(0xFF22B14C),
         () => _pushDashboard(const WhatsAppLinkingScreen()),
       ),
@@ -2614,19 +2613,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                         Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            if (action.$2.isEmpty)
-                              Icon(
-                                Icons.qr_code_2_rounded,
-                                color: action.$3,
-                                size: 42,
-                              )
-                            else
-                              Image.asset(
-                                _referenceAssetPath(_dashboardIcon(action.$2)),
-                                width: 42,
-                                height: 42,
-                                fit: BoxFit.contain,
-                              ),
+                            Image.asset(
+                              _referenceAssetPath(_dashboardIcon(action.$2)),
+                              width: 42,
+                              height: 42,
+                              fit: BoxFit.contain,
+                            ),
                             const SizedBox(height: 6),
                             Text(
                               action.$1,
@@ -2831,9 +2823,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _latestSubscriberRow(Subscriber subscriber) {
-    final days = subscriber.endDate.difference(DateTime.now()).inDays;
     final bool isExpired = subscriber.expired;
-    final bool isExpiring = !isExpired && days <= 3;
+    final bool isExpiring = !isExpired && subscriber.endsWithinDays(3);
     final color = isExpired
         ? const Color(0xFFE53935)
         : isExpiring
@@ -2921,7 +2912,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  isExpired ? 'منتهي' : 'المتبقي ${days < 0 ? 0 : days} يوم',
+                  isExpired ? 'منتهي' : remainingTimeText(subscriber.endDate),
                   style: TextStyle(
                     color: color,
                     fontSize: 9.5,
@@ -4474,6 +4465,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                   onEdit: _editDebt,
                   onAddAmount: _addManualEntry,
                   onPartialPayment: _partialPayment,
+                  onCorrectCarriedDebt: _correctCarriedDebt,
                 ),
               ],
             ),
@@ -4481,6 +4473,11 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _correctCarriedDebt(Subscriber subscriber) async {
+    await recordCarriedDebtCorrection(context, subscriber);
+    if (mounted) setState(() {});
   }
 
   Future<void> _addManualEntry(Subscriber subscriber) async {

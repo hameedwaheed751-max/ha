@@ -721,6 +721,13 @@ class Subscriber {
       (price - paid).clamp(0, double.infinity).toDouble();
   double get remaining => carriedDebt + currentMonthRemaining;
   bool get expired => endDate.isBefore(DateTime.now());
+
+  /// صحيح إذا كان الاشتراك سينتهي خلال هذه المدة بدقة الوقت لا اليوم.
+  bool endsWithinDays(int days, [DateTime? now]) {
+    final left = endDate.difference(now ?? DateTime.now());
+    return !left.isNegative && left <= Duration(days: days);
+  }
+
   bool get isActive => active && !disabled && !expired;
   bool get isOnline => liveOnline ?? (sasOnline || _detectOnline(sasData));
 
@@ -1300,6 +1307,29 @@ String moneyText(num amount) {
     (_) => ',',
   );
   return '${rounded < 0 ? '-' : ''}$digits د.ع';
+}
+
+String _dayCountText(int days) {
+  if (days == 1) return 'يوم';
+  if (days == 2) return 'يومان';
+  return days <= 10 ? '$days أيام' : '$days يوم';
+}
+
+String _hourCountText(int hours) {
+  if (hours == 1) return 'ساعة';
+  if (hours == 2) return 'ساعتان';
+  return hours <= 10 ? '$hours ساعات' : '$hours ساعة';
+}
+
+/// الوقت المتبقي بالأيام والساعات، مثل: 6 أيام و5 ساعات.
+String remainingTimeText(DateTime end, [DateTime? now]) {
+  final left = end.difference(now ?? DateTime.now());
+  if (left.inHours <= 0) return 'أقل من ساعة';
+  final days = left.inDays;
+  final hours = left.inHours - days * 24;
+  if (days == 0) return _hourCountText(hours);
+  if (hours == 0) return _dayCountText(days);
+  return '${_dayCountText(days)} و${_hourCountText(hours)}';
 }
 
 /// رسالة تُعرض للمستخدم بدل نص الخطأ الخام.

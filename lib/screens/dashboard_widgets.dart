@@ -12,6 +12,7 @@ class DebtOperationsMenu extends StatelessWidget {
     this.onEdit,
     this.onAddAmount,
     this.onPartialPayment,
+    this.onCorrectCarriedDebt,
     this.showLabel = false,
   });
 
@@ -19,6 +20,7 @@ class DebtOperationsMenu extends StatelessWidget {
   final Future<void> Function(Subscriber)? onEdit;
   final Future<void> Function(Subscriber)? onAddAmount;
   final Future<void> Function(Subscriber)? onPartialPayment;
+  final Future<void> Function(Subscriber)? onCorrectCarriedDebt;
   final bool showLabel;
 
   @override
@@ -60,6 +62,8 @@ class DebtOperationsMenu extends StatelessWidget {
             await onAddAmount?.call(subscriber);
           case 'partial_payment':
             await onPartialPayment?.call(subscriber);
+          case 'correct_carried':
+            await onCorrectCarriedDebt?.call(subscriber);
         }
       },
       itemBuilder: (context) => [
@@ -107,6 +111,15 @@ class DebtOperationsMenu extends StatelessWidget {
               dense: true,
               leading: Icon(Icons.payments_outlined),
               title: Text('تسديد جزء من المبلغ'),
+            ),
+          ),
+        if (onCorrectCarriedDebt != null && subscriber.carriedDebt > 0.0001)
+          const PopupMenuItem<String>(
+            value: 'correct_carried',
+            child: ListTile(
+              dense: true,
+              leading: Icon(Icons.rule_rounded),
+              title: Text('تصحيح الدين المرحّل'),
             ),
           ),
       ],
@@ -456,14 +469,22 @@ class DashboardBottomBar extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(top: 20),
           child: DecoratedBox(
-            decoration: const BoxDecoration(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF0E6B39), Color(0xFF07482A)],
+            decoration: BoxDecoration(
+              color: const Color(0xFF0B5D2E),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
               ),
-              boxShadow: [
+              image: DecorationImage(
+                image: AssetImage(
+                  dashboardReferenceAssetPath('assets/dashboard/waves.jpg'),
+                ),
+                fit: BoxFit.cover,
+                colorFilter: const ColorFilter.mode(
+                  Color(0x33062E18),
+                  BlendMode.srcOver,
+                ),
+              ),
+              boxShadow: const [
                 BoxShadow(
                   color: Color(0x330B5D2E),
                   blurRadius: 12,

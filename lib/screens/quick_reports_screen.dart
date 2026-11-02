@@ -20,8 +20,7 @@ class QuickReportsScreen extends StatelessWidget {
       }
 
       if (!s.disabled && !s.expired) {
-        final days = s.endDate.difference(now).inDays;
-        if (days >= 0 && days <= 3) {
+        if (s.endsWithinDays(3, now)) {
           expiringSoon.add(s);
         }
       }
@@ -115,7 +114,7 @@ class QuickReportsScreen extends StatelessWidget {
                             contentPadding: EdgeInsets.zero,
                             title: Text(s.name),
                             subtitle: Text('ينتهي: ${_fmt(s.endDate)}'),
-                            trailing: Text('${s.endDate.difference(DateTime.now()).inDays} يوم'),
+                            trailing: Text(remainingTimeText(s.endDate)),
                           )),
                   ],
                 ),

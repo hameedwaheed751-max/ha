@@ -9,6 +9,7 @@ import '../services/subscriber_financial_ledger.dart';
 import 'add_subscriber_screen.dart';
 import 'dashboard_widgets.dart';
 import 'manual_entry_flow.dart';
+import 'partial_payment_flow.dart';
 import 'receipt_screen.dart';
 
 class CancelEntryDialog extends StatefulWidget {
@@ -826,6 +827,10 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                   ? null
                   : (subscriber) =>
                         _runDebtAction(widget.onPartialDebtPayment, subscriber),
+              onCorrectCarriedDebt: (subscriber) => _runDebtAction(
+                (target) => recordCarriedDebtCorrection(context, target),
+                subscriber,
+              ),
               showLabel: true,
             ),
             const SizedBox(width: 8),
