@@ -578,11 +578,15 @@ void main() {
       expect(adjustment.addedDebt, 35000);
       expect(s.paid, 15000);
       expect(s.remaining, 20000);
-      expect(debtToday.debtPaymentsCollected, 15000);
-      expect(debtToday.debtPaymentCases, 1);
+      expect(debtToday.debtPaymentsCollected, 0);
+      expect(debtToday.debtPaymentCases, 0);
+      expect(debtToday.otherCollected, 15000);
+      expect(debtToday.totalCollected, 15000);
       expect(debtToday.debtAddedTotal, 35000);
       expect(debtToday.netDebtMovement, 20000);
-      expect(afterRepayment.debtPaymentsCollected, 20000);
+      expect(afterRepayment.debtPaymentsCollected, 5000);
+      expect(afterRepayment.debtPaymentCases, 1);
+      expect(afterRepayment.totalCollected, 20000);
       expect(afterRepayment.debtAddedTotal, 35000);
       expect(afterRepayment.debtRepaymentsTotal, 20000);
       expect(afterRepayment.netDebtMovement, 15000);

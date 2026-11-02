@@ -49,7 +49,7 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
   @override
   Widget build(BuildContext context) {
     final events = _eventsOfDay(_selectedDate);
-    final summary = DailyTaskSummary.fromEvents(events);
+    final summary = AppStore.summaryOfDay(_selectedDate);
     final filteredEvents = events.where((event) {
       return switch (_filter) {
         _DailyTaskFilter.all => true,
@@ -239,6 +239,13 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
         Icons.account_balance_wallet_outlined,
         Colors.orange,
       ),
+      if (summary.otherCollected > 0.0001)
+        (
+          'واصل آخر',
+          _money(summary.otherCollected),
+          Icons.shopping_bag_outlined,
+          Colors.indigo,
+        ),
       (
         'تخفيض الدين',
         _money(summary.debtReducedTotal),

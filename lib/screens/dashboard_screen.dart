@@ -28,6 +28,7 @@ import 'quick_reports_screen.dart';
 import 'today_tasks_screen.dart';
 import 'activity_log_screen.dart';
 import 'payment_requests_admin_screen.dart';
+import 'plan_prices_admin_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'login_screen.dart';
 import 'subscription_requests_admin_screen.dart';
@@ -1607,6 +1608,20 @@ class _DashboardScreenState extends State<DashboardScreen>
                       );
                     },
                   ),
+                if (!widget.isAgentMode)
+                  _drawerTile(
+                    icon: Icons.sell_outlined,
+                    title: 'الأسعار وبيانات الدفع',
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const PlanPricesAdminScreen(),
+                        ),
+                      );
+                    },
+                  ),
                 _drawerTile(
                   icon: Icons.speed_outlined,
                   title: 'بيانات SAS المباشرة',
@@ -1875,10 +1890,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     final active = AppStore.subscribers.where((s) => s.isActive).length;
     final expired = AppStore.subscribers.where((s) => s.expired).length;
     final debts = AppStore.subscribers.where((s) => s.remaining > 0).length;
-    final dayEvents = AppStore.dailyTaskEvents
-        .where((event) => AppStore.isSameDay(event.at, _dashboardDate))
-        .toList();
-    final daySummary = DailyTaskSummary.fromEvents(dayEvents);
+    final daySummary = AppStore.summaryOfDay(_dashboardDate);
     final alertsCount = _expiredToday + _expiring3Days;
     final latestSubscribers = List<Subscriber>.from(AppStore.subscribers)
       ..sort((a, b) => b.startDate.compareTo(a.startDate));
@@ -2382,6 +2394,13 @@ class _DashboardScreenState extends State<DashboardScreen>
         'assets/reference/payment_contact.png',
         const Color(0xFFF57C00),
       ),
+      if (summary.otherCollected > 0.0001)
+        (
+          'واصل آخر',
+          _money(summary.otherCollected),
+          'assets/reference/payment_contact.png',
+          const Color(0xFF3F51B5),
+        ),
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -4137,14 +4156,6 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
           return b.remaining.compareTo(a.remaining);
       }
     });
-    final totalSubscriptions = sortedDebts.fold<double>(
-      0,
-      (total, subscriber) => total + subscriber.price,
-    );
-    final totalPaid = sortedDebts.fold<double>(
-      0,
-      (total, subscriber) => total + subscriber.paid,
-    );
     final totalRemaining = sortedDebts.fold<double>(
       0,
       (total, subscriber) => total + subscriber.remaining,
@@ -4214,7 +4225,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'إجمالي المبلغ المتبقي',
+                          'إجمالي الدين',
                           style: TextStyle(
                             color: Colors.white.withValues(alpha: 0.72),
                           ),
@@ -4323,63 +4334,6 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                       ),
                     );
                   }).toList(),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final columns = constraints.maxWidth >= 900
-                        ? 4
-                        : constraints.maxWidth >= 520
-                        ? 2
-                        : 1;
-                    final width =
-                        (constraints.maxWidth - (columns - 1) * 10) / columns;
-                    return Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        SizedBox(
-                          width: width,
-                          child: _debtMetricTile(
-                            title: 'مبالغ الاشتراكات',
-                            value:
-                                '${totalSubscriptions.toStringAsFixed(0)} د.ع',
-                            icon: Icons.receipt_long_outlined,
-                            color: Colors.blue,
-                          ),
-                        ),
-                        SizedBox(
-                          width: width,
-                          child: _debtMetricTile(
-                            title: 'إجمالي الواصل',
-                            value: '${totalPaid.toStringAsFixed(0)} د.ع',
-                            icon: Icons.payments_outlined,
-                            color: Colors.green,
-                          ),
-                        ),
-                        SizedBox(
-                          width: width,
-                          child: _debtMetricTile(
-                            title: 'إجمالي المتبقي',
-                            value: '${totalRemaining.toStringAsFixed(0)} د.ع',
-                            icon: Icons.money_off_csred_outlined,
-                            color: Colors.red,
-                          ),
-                        ),
-                        SizedBox(
-                          width: width,
-                          child: _debtMetricTile(
-                            title: 'عدد المدينين',
-                            value: '$debtorsCount',
-                            icon: Icons.people_outline,
-                            color: Colors.orange,
-                          ),
-                        ),
-                      ],
-                    );
-                  },
                 ),
               ),
               if (sortedDebts.isEmpty)
@@ -4523,62 +4477,5 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
   Future<void> _addManualEntry(Subscriber subscriber) async {
     await recordManualEntry(context, subscriber);
     if (mounted) setState(() {});
-  }
-
-  Widget _debtMetricTile({
-    required String title,
-    required String value,
-    required IconData icon,
-    required Color color,
-  }) {
-    return Container(
-      constraints: const BoxConstraints(minHeight: 104),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.28)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: color),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

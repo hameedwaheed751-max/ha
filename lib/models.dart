@@ -475,6 +475,7 @@ class DailyTaskSummary {
     required this.debtRepaymentsTotal,
     required this.debtAddedTotal,
     this.debtReducedTotal = 0,
+    this.otherCollected = 0,
   });
 
   final int activationCases;
@@ -485,7 +486,11 @@ class DailyTaskSummary {
   final double debtAddedTotal;
   final double debtReducedTotal;
 
-  double get totalCollected => activationCollected + debtPaymentsCollected;
+  /// واصل سُجل مع مبلغه الجديد، كالمشتريات واشتراك لم يُفعل بعد: ليس تسديد دين.
+  final double otherCollected;
+
+  double get totalCollected =>
+      activationCollected + debtPaymentsCollected + otherCollected;
 
   double get netDebtMovement =>
       debtAddedTotal - debtRepaymentsTotal - debtReducedTotal;
@@ -528,33 +533,60 @@ class DailyTaskSummary {
   factory DailyTaskSummary.fromEvents(
     Iterable<DailyTaskEvent> events, {
     double Function(DailyTaskEvent event)? amountOf,
+    Iterable<AccountingActivationRecord> activations = const [],
   }) {
-    var activationCases = 0;
+    String operationKey(String user, String name, DateTime at) {
+      final subscriber = user.trim().toLowerCase().isNotEmpty
+          ? user.trim().toLowerCase()
+          : name.trim().toLowerCase();
+      return '$subscriber|${at.toUtc().microsecondsSinceEpoch}';
+    }
+
+    final liveEvents = events.where((event) => !event.isCancelled).toList();
+    // التفعيل بالدين الكامل لا واصل له، فيُعد من سجل المبيعات.
+    final activationKeys = <String>{
+      for (final record in activations)
+        operationKey(record.subscriberUser, record.subscriberName, record.at),
+    };
+    final chargedOperations = <String>{
+      for (final event in liveEvents)
+        if (event.type == 'debt_added' ||
+            event.type == DailyTaskEvent.subscriberCreatedType ||
+            (event.type == DailyTaskEvent.debtEditType && event.amount > 0))
+          operationKey(event.subscriberUser, event.subscriberName, event.at),
+    };
     var debtPaymentCases = 0;
     var activationCollected = 0.0;
     var debtPaymentsCollected = 0.0;
     var debtRepaymentsTotal = 0.0;
     var debtAddedTotal = 0.0;
     var debtReducedTotal = 0.0;
+    var otherCollected = 0.0;
     final paymentCaseKeys = <String>{};
 
-    for (final event in events) {
-      if (event.isCancelled) continue;
+    for (final event in liveEvents) {
       final amount = amountOf?.call(event) ?? event.amount;
+      final caseKey = operationKey(
+        event.subscriberUser,
+        event.subscriberName,
+        event.at,
+      );
       if (event.type == 'activation') {
-        activationCases++;
+        activationKeys.add(caseKey);
         if (amount > 0) activationCollected += amount;
       } else if ((event.type == 'debt_payment' ||
               event.type == 'debt_entry_collection') &&
           amount > 0) {
-        final subscriber = event.subscriberUser.trim().toLowerCase().isNotEmpty
-            ? event.subscriberUser.trim().toLowerCase()
-            : event.subscriberName.trim().toLowerCase();
-        final caseKey =
-            '$subscriber|${event.at.toUtc().microsecondsSinceEpoch}';
+        debtRepaymentsTotal += amount;
+        final isRepayment =
+            event.type == 'debt_payment' ||
+            (event.category.isEmpty && !chargedOperations.contains(caseKey));
+        if (!isRepayment) {
+          otherCollected += amount;
+          continue;
+        }
         if (paymentCaseKeys.add(caseKey)) debtPaymentCases++;
         debtPaymentsCollected += amount;
-        debtRepaymentsTotal += amount;
       } else if (event.type == 'debt_added' && amount > 0) {
         debtAddedTotal += amount;
       } else if (event.type == DailyTaskEvent.debtRemovedType && amount > 0) {
@@ -563,13 +595,14 @@ class DailyTaskSummary {
     }
 
     return DailyTaskSummary(
-      activationCases: activationCases,
+      activationCases: activationKeys.length,
       debtPaymentCases: debtPaymentCases,
       activationCollected: activationCollected,
       debtPaymentsCollected: debtPaymentsCollected,
       debtRepaymentsTotal: debtRepaymentsTotal,
       debtAddedTotal: debtAddedTotal,
       debtReducedTotal: debtReducedTotal,
+      otherCollected: otherCollected,
     );
   }
 }
@@ -659,6 +692,9 @@ class Subscriber {
   String source;
   String sasId;
   bool sasOnline;
+
+  /// نتيجة آخر قراءة للجلسات، وتتقدم على حقول الاتصال القديمة في sasData.
+  bool? liveOnline;
   Map<String, dynamic> sasData;
   List<PaymentRecord> payments;
   List<InvoiceRecord> invoices;
@@ -686,7 +722,7 @@ class Subscriber {
   double get remaining => carriedDebt + currentMonthRemaining;
   bool get expired => endDate.isBefore(DateTime.now());
   bool get isActive => active && !disabled && !expired;
-  bool get isOnline => sasOnline || _detectOnline(sasData);
+  bool get isOnline => liveOnline ?? (sasOnline || _detectOnline(sasData));
 
   void markActivationDate({DateTime? at}) {
     final activationDay = DateTime(
@@ -1295,6 +1331,8 @@ class AppStore {
   static String agentEmail = '';
   static String agentKey = '';
   static final List<ChatMessage> chatMessages = [];
+  /// يُخطر الشاشات عند حفظ المشتركين أو وصول نسخة أحدث من جهاز آخر.
+  static final ValueNotifier<int> subscribersChange = ValueNotifier<int>(0);
   static final ValueNotifier<int> chatMessagesChange = ValueNotifier<int>(0);
   static DateTime _lastChatOpenedAt = DateTime.now();
   static final ValueNotifier<bool> themeModeChange = ValueNotifier<bool>(false);
@@ -2733,6 +2771,7 @@ class AppStore {
     }
     final p = await SharedPreferences.getInstance();
     rolloverMonthlyBalances();
+    subscribersChange.value++;
     // رفع الرقم قبل تأكيد التحميل يجعل بيانات الجهاز تتغلب على الأحدث سحابياً.
     final canAdvanceRevision = !_isLoggedIn || _remoteLoadConfirmed;
     if (canAdvanceRevision) {
@@ -3017,6 +3056,7 @@ class AppStore {
               persistMissingIdsToFirebase: true,
             );
             applyDebtsPayload(agentData['debts']);
+            subscribersChange.value++;
             await p.setString(
               'subscribers',
               jsonEncode(
@@ -3093,6 +3133,14 @@ class AppStore {
   static bool isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
+
+  static DailyTaskSummary summaryOfDay(DateTime day) =>
+      DailyTaskSummary.fromEvents(
+        dailyTaskEvents.where((event) => isSameDay(event.at, day)),
+        activations: accountingActivations.where(
+          (record) => isSameDay(record.at, day),
+        ),
+      );
 
   /// يلغي دين أو مشتريات مضافة يدوياً، ويحتفظ بالعملية ظاهرة مع سبب الإلغاء.
   static Future<void> cancelManualEntry(

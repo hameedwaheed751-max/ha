@@ -2,6 +2,37 @@
   "rules": {
     ".read": false,
     ".write": false,
+    "publicConfig": {
+      "planPrices": {
+        ".read": true,
+        ".write": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'",
+        "three_months": {
+          ".validate": "newData.isString() && newData.val().matches(/^[1-9][0-9]*$/)"
+        },
+        "six_months": {
+          ".validate": "newData.isString() && newData.val().matches(/^[1-9][0-9]*$/)"
+        },
+        "one_year": {
+          ".validate": "newData.isString() && newData.val().matches(/^[1-9][0-9]*$/)"
+        },
+        "$other": {
+          ".validate": false
+        }
+      },
+      "paymentAccount": {
+        ".read": true,
+        ".write": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'",
+        "accountNumber": {
+          ".validate": "newData.isString() && newData.val().length <= 64"
+        },
+        "cardNumber": {
+          ".validate": "newData.isString() && newData.val().length <= 64"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
     "admin": {
       "subscription_requests": {
         ".read": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'",
@@ -13,8 +44,8 @@
         ".indexOn": ["uid"],
         "$requestId": {
           ".read": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || data.child('uid').val() === auth.uid)",
-          ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (!data.exists() && newData.child('uid').val() === auth.uid && newData.child('email').val() === auth.token.email && newData.child('status').val() === 'pending' && newData.child('password').val() === null && ((newData.child('isRenewal').val() === true && root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent') || (newData.child('isRenewal').val() !== true && !root.child('agents').child(auth.uid).child('profile').child('role').exists()))))",
-          ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (newData.hasChildren(['requestId', 'uid', 'email', 'firstName', 'lastName', 'phone', 'selectedPlan', 'amount', 'paymentMethod', 'transferNumber', 'status', 'createdAt']) && newData.child('uid').val() === auth.uid && newData.child('email').val() === auth.token.email && newData.child('status').val() === 'pending' && newData.child('password').val() === null && ((newData.child('isRenewal').val() === true && root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent') || (newData.child('isRenewal').val() !== true && !root.child('agents').child(auth.uid).child('profile').child('role').exists())) && ((newData.child('selectedPlan').val() === 'free_15_days' && newData.child('amount').val() === 'مجاني') || (newData.child('selectedPlan').val() === 'three_months' && newData.child('amount').val() === '40000') || (newData.child('selectedPlan').val() === 'six_months' && newData.child('amount').val() === '50000') || (newData.child('selectedPlan').val() === 'one_year' && newData.child('amount').val() === '70000'))))",
+          ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (!data.exists() && newData.child('uid').val() === auth.uid && newData.child('email').val() === auth.token.email && (newData.child('status').val() === 'pending' || (newData.child('status').val() === 'approved' && newData.child('selectedPlan').val() === 'free_15_days' && newData.child('isRenewal').val() !== true)) && newData.child('password').val() === null && ((newData.child('isRenewal').val() === true && root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent') || (newData.child('isRenewal').val() !== true && !root.child('agents').child(auth.uid).child('profile').child('role').exists()))))",
+          ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (newData.hasChildren(['requestId', 'uid', 'email', 'firstName', 'lastName', 'phone', 'selectedPlan', 'amount', 'paymentMethod', 'transferNumber', 'status', 'createdAt']) && newData.child('uid').val() === auth.uid && newData.child('email').val() === auth.token.email && (newData.child('status').val() === 'pending' || (newData.child('status').val() === 'approved' && newData.child('selectedPlan').val() === 'free_15_days' && newData.child('isRenewal').val() !== true)) && newData.child('password').val() === null && ((newData.child('isRenewal').val() === true && root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent') || (newData.child('isRenewal').val() !== true && !root.child('agents').child(auth.uid).child('profile').child('role').exists())) && (data.exists() || (newData.child('selectedPlan').val() === 'free_15_days' && newData.child('amount').val() === 'مجاني' && newData.child('isRenewal').val() !== true) || ((newData.child('selectedPlan').val() === 'three_months' || newData.child('selectedPlan').val() === 'six_months' || newData.child('selectedPlan').val() === 'one_year') && newData.child('amount').val() === root.child('publicConfig').child('planPrices').child(newData.child('selectedPlan').val()).val()))))",
           "requestId": {
             ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
           },
@@ -46,7 +77,7 @@
             ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isString())"
           },
           "status": {
-            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.val() === 'pending')"
+            ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.val() === 'pending' || newData.val() === 'approved')"
           },
           "createdAt": {
             ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || newData.isNumber())"
@@ -101,11 +132,11 @@
           ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (($agentId === auth.uid || root.child('agents').child(auth.uid).child('profile').child('currentAgentId').val() === $agentId) && $dataPath !== 'profile' && $dataPath !== 'subscription'))"
         },
         "profile": {
-          ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (($agentId === auth.uid || root.child('agents').child(auth.uid).child('profile').child('currentAgentId').val() === $agentId) && newData.child('role').val() === data.child('role').val() && newData.child('status').val() === data.child('status').val() && newData.child('approvedAt').val() === data.child('approvedAt').val() && newData.child('approvalRequestId').val() === data.child('approvalRequestId').val() && newData.child('admin').val() === data.child('admin').val() && (newData.child('currentAgentId').val() === data.child('currentAgentId').val() || newData.child('currentAgentId').val() === auth.uid)))",
-          ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (newData.child('role').val() === data.child('role').val() && newData.child('status').val() === data.child('status').val() && newData.child('approvedAt').val() === data.child('approvedAt').val() && newData.child('approvalRequestId').val() === data.child('approvalRequestId').val() && newData.child('admin').val() === data.child('admin').val() && (newData.child('currentAgentId').val() === data.child('currentAgentId').val() || newData.child('currentAgentId').val() === auth.uid)))"
+          ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || ($agentId === auth.uid && !data.child('role').exists() && newData.child('role').val() === 'agent' && newData.child('status').val() === 'active' && newData.child('approvalRequestId').isString() && newData.child('approvedAt').isNumber() && newData.child('admin').val() === data.child('admin').val() && (newData.child('currentAgentId').val() === data.child('currentAgentId').val() || newData.child('currentAgentId').val() === auth.uid) && newData.parent().child('subscription').child('plan').val() === 'free_15_days') || (($agentId === auth.uid || root.child('agents').child(auth.uid).child('profile').child('currentAgentId').val() === $agentId) && newData.child('role').val() === data.child('role').val() && newData.child('status').val() === data.child('status').val() && newData.child('approvedAt').val() === data.child('approvedAt').val() && newData.child('approvalRequestId').val() === data.child('approvalRequestId').val() && newData.child('admin').val() === data.child('admin').val() && (newData.child('currentAgentId').val() === data.child('currentAgentId').val() || newData.child('currentAgentId').val() === auth.uid)))",
+          ".validate": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || ($agentId === auth.uid && !data.child('role').exists() && newData.child('role').val() === 'agent' && newData.child('status').val() === 'active' && newData.child('approvalRequestId').isString() && newData.child('approvedAt').isNumber() && newData.child('admin').val() === data.child('admin').val() && (newData.child('currentAgentId').val() === data.child('currentAgentId').val() || newData.child('currentAgentId').val() === auth.uid) && newData.parent().child('subscription').child('plan').val() === 'free_15_days') || (newData.child('role').val() === data.child('role').val() && newData.child('status').val() === data.child('status').val() && newData.child('approvedAt').val() === data.child('approvedAt').val() && newData.child('approvalRequestId').val() === data.child('approvalRequestId').val() && newData.child('admin').val() === data.child('admin').val() && (newData.child('currentAgentId').val() === data.child('currentAgentId').val() || newData.child('currentAgentId').val() === auth.uid)))"
         },
         "subscription": {
-          ".write": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'"
+          ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || ($agentId === auth.uid && !data.parent().child('profile').child('role').exists() && newData.child('plan').val() === 'free_15_days' && newData.child('status').val() === 'active' && newData.child('durationDays').val() === 15 && newData.child('autoExpire').val() === true && newData.child('startDate').isNumber() && newData.child('startDate').val() >= now - 300000 && newData.child('startDate').val() <= now + 300000 && newData.child('endDate').val() === newData.child('startDate').val() + 1296000000))"
         }
       }
     },

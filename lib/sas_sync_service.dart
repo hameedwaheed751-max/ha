@@ -13,7 +13,49 @@ class SasSyncResult {
   });
 }
 
+class _SessionIndex {
+  _SessionIndex(List<Map<String, dynamic>> sessions) {
+    for (final session in sessions) {
+      final username = SasSyncService._extractSessionText(session, [
+        'username',
+        'user',
+        'user_name',
+        'login',
+        'name',
+      ]).toLowerCase();
+      // id الجلسة لا يدل على المشترك إلا إذا خلا الصف من اسمه.
+      final sasId = SasSyncService._extractSessionText(session, [
+        'user_id',
+        if (username.isEmpty) 'id',
+        'uid',
+        'uuid',
+      ]).toLowerCase();
+      final ip = SasSyncService._extractIp(session);
+      if (username.isNotEmpty) _ipByUser[username] = ip;
+      if (sasId.isNotEmpty) _ipBySasId[sasId] = ip;
+    }
+  }
+
+  final _ipByUser = <String, String>{};
+  final _ipBySasId = <String, String>{};
+
+  /// فارغ إذا كان متصلاً دون IP معروف، و null إذا لم يكن متصلاً.
+  String? ipOf(Subscriber subscriber) =>
+      _ipByUser[subscriber.user.trim().toLowerCase()] ??
+      _ipBySasId[subscriber.sasId.trim().toLowerCase()];
+}
+
 class SasSyncService {
+  static const _endDateKeys = [
+    'expiration',
+    'expiration_date',
+    'expire_date',
+    'end_date',
+    'endDate',
+    'expires_at',
+    'expiry_date',
+  ];
+
   static DateTime? activationDateFromSas(dynamic node) {
     const keys = ['activation_date', 'activated_at', 'start_date', 'from_date'];
 
@@ -115,28 +157,7 @@ class SasSyncService {
       debugPrint('fetchConnectedSessions failed (non-fatal): $e');
     }
 
-    final sessionIpByUser = <String, String>{};
-    final sessionIpBySasId = <String, String>{};
-    for (final session in sessions) {
-      final username = _extractSessionText(session, [
-        'username',
-        'user',
-        'user_name',
-        'login',
-        'name',
-      ]);
-      final sasId = _extractSessionText(session, [
-        'user_id',
-        'id',
-        'uid',
-        'uuid',
-      ]);
-      final ip = _extractIp(session);
-      debugPrint('session sasId=$sasId username=$username ip=$ip');
-      if (ip.isEmpty) continue;
-      if (username.isNotEmpty) sessionIpByUser[username.toLowerCase()] = ip;
-      if (sasId.isNotEmpty) sessionIpBySasId[sasId.toLowerCase()] = ip;
-    }
+    final connected = _SessionIndex(sessions);
 
     var added = 0;
     var updated = 0;
@@ -152,26 +173,14 @@ class SasSyncService {
               row['profile_name'].toString().trim().isEmpty)) {
         row['profile_name'] = profileName;
       }
-      debugPrint(
-        'SAS sync raw profile_name=${row['profile_name'] ?? ''}, profile_id=${row['profile_id'] ?? ''}',
-      );
       final mapped = _map(row);
       if (mapped.user.trim().isEmpty) continue;
-      debugPrint(
-        'SAS sync mapped profile_name=${mapped.sasData['profile_name'] ?? ''}, type=${mapped.type}',
-      );
 
-      final userKey = mapped.user.trim().toLowerCase();
-      debugPrint('CHECK user=${mapped.user} ip=${mapped.ip}');
-      final sasIdKey = mapped.sasId.trim().toLowerCase();
-      debugPrint('mapped.user=${mapped.user}  mapped.sasId=${mapped.sasId}');
-      debugPrint('session username keys=${sessionIpByUser.keys}');
-      if (sasIdKey.isNotEmpty && sessionIpBySasId.containsKey(sasIdKey)) {
-        mapped.ip = sessionIpBySasId[sasIdKey]!;
-      } else if (userKey.isNotEmpty && sessionIpByUser.containsKey(userKey)) {
-        mapped.ip = sessionIpByUser[userKey]!;
+      final sessionIp = connected.ipOf(mapped);
+      if (sessionIp != null) {
+        mapped.sasOnline = true;
+        if (sessionIp.isNotEmpty) mapped.ip = sessionIp;
       }
-      debugPrint('AFTER MATCH user=${mapped.user} ip=${mapped.ip}');
 
       final sasId = mapped.sasId;
       var index = -1;
@@ -202,6 +211,10 @@ class SasSyncService {
         final nextIp = mapped.ip.isNotEmpty ? mapped.ip : old.ip;
         final nextType = mapped.type.isNotEmpty ? mapped.type : old.type;
         final nextSasId = mapped.sasId.isNotEmpty ? mapped.sasId : old.sasId;
+        final resolvedStartDate = resolveStartDateForSync(
+          existing: old,
+          remoteStartDate: mapped.startDate,
+        );
 
         final changed =
             old.user != nextUser ||
@@ -210,7 +223,7 @@ class SasSyncService {
             old.address != nextAddress ||
             old.ip != nextIp ||
             old.type != nextType ||
-            old.startDate != mapped.startDate ||
+            old.startDate != resolvedStartDate ||
             old.endDate != mapped.endDate ||
             old.active != mapped.active ||
             old.disabled != mapped.disabled ||
@@ -218,11 +231,6 @@ class SasSyncService {
             old.sasId != nextSasId;
 
         if (changed) {
-          final resolvedStartDate = resolveStartDateForSync(
-            existing: old,
-            remoteStartDate: mapped.startDate,
-          );
-
           old
             ..user = nextUser
             ..name = nextName
@@ -237,18 +245,80 @@ class SasSyncService {
             ..source = 'sas'
             ..sasId = nextSasId
             ..sasData = _mergeSasDataPreservingActivation(old, mapped.sasData)
-            ..sasOnline = mapped.sasOnline;
+            ..sasOnline = mapped.sasOnline
+            ..liveOnline = null;
           updated++;
         } else {
           old
             ..sasData = _mergeSasDataPreservingActivation(old, mapped.sasData)
-            ..sasOnline = mapped.sasOnline;
+            ..sasOnline = mapped.sasOnline
+            ..liveOnline = null;
         }
       }
     }
 
     await AppStore.save();
     return SasSyncResult(read: rows.length, added: added, updated: updated);
+  }
+
+  /// يحدّث المشترك من رد SAS لمشترك واحد، مغلفاً بـ data أو مباشراً، دون مزامنة
+  /// القائمة كاملة. لا يغيّر تاريخ الانتهاء إذا خلا الرد منه.
+  static void applyUserSnapshot(Subscriber subscriber, dynamic response) {
+    dynamic node = response;
+    for (var depth = 0; depth < 3 && node is Map; depth++) {
+      if (node['data'] is! Map) break;
+      node = node['data'];
+    }
+    if (node is! Map) return;
+    final row = Map<String, dynamic>.from(node);
+    final mapped = _map(row);
+    if (mapped.ip.isNotEmpty) subscriber.ip = mapped.ip;
+    if (_endDateKeys.any((key) => row[key] != null)) {
+      subscriber.endDate = mapped.endDate;
+    }
+    subscriber
+      ..active = mapped.active
+      ..disabled = mapped.disabled
+      ..sasOnline = mapped.sasOnline
+      ..liveOnline = null
+      ..sasData = {
+        ...subscriber.sasData,
+        ..._mergeSasDataPreservingActivation(subscriber, row),
+      };
+  }
+
+  /// يقرأ الجلسات المتصلة فقط لإظهار IP المشترك بعد اتصاله.
+  static Future<void> refreshConnection(
+    SasApiService api,
+    Subscriber subscriber,
+  ) async {
+    final connected = _SessionIndex(await api.fetchConnectedSessions());
+    final ip = connected.ipOf(subscriber);
+    if (ip == null) return;
+    subscriber
+      ..sasOnline = true
+      ..liveOnline = true;
+    if (ip.isNotEmpty) subscriber.ip = ip;
+  }
+
+  /// تحديث سريع للمتصلين وIP دون جلب المشتركين. يعيد عدد المتصلين، و null إذا
+  /// لم ترجع SAS أي جلسة، فلا يُعد الجميع غير متصلين بسبب رد فارغ.
+  static Future<int?> refreshConnections(SasApiService api) async {
+    final sessions = await api.fetchConnectedSessions();
+    if (sessions.isEmpty) return null;
+    final connected = _SessionIndex(sessions);
+    var online = 0;
+    for (final subscriber in AppStore.subscribers) {
+      if (subscriber.source == 'ftth') continue;
+      final ip = connected.ipOf(subscriber);
+      subscriber
+        ..sasOnline = ip != null
+        ..liveOnline = ip != null;
+      if (ip == null) continue;
+      online++;
+      if (ip.isNotEmpty) subscriber.ip = ip;
+    }
+    return online;
   }
 
   static String _extractIp(dynamic node) {
@@ -272,8 +342,6 @@ class SasSyncService {
         'framed_ip_address',
         'framed_ip',
         'framedIpAddress',
-        'nas_ip',
-        'nasip',
         'client_ip',
         'remote_ip',
         'calling_station_id',
@@ -282,6 +350,9 @@ class SasSyncService {
         'ip',
         'ip_address',
         'address',
+        // عنوان خادم الاتصال لا المشترك، فلا يُقبل إلا عند غياب غيره.
+        'nas_ip',
+        'nasip',
       ]) {
         final value = node[key];
         if (value != null) {
@@ -490,15 +561,7 @@ class SasSyncService {
     }
 
     final now = DateTime.now();
-    final end = date([
-      'expiration',
-      'expiration_date',
-      'expire_date',
-      'end_date',
-      'endDate',
-      'expires_at',
-      'expiry_date',
-    ], now);
+    final end = date(_endDateKeys, now);
 
     final explicitDisabled = truthy([
       'disabled',
@@ -554,21 +617,24 @@ class SasSyncService {
       'plan_name',
       'service_name',
     ]);
-    debugPrint(
-      'SAS _map profile_name=${row['profile_name'] ?? ''}, packageValue=$packageValue',
-    );
+    final firstName = (row['firstname'] ?? '').toString().trim();
+    final lastName = (row['lastname'] ?? '').toString().trim();
 
     return Subscriber(
       user: text(['username', 'user', 'user_name', 'login', 'name']),
-      name: text([
-        'firstname',
-        'full_name',
-        'fullname',
-        'customer_name',
-        'display_name',
-        'name',
-        'username',
-      ]),
+      name: firstName.isNotEmpty
+          ? [
+              firstName,
+              if (lastName.isNotEmpty && lastName != '-') lastName,
+            ].join(' ')
+          : text([
+              'full_name',
+              'fullname',
+              'customer_name',
+              'display_name',
+              'name',
+              'username',
+            ]),
       phone: text(['phone', 'mobile', 'phone_number', 'mobile_number']),
       address: text(['address', 'location', 'city']),
       ip: _extractIp(row),

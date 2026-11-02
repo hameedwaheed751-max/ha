@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../models.dart';
@@ -18,6 +19,21 @@ class PaymentPlanCatalog {
     sixMonths,
     oneYear,
   ];
+
+  static const List<String> paidPlans = <String>[
+    threeMonths,
+    sixMonths,
+    oneYear,
+  ];
+
+  /// يحدده المدير، ويقرؤه التسجيل قبل تسجيل الدخول فهو عام القراءة.
+  static const String pricesPath = 'publicConfig/planPrices';
+
+  static const String paymentAccountPath = 'publicConfig/paymentAccount';
+
+  static final Map<String, String> _prices = <String, String>{};
+  static String accountNumber = '';
+  static String cardNumber = '';
 
   static String normalize(String value) {
     switch (value.trim()) {
@@ -40,19 +56,64 @@ class PaymentPlanCatalog {
   static int durationDays(String value) =>
       AppStore.subscriptionDurationDaysFor(normalize(value));
 
+  /// فارغ إذا لم يحدد المدير سعر الباقة بعد.
   static String amount(String value) {
-    switch (normalize(value)) {
-      case free15Days:
-        return 'مجاني';
-      case threeMonths:
-        return '40000';
-      case sixMonths:
-        return '50000';
-      case oneYear:
-        return '70000';
-      default:
-        return '0';
+    final plan = normalize(value);
+    return plan == free15Days ? 'مجاني' : _prices[plan] ?? '';
+  }
+
+  /// الصيغة المحفوظة: أرقام لاتينية دون فواصل، أو null إذا لم يكن سعراً صحيحاً.
+  static String? normalizePrice(String raw) {
+    var digits = raw.replaceAll(RegExp(r'[\s,٬]'), '');
+    const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
+    for (var digit = 0; digit < arabicDigits.length; digit++) {
+      digits = digits.replaceAll(arabicDigits[digit], '$digit');
     }
+    return RegExp(r'^[1-9][0-9]*$').hasMatch(digits) ? digits : null;
+  }
+
+  static void applyPrices(dynamic raw) {
+    _prices.clear();
+    if (raw is! Map) return;
+    for (final plan in paidPlans) {
+      final price = normalizePrice((raw[plan] ?? '').toString());
+      if (price != null) _prices[plan] = price;
+    }
+  }
+
+  static void applyPaymentAccount(dynamic raw) {
+    final account = raw is Map ? raw : const {};
+    accountNumber = (account['accountNumber'] ?? '').toString().trim();
+    cardNumber = (account['cardNumber'] ?? '').toString().trim();
+  }
+
+  static Future<void> loadPrices() async {
+    final database = FirebaseDatabase.instance;
+    final snapshots = await Future.wait([
+      database.ref(pricesPath).get(),
+      database.ref(paymentAccountPath).get(),
+    ]);
+    applyPrices(snapshots[0].value);
+    applyPaymentAccount(snapshots[1].value);
+  }
+
+  static void _requireAdmin() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user?.uid != SubscriptionRequestService.trustedAdminUid) {
+      throw StateError('Only the administrator may change payment settings.');
+    }
+  }
+
+  static Future<void> savePrices(Map<String, String> prices) async {
+    _requireAdmin();
+    await FirebaseDatabase.instance.ref(pricesPath).update(prices);
+    applyPrices(prices);
+  }
+
+  static Future<void> savePaymentAccount(Map<String, String> account) async {
+    _requireAdmin();
+    await FirebaseDatabase.instance.ref(paymentAccountPath).update(account);
+    applyPaymentAccount(account);
   }
 }
 
@@ -198,11 +259,20 @@ class RenewalRequestState {
   final int? reviewedAt;
   final String selectedPlan;
 
-  bool get isPending => status == 'pending';
+  bool get isPending =>
+      status == SubscriptionRequestService.pendingStatus ||
+      status == SubscriptionRequestService.reviewingStatus;
   bool get isApproved => status == 'approved';
   bool get isRejected => status == 'rejected';
 
   int get sortTs => reviewedAt ?? createdAt;
+}
+
+class OpenRequest {
+  const OpenRequest({required this.requestId, required this.hasReceipt});
+
+  final String requestId;
+  final bool hasReceipt;
 }
 
 class PaymentRequestService {
@@ -210,6 +280,34 @@ class PaymentRequestService {
       'admin/${SubscriptionRequestService.collectionName}';
 
   static DatabaseReference get _root => FirebaseDatabase.instance.ref();
+
+  /// الطلب الذي ما زال بانتظار الإدارة، ما دام الحساب لا يحتاج طلباً ثانياً.
+  static Future<OpenRequest?> findOpenRequest(String uid) async {
+    final snapshot = await _requestsForUid(uid).get();
+    return openRequestIn(snapshot.value, uid);
+  }
+
+  static OpenRequest? openRequestIn(Object? value, String uid) {
+    if (value is! Map) return null;
+    for (final entry in value.entries) {
+      if (entry.value is! Map) continue;
+      final request = Map<String, dynamic>.from(entry.value as Map);
+      final status = request['status'];
+      if (request['uid'] != uid ||
+          (status != SubscriptionRequestService.pendingStatus &&
+              status != SubscriptionRequestService.reviewingStatus)) {
+        continue;
+      }
+      return OpenRequest(
+        requestId: entry.key.toString(),
+        hasReceipt: (request['receiptImageUrl'] ?? '')
+            .toString()
+            .trim()
+            .isNotEmpty,
+      );
+    }
+    return null;
+  }
 
   static Future<RenewalRequestState?> findLatestRenewalRequestForAccount({
     required String uid,
@@ -288,7 +386,15 @@ class PaymentRequestService {
   }
 
   static Stream<List<PaymentRequestRecord>> watchPendingRequests() =>
-      watchRequests(status: SubscriptionRequestService.pendingStatus);
+      watchRequests().map(
+        (requests) => requests
+            .where(
+              (request) =>
+                  request.status == SubscriptionRequestService.pendingStatus ||
+                  request.status == SubscriptionRequestService.reviewingStatus,
+            )
+            .toList(),
+      );
 
   static Future<String> createRequest({
     String uid = '',
@@ -332,13 +438,11 @@ class PaymentRequestService {
         'Unsupported subscription plan.',
       );
     }
+    // قد يغيّر المدير السعر بعد فتح شاشة الباقات.
+    await PaymentPlanCatalog.loadPrices();
     final expectedAmount = PaymentPlanCatalog.amount(normalizedPlan);
-    if (amount.trim() != expectedAmount) {
-      throw ArgumentError.value(
-        amount,
-        'amount',
-        'Amount does not match the selected plan.',
-      );
+    if (expectedAmount.isEmpty || amount.trim() != expectedAmount) {
+      throw StateError('تغيّر سعر الباقة، ارجع واختر الباقة من جديد');
     }
     final nameParts = agentName.trim().split(RegExp(r'\s+'));
     final requestId = await SubscriptionRequestService.createRequest(
@@ -361,6 +465,15 @@ class PaymentRequestService {
     return requestId;
   }
 
+  static Future<void> activateFreeTrial({
+    required String agentName,
+    required String phone,
+  }) => SubscriptionRequestService.activateFreeTrial(
+    agentName: agentName,
+    phone: phone,
+    amount: PaymentPlanCatalog.amount(PaymentPlanCatalog.free15Days),
+  );
+
   static Future<String?> uploadReceiptImage({
     required String requestId,
     required XFile file,
@@ -382,6 +495,28 @@ class PaymentRequestService {
       SettableMetadata(contentType: contentType),
     );
     return task.ref.getDownloadURL();
+  }
+
+  /// يعيد false إذا بقي الطلب بلا وصل، ليعرف الوكيل ذلك ويعيد المحاولة.
+  static Future<bool> attachReceipt({
+    required String requestId,
+    required XFile file,
+  }) async {
+    try {
+      final imageUrl = await uploadReceiptImage(
+        requestId: requestId,
+        file: file,
+      ).timeout(const Duration(seconds: 30));
+      if ((imageUrl ?? '').isEmpty) return false;
+      await markRequestAsPendingReview(
+        requestId: requestId,
+        patch: {'receiptImageUrl': imageUrl},
+      ).timeout(const Duration(seconds: 15));
+      return true;
+    } catch (e) {
+      debugPrint('Receipt upload/update failed for request $requestId: $e');
+      return false;
+    }
   }
 
   static Future<void> markRequestAsPendingReview({

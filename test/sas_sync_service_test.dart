@@ -229,6 +229,257 @@ void main() {
     },
   );
 
+  test('a connected session marks the subscriber online', () async {
+    final api = _FakeSasApiService(
+      [
+        {'id': 7, 'username': 'user7', 'expiration': '2030-01-01'},
+      ],
+      [
+        {'username': 'user7', 'framedipaddress': '10.0.0.7'},
+      ],
+    );
+
+    await SasSyncService.sync(api);
+
+    expect(AppStore.subscribers.single.isOnline, isTrue);
+  });
+
+  test('a session id equal to another user id does not move its IP', () async {
+    final api = _FakeSasApiService(
+      [
+        {'id': 5, 'username': 'first', 'expiration': '2030-01-01'},
+        {'id': 9, 'username': 'second', 'expiration': '2030-01-01'},
+      ],
+      [
+        {'id': 5, 'username': 'second', 'framedipaddress': '10.0.0.9'},
+      ],
+    );
+
+    await SasSyncService.sync(api);
+
+    final first = AppStore.subscribers.firstWhere((s) => s.user == 'first');
+    final second = AppStore.subscribers.firstWhere((s) => s.user == 'second');
+    expect(second.ip, '10.0.0.9');
+    expect(first.ip, isNot('10.0.0.9'));
+  });
+
+  test('the subscriber IP wins over the server IP in one record', () async {
+    final api = _FakeSasApiService([
+      {
+        'username': 'user8',
+        'expiration': '2030-01-01',
+        'last_session': {'nas_ip': '172.16.0.1', 'ip': '10.0.0.8'},
+      },
+    ]);
+
+    await SasSyncService.sync(api);
+
+    expect(AppStore.subscribers.single.ip, '10.0.0.8');
+  });
+
+  test('the full SAS name survives a sync', () async {
+    final api = _FakeSasApiService([
+      {
+        'username': 'user6',
+        'firstname': 'أحمد',
+        'lastname': 'علي',
+        'expiration': '2030-01-01',
+      },
+      {
+        'username': 'user9',
+        'firstname': 'سعد',
+        'lastname': '-',
+        'expiration': '2030-01-01',
+      },
+    ]);
+
+    await SasSyncService.sync(api);
+
+    expect(AppStore.subscribers.map((s) => s.name), ['أحمد علي', 'سعد']);
+  });
+
+  test('a second sync with no changes reports nothing updated', () async {
+    final api = _FakeSasApiService([
+      {
+        'id': 11,
+        'username': 'stable',
+        'firstname': 'Stable',
+        'start_date': '2024-01-01T08:30:00',
+        'expiration': '2030-01-01',
+        'active': 1,
+      },
+    ]);
+
+    await SasSyncService.sync(api);
+    await SasSyncService.sync(api);
+    final result = await SasSyncService.sync(api);
+
+    expect(result.updated, 0);
+  });
+
+  group('single subscriber refresh', () {
+    Subscriber subscriber() {
+      final s = Subscriber(
+        user: 'single',
+        name: 'Single',
+        phone: '',
+        address: '',
+        ip: '',
+        type: 'Normal',
+        price: 0,
+        startDate: DateTime(2026, 1, 1),
+        endDate: DateTime(2026, 2, 1),
+        sasId: '21',
+        active: false,
+      );
+      s.markActivationDate(at: DateTime(2026, 11, 1));
+      return s;
+    }
+
+    test('reads a response wrapped in data', () {
+      final s = subscriber();
+
+      SasSyncService.applyUserSnapshot(s, {
+        'status': 200,
+        'data': {
+          'id': 21,
+          'username': 'single',
+          'expiration': '2030-06-01 10:00:00',
+          'enabled': 1,
+          'last_session': {'framedipaddress': '10.0.0.21'},
+        },
+      });
+
+      expect(s.endDate, DateTime(2030, 6, 1, 10));
+      expect(s.isActive, isTrue);
+      expect(s.ip, '10.0.0.21');
+      expect(s.sasData.containsKey('data'), isFalse);
+    });
+
+    test('keeps the activation day and the end date it did not receive', () {
+      final s = subscriber();
+
+      SasSyncService.applyUserSnapshot(s, {
+        'id': 21,
+        'username': 'single',
+        'activation_date': '2024-01-01',
+      });
+
+      expect(s.endDate, DateTime(2026, 2, 1));
+      expect(s.sasData['activation_date'], s.sasData['local_activation_date']);
+    });
+
+    test('ignores an empty response', () {
+      final s = subscriber();
+
+      SasSyncService.applyUserSnapshot(s, null);
+
+      expect(s.endDate, DateTime(2026, 2, 1));
+    });
+
+    test('shows the IP once the subscriber connects', () async {
+      final s = subscriber();
+      final api = _FakeSasApiService(const [], [
+        {'username': 'single', 'framedipaddress': '10.0.0.21'},
+      ]);
+
+      await SasSyncService.refreshConnection(api, s);
+
+      expect(s.ip, '10.0.0.21');
+      expect(s.isOnline, isTrue);
+    });
+
+    test('leaves a subscriber who has not connected', () async {
+      final s = subscriber();
+
+      await SasSyncService.refreshConnection(_FakeSasApiService(const []), s);
+
+      expect(s.ip, '');
+      expect(s.sasOnline, isFalse);
+    });
+  });
+
+  group('quick connection refresh', () {
+    Subscriber add(String user, {String ip = '', String source = 'sas'}) {
+      final s = Subscriber(
+        user: user,
+        name: user,
+        phone: '',
+        address: '',
+        ip: ip,
+        type: 'Normal',
+        price: 0,
+        startDate: DateTime(2026, 1, 1),
+        endDate: DateTime(2030, 1, 1),
+        source: source,
+        sasData: const {'online': 1},
+      );
+      AppStore.subscribers.add(s);
+      return s;
+    }
+
+    test('updates who is connected and keeps the last known IP', () async {
+      final connected = add('on');
+      final offline = add('off', ip: '10.0.0.2');
+
+      final online = await SasSyncService.refreshConnections(
+        _FakeSasApiService(const [], [
+          {'username': 'on', 'framedipaddress': '10.0.0.1'},
+        ]),
+      );
+
+      expect(online, 1);
+      expect(connected.isOnline, isTrue);
+      expect(connected.ip, '10.0.0.1');
+      expect(offline.isOnline, isFalse);
+      expect(offline.ip, '10.0.0.2');
+    });
+
+    test('an empty reply leaves everyone as they were', () async {
+      final subscriber = add('on');
+
+      final online = await SasSyncService.refreshConnections(
+        _FakeSasApiService(const []),
+      );
+
+      expect(online, isNull);
+      expect(subscriber.isOnline, isTrue);
+    });
+
+    test('FTTH subscribers are left alone', () async {
+      final ftth = add('fiber', source: 'ftth');
+
+      await SasSyncService.refreshConnections(
+        _FakeSasApiService(const [], [
+          {'username': 'other', 'framedipaddress': '10.0.0.1'},
+        ]),
+      );
+
+      expect(ftth.isOnline, isTrue);
+    });
+
+    test('a full sync takes over from the quick refresh', () async {
+      final subscriber = add('fresh')..liveOnline = false;
+
+      await SasSyncService.sync(
+        _FakeSasApiService([
+          {'username': 'fresh', 'online': 1, 'expiration': '2030-01-01'},
+        ]),
+      );
+
+      expect(subscriber.liveOnline, isNull);
+      expect(subscriber.isOnline, isTrue);
+    });
+  });
+
+  test('saving tells open screens the subscribers changed', () async {
+    final before = AppStore.subscribersChange.value;
+
+    await AppStore.save();
+
+    expect(AppStore.subscribersChange.value, greaterThan(before));
+  });
+
   test('reads the activation date from a nested SAS response', () {
     final date = SasSyncService.activationDateFromSas({
       'data': {

@@ -233,10 +233,10 @@ class _LoginScreenState extends State<LoginScreen> {
         .toString()
         .trim()
         .toLowerCase();
-    final endDateRaw = (subscription['endDate'] ?? '').toString().trim();
-    final endDate = endDateRaw.isNotEmpty
-        ? DateTime.tryParse(endDateRaw)?.toUtc()
-        : null;
+    final endDateRaw = subscription['endDate'];
+    final endDate = endDateRaw is num
+        ? DateTime.fromMillisecondsSinceEpoch(endDateRaw.toInt(), isUtc: true)
+        : DateTime.tryParse((endDateRaw ?? '').toString().trim())?.toUtc();
     final now = DateTime.now().toUtc();
     final isExpired =
         status == 'expired' || (endDate != null && !endDate.isAfter(now));
@@ -352,21 +352,8 @@ class _LoginScreenState extends State<LoginScreen> {
       renewalForUid: account.uid,
     );
 
-    if (receiptFile != null) {
-      try {
-        final imageUrl = await PaymentRequestService.uploadReceiptImage(
-          requestId: requestId,
-          file: receiptFile,
-        ).timeout(const Duration(seconds: 30));
-        await PaymentRequestService.markRequestAsPendingReview(
-          requestId: requestId,
-          patch: {'receiptImageUrl': imageUrl ?? ''},
-        ).timeout(const Duration(seconds: 15));
-      } catch (e) {
-        debugPrint(
-          'Renewal receipt upload/update failed for request $requestId: $e',
-        );
-      }
+    if (receiptFile != null && mounted) {
+      await _attachReceiptWithRetry(context, requestId, receiptFile);
     }
 
     _navigateToRenewalStatusScreen(
@@ -962,30 +949,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: _passwordController.text,
       );
 
-      final requestId = await PaymentRequestService.createRequest(
-        uid: user.uid,
-        phone: _phoneController.text.trim(),
-        email: email,
-        agentName: _fullNameController.text.trim(),
-        selectedPlan: _selectedPlan,
-        amount: PaymentPlanCatalog.amount(_selectedPlan),
-        paymentMethod: 'Qi Card',
-        transferNumber: _transferNumber,
-      );
-
-      if (_receiptFile != null) {
-        try {
-          final imageUrl = await PaymentRequestService.uploadReceiptImage(
-            requestId: requestId,
-            file: _receiptFile!,
-          ).timeout(const Duration(seconds: 30));
-          await PaymentRequestService.markRequestAsPendingReview(
-            requestId: requestId,
-            patch: {'receiptImageUrl': imageUrl ?? ''},
-          ).timeout(const Duration(seconds: 15));
-        } catch (e) {
-          debugPrint('Receipt upload/update failed for request $requestId: $e');
+      final String notice;
+      final openRequest = await PaymentRequestService.findOpenRequest(user.uid);
+      if (openRequest != null) {
+        if (!openRequest.hasReceipt && _receiptFile != null && mounted) {
+          await _attachReceiptWithRetry(
+            context,
+            openRequest.requestId,
+            _receiptFile!,
+          );
         }
+        notice =
+            'لديك طلب اشتراك قيد المراجعة، لذلك لم يُرسل طلب جديد. يرجى انتظار موافقة الإدارة.';
+      } else if (_selectedPlan == PaymentPlanCatalog.free15Days) {
+        await PaymentRequestService.activateFreeTrial(
+          agentName: _fullNameController.text.trim(),
+          phone: _phoneController.text.trim(),
+        );
+        notice =
+            'تم تفعيل الباقة المجانية لمدة 15 يوماً. يمكنك تسجيل الدخول الآن.';
+      } else {
+        final requestId = await PaymentRequestService.createRequest(
+          uid: user.uid,
+          phone: _phoneController.text.trim(),
+          email: email,
+          agentName: _fullNameController.text.trim(),
+          selectedPlan: _selectedPlan,
+          amount: PaymentPlanCatalog.amount(_selectedPlan),
+          paymentMethod: 'Qi Card',
+          transferNumber: _transferNumber,
+        );
+
+        if (_receiptFile != null && mounted) {
+          await _attachReceiptWithRetry(context, requestId, _receiptFile!);
+        }
+        notice = 'تم إرسال طلب الاشتراك بنجاح، وهو الآن بانتظار موافقة الإدارة.';
       }
       await FirebaseAuth.instance.signOut();
 
@@ -996,9 +994,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         builder: (ctx) => Directionality(
           textDirection: TextDirection.rtl,
           child: AlertDialog(
-            content: const Text(
-              'تم إرسال طلب الاشتراك بنجاح، وهو الآن بانتظار موافقة الإدارة.',
-            ),
+            content: Text(notice),
             actions: [
               FilledButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -1367,6 +1363,46 @@ class ExpiredAccountData {
   final String address;
 }
 
+/// الطلب مسجل مسبقاً، فلا تُفقد بياناته إذا اختار الوكيل المتابعة دون وصل.
+Future<void> _attachReceiptWithRetry(
+  BuildContext context,
+  String requestId,
+  XFile file,
+) async {
+  while (context.mounted) {
+    final attached = await PaymentRequestService.attachReceipt(
+      requestId: requestId,
+      file: file,
+    );
+    if (attached || !context.mounted) return;
+    final retry = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('لم يُرفع الوصل'),
+          content: const Text(
+            'وصل طلبك إلى الإدارة دون صورة الوصل، ولن يُقبل بدونها. '
+            'تأكد من الإنترنت وأعد المحاولة.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('متابعة دون وصل'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('إعادة المحاولة'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (retry != true) return;
+  }
+}
+
 Future<bool> _ensureRenewalAccountAuthenticated(
   BuildContext context,
   ExpiredAccountData account,
@@ -1495,21 +1531,8 @@ class _RenewalRequestStatusScreenState
       renewalForUid: widget.account.uid,
     );
 
-    if (receiptFile != null) {
-      try {
-        final imageUrl = await PaymentRequestService.uploadReceiptImage(
-          requestId: requestId,
-          file: receiptFile,
-        ).timeout(const Duration(seconds: 30));
-        await PaymentRequestService.markRequestAsPendingReview(
-          requestId: requestId,
-          patch: {'receiptImageUrl': imageUrl ?? ''},
-        ).timeout(const Duration(seconds: 15));
-      } catch (e) {
-        debugPrint(
-          'Renewal receipt upload/update failed for request $requestId: $e',
-        );
-      }
+    if (receiptFile != null && mounted) {
+      await _attachReceiptWithRetry(context, requestId, receiptFile);
     }
 
     if (!mounted) return;
@@ -1735,7 +1758,7 @@ class _RenewalRequestStatusScreenState
   }
 }
 
-class SubscriptionPlansScreen extends StatelessWidget {
+class SubscriptionPlansScreen extends StatefulWidget {
   final ExpiredAccountData? renewalAccount;
   final Future<void> Function(
     String plan,
@@ -1749,6 +1772,14 @@ class SubscriptionPlansScreen extends StatelessWidget {
     this.renewalAccount,
     this.onRenewSubmit,
   });
+
+  @override
+  State<SubscriptionPlansScreen> createState() =>
+      _SubscriptionPlansScreenState();
+}
+
+class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
+  late Future<void> _prices = PaymentPlanCatalog.loadPrices();
 
   String _planLabel(String value) {
     switch (PaymentPlanCatalog.normalize(value)) {
@@ -1767,11 +1798,26 @@ class SubscriptionPlansScreen extends StatelessWidget {
 
   String _planPrice(String value) {
     final amount = PaymentPlanCatalog.amount(value);
+    if (amount.isEmpty) return 'غير محدد';
     if (amount == 'مجاني') return amount;
-    return '$amount دينار';
+    final grouped = amount.replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+$)'),
+      (_) => ',',
+    );
+    return '$grouped دينار';
   }
 
   void _openRegistration(BuildContext context, String plan) {
+    if (plan == PaymentPlanCatalog.free15Days) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              RegisterScreen(selectedPlan: plan, transferNumber: ''),
+        ),
+      );
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -1780,8 +1826,13 @@ class SubscriptionPlansScreen extends StatelessWidget {
           planPrice: _planPrice(plan),
           onContinue:
               ({required String transferNumber, XFile? receiptFile}) async {
-                if (renewalAccount != null && onRenewSubmit != null) {
-                  await onRenewSubmit!(plan, transferNumber, receiptFile);
+                if (widget.renewalAccount != null &&
+                    widget.onRenewSubmit != null) {
+                  await widget.onRenewSubmit!(
+                    plan,
+                    transferNumber,
+                    receiptFile,
+                  );
                   return;
                 }
                 Navigator.pushReplacement(
@@ -1805,11 +1856,13 @@ class SubscriptionPlansScreen extends StatelessWidget {
     required String plan,
     required String title,
     required String subtitle,
-    required String price,
     required Color accent,
   }) {
+    final price = _planPrice(plan);
     return InkWell(
-      onTap: () => _openRegistration(context, plan),
+      onTap: PaymentPlanCatalog.amount(plan).isEmpty
+          ? null
+          : () => _openRegistration(context, plan),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
@@ -1930,37 +1983,64 @@ class SubscriptionPlansScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 18),
-                    _planTile(
-                      context,
-                      plan: PaymentPlanCatalog.free15Days,
-                      title: 'مجاني 15 يوم',
-                      subtitle: 'تجربة أولية',
-                      price: 'مجاني',
-                      accent: const Color(0xFF2E7D32),
-                    ),
-                    _planTile(
-                      context,
-                      plan: PaymentPlanCatalog.threeMonths,
-                      title: '3 أشهر',
-                      subtitle: 'اشتراك مدفوع',
-                      price: '20,000 دينار',
-                      accent: const Color(0xFF1565C0),
-                    ),
-                    _planTile(
-                      context,
-                      plan: PaymentPlanCatalog.sixMonths,
-                      title: '6 أشهر',
-                      subtitle: 'اشتراك مدفوع',
-                      price: '30,000 دينار',
-                      accent: const Color(0xFF00897B),
-                    ),
-                    _planTile(
-                      context,
-                      plan: PaymentPlanCatalog.oneYear,
-                      title: 'سنة',
-                      subtitle: 'اشتراك مدفوع',
-                      price: '45,000 دينار',
-                      accent: const Color(0xFF8E24AA),
+                    FutureBuilder<void>(
+                      future: _prices,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState != ConnectionState.done) {
+                          return const Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (snapshot.hasError) ...[
+                              const Text(
+                                'تعذر جلب أسعار الباقات',
+                                textAlign: TextAlign.center,
+                              ),
+                              TextButton(
+                                onPressed: () => setState(
+                                  () =>
+                                      _prices = PaymentPlanCatalog.loadPrices(),
+                                ),
+                                child: const Text('إعادة المحاولة'),
+                              ),
+                            ],
+                            // التجربة المجانية للحسابات الجديدة فقط.
+                            if (widget.renewalAccount == null)
+                              _planTile(
+                                context,
+                                plan: PaymentPlanCatalog.free15Days,
+                                title: 'مجاني 15 يوم',
+                                subtitle: 'تجربة أولية',
+                                accent: const Color(0xFF2E7D32),
+                              ),
+                            _planTile(
+                              context,
+                              plan: PaymentPlanCatalog.threeMonths,
+                              title: '3 أشهر',
+                              subtitle: 'اشتراك مدفوع',
+                              accent: const Color(0xFF1565C0),
+                            ),
+                            _planTile(
+                              context,
+                              plan: PaymentPlanCatalog.sixMonths,
+                              title: '6 أشهر',
+                              subtitle: 'اشتراك مدفوع',
+                              accent: const Color(0xFF00897B),
+                            ),
+                            _planTile(
+                              context,
+                              plan: PaymentPlanCatalog.oneYear,
+                              title: 'سنة',
+                              subtitle: 'اشتراك مدفوع',
+                              accent: const Color(0xFF8E24AA),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -2228,6 +2308,21 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                                     color: colorScheme.onSurfaceVariant,
                                   ),
                                 ),
+                                const SizedBox(height: 4),
+                                if (PaymentPlanCatalog.accountNumber.isNotEmpty)
+                                  SelectableText(
+                                    'رقم الحساب: ${PaymentPlanCatalog.accountNumber}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                if (PaymentPlanCatalog.cardNumber.isNotEmpty)
+                                  SelectableText(
+                                    'رقم البطاقة: ${PaymentPlanCatalog.cardNumber}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
                                 const SizedBox(height: 4),
                                 Text(
                                   'المبلغ المستحق: ${widget.planPrice}',

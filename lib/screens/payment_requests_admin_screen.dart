@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../services/payment_request_service.dart';
+import '../services/subscription_request_service.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
 
 class PaymentRequestsAdminScreen extends StatefulWidget {
@@ -26,18 +27,15 @@ class _PaymentRequestsAdminScreenState
       final planLabel = (data['planLabel'] ?? request.planLabel).toString();
       final endDate = (data['endDate'] ?? '').toString();
 
-      AppStore.addDailyTaskEvent(
-        DailyTaskEvent(
+      final notified = await _afterDecision(
+        event: DailyTaskEvent(
           type: 'payment_approved',
           subscriberUser: request.email,
           subscriberName: request.agentName,
           at: DateTime.now(),
           note: 'تم قبول طلب الدفع - $planLabel',
         ),
-      );
-
-      await WhatsAppNotificationDispatcher().sendText(
-        to: phone,
+        phone: phone,
         text:
             'مرحباً ${request.agentName}،\n✅ تم قبول طلب الاشتراك بنجاح.\n📦 الباقة: $planLabel\n📅 ينتهي الاشتراك: ${endDate.isNotEmpty ? endDate : '—'}\n\nشكراً لاختياركم خدمتنا.',
         eventType: 'payment_approved',
@@ -46,9 +44,15 @@ class _PaymentRequestsAdminScreenState
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('تم قبول الطلب بنجاح')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            notified
+                ? 'تم قبول الطلب بنجاح'
+                : 'تم قبول الطلب وتفعيل الاشتراك، لكن تعذر إرسال رسالة واتساب للوكيل',
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -101,18 +105,15 @@ class _PaymentRequestsAdminScreenState
 
       final phone = request.phone;
 
-      AppStore.addDailyTaskEvent(
-        DailyTaskEvent(
+      final notified = await _afterDecision(
+        event: DailyTaskEvent(
           type: 'payment_rejected',
           subscriberUser: request.email,
           subscriberName: request.agentName,
           at: DateTime.now(),
           note: reason,
         ),
-      );
-
-      await WhatsAppNotificationDispatcher().sendText(
-        to: phone,
+        phone: phone,
         text:
             'مرحباً ${request.agentName}،\n❌ تم رفض طلب الاشتراك.\nالسبب: $reason\n\nللاستفسار يرجى التواصل مع:\n🏢 ${AppStore.effectiveAgentName}\n\nشكراً لكم.',
         eventType: 'payment_rejected',
@@ -121,9 +122,15 @@ class _PaymentRequestsAdminScreenState
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('تم رفض الطلب')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            notified
+                ? 'تم رفض الطلب'
+                : 'تم رفض الطلب، لكن تعذر إرسال رسالة واتساب للوكيل',
+          ),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -131,6 +138,29 @@ class _PaymentRequestsAdminScreenState
       ).showSnackBar(SnackBar(content: Text('فشل رفض الطلب: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// القرار حُفظ قبل هذه الخطوة، فلا يُعرض فشلها على أنه فشل القبول أو الرفض.
+  Future<bool> _afterDecision({
+    required DailyTaskEvent event,
+    required String phone,
+    required String text,
+    required String eventType,
+    required String idempotencyKey,
+  }) async {
+    try {
+      AppStore.addDailyTaskEvent(event);
+      final result = await WhatsAppNotificationDispatcher().sendText(
+        to: phone,
+        text: text,
+        eventType: eventType,
+        idempotencyKey: idempotencyKey,
+      );
+      return result.success;
+    } catch (e) {
+      debugPrint('Notification failed for $eventType: $e');
+      return false;
     }
   }
 
@@ -227,9 +257,13 @@ class _PaymentRequestsAdminScreenState
                                 color: Colors.orange.shade700,
                                 borderRadius: BorderRadius.circular(999),
                               ),
-                              child: const Text(
-                                'pending',
-                                style: TextStyle(
+                              child: Text(
+                                request.status ==
+                                        SubscriptionRequestService
+                                            .reviewingStatus
+                                    ? 'قيد القبول'
+                                    : 'معلق',
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 12,
                                 ),
@@ -246,6 +280,19 @@ class _PaymentRequestsAdminScreenState
                           'رقم التحويل: ${request.transferNumber.isEmpty ? '—' : request.transferNumber}',
                         ),
                         Text('تاريخ الطلب: $createdText'),
+                        if (request.receiptImage.isEmpty &&
+                            request.selectedPlan !=
+                                PaymentPlanCatalog.free15Days)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8),
+                            child: Text(
+                              'لا يوجد وصل، ولا يمكن قبول الطلب دون وصل',
+                              style: TextStyle(
+                                color: Color(0xFFC62828),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
                         if (request.receiptImage.isNotEmpty) ...[
                           const SizedBox(height: 10),
                           InkWell(

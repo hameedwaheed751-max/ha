@@ -54,6 +54,25 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     super.initState();
     _loadColumnPreferences();
     _filteredSubscribers = _buildFilteredSubscribers();
+    AppStore.subscribersChange.addListener(_onSubscribersChanged);
+  }
+
+  /// المزامنة وأجهزة الوكيل الأخرى قد تستبدل كائنات المشتركين في أي وقت.
+  void _onSubscribersChanged() {
+    if (!mounted) return;
+    setState(() {
+      final current = selected;
+      selected = null;
+      if (current != null) {
+        for (final subscriber in AppStore.subscribers) {
+          if (subscriber.subscriberId == current.subscriberId) {
+            selected = subscriber;
+            break;
+          }
+        }
+      }
+      _filteredSubscribers = _buildFilteredSubscribers();
+    });
   }
 
   Future<void> _loadColumnPreferences() async {
@@ -96,6 +115,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           s.user.toLowerCase().contains(z) ||
           s.name.toLowerCase().contains(z) ||
           s.phone.contains(z) ||
+          s.ip.contains(z) ||
           s.type.toLowerCase().contains(z) ||
           s.packageDisplay.toLowerCase().contains(z);
       if (!basicMatch) return false;
@@ -188,27 +208,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     s.markActivationDate(at: at ?? DateTime.now());
   }
 
-  DateTime? _extractEndDateFromSas(Map<String, dynamic> sasData) {
-    final source = (sasData['data'] is Map)
-        ? Map<String, dynamic>.from(sasData['data'] as Map)
-        : sasData;
-
-    final endRaw =
-        source['expiration'] ??
-        source['expiration_date'] ??
-        source['expires_at'] ??
-        source['end_date'] ??
-        source['endDate'] ??
-        source['expiry_date'];
-
-    if (endRaw == null) return null;
-    if (endRaw is num) {
-      final n = endRaw.toInt();
-      return DateTime.fromMillisecondsSinceEpoch(n > 9999999999 ? n : n * 1000);
-    }
-    return DateTime.tryParse(endRaw.toString());
-  }
-
   String _parentText(Subscriber s) => _sasText(s, const [
     'parent_name',
     'parent',
@@ -263,11 +262,28 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   Future<void> _refreshSubscribers() async {
     if (syncing || _isRefreshing) return;
     setState(() => _isRefreshing = true);
+    String message;
     try {
-      await syncNow();
+      final settings = await SasSettings.load();
+      if (settings.username.trim().isEmpty || settings.password.isEmpty) {
+        throw Exception('أكمل إعدادات ربط SAS أولاً');
+      }
+      final online = await SasSyncService.refreshConnections(
+        SasApiService(settings),
+      ).timeout(const Duration(seconds: 30));
+      if (online != null) await AppStore.save();
+      message = online == null
+          ? 'لم يرجع SAS أي جلسة متصلة'
+          : 'تم التحديث — المتصلون الآن $online';
+    } catch (e) {
+      message = 'تعذر تحديث المتصلين: $e';
     } finally {
       if (mounted) setState(() => _isRefreshing = false);
     }
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> syncNow() async {
@@ -315,6 +331,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
   @override
   void dispose() {
+    AppStore.subscribersChange.removeListener(_onSubscribersChanged);
     _verticalScrollController.dispose();
     super.dispose();
   }
@@ -569,18 +586,43 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     final activationTemplate =
         AppStore.messageTemplates['activation'] ??
         'مرحباً {name}، تم تفعيل اشتراكك لدى {office}. الباقة: {package} وتنتهي بتاريخ {endDate}.';
-    final result = await WhatsAppNotificationDispatcher()
-        .notifySubscriptionActivated(
-      s,
-      template: activationTemplate,
-      paidAmount: paidAmount,
-      eventId: 'activation_${s.subscriberId}_${s.startDate.millisecondsSinceEpoch}_${s.endDate.millisecondsSinceEpoch}_${(paidAmount ?? 0).round()}',
-    );
-    if (!result.success) {
-      debugPrint(
-        'Activation WhatsApp failed for ${s.name}: ${result.error ?? 'unknown'}',
-      );
+    try {
+      final result = await WhatsAppNotificationDispatcher()
+          .notifySubscriptionActivated(
+            s,
+            template: activationTemplate,
+            paidAmount: paidAmount,
+            eventId:
+                'activation_${s.subscriberId}_${s.startDate.millisecondsSinceEpoch}_${s.endDate.millisecondsSinceEpoch}_${(paidAmount ?? 0).round()}',
+          );
+      if (!result.success) {
+        debugPrint(
+          'Activation WhatsApp failed for ${s.name}: ${result.error ?? 'unknown'}',
+        );
+      }
+    } catch (error) {
+      debugPrint('Activation WhatsApp failed for ${s.name}: $error');
     }
+  }
+
+  /// المشترك يتصل بعد التفعيل بلحظات، فيظهر IP الخاص به دون مزامنة كاملة.
+  void _refreshAfterActivation(SasApiService api, Subscriber s, int userId) {
+    Future<void> refresh() async {
+      for (final wait in const [20, 60]) {
+        await Future<void>.delayed(Duration(seconds: wait));
+        if (!AppStore.subscribers.any((item) => identical(item, s))) return;
+        try {
+          SasSyncService.applyUserSnapshot(s, await api.fetchUser(userId));
+          await SasSyncService.refreshConnection(api, s);
+          await AppStore.save();
+        } catch (error) {
+          debugPrint('Refresh after activation failed: $error');
+        }
+        if (s.ip.isNotEmpty && s.isOnline) return;
+      }
+    }
+
+    RenderWhatsAppService.dispatchInBackground(refresh());
   }
 
   Future<void> phoneCall(Subscriber s) async {
@@ -810,11 +852,26 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
   }
 
+  /// ضغطتان متتاليتان تعنيان خصمين من رصيد SAS.
   Future<void> _activateSubscriber(
     Subscriber s, {
     BuildContext? modalContext,
   }) async {
+    if (operationBusy) return;
+    operationBusy = true;
+    try {
+      await _runActivation(s, modalContext: modalContext);
+    } finally {
+      operationBusy = false;
+    }
+  }
+
+  Future<void> _runActivation(
+    Subscriber s, {
+    BuildContext? modalContext,
+  }) async {
     bool loadingDialogShown = false;
+    bool sasActivated = false;
     // استخراج معرف SAS بشكل آمن
     final sasId = s.sasId.trim();
     final dataId = (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
@@ -881,9 +938,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             notifyMessage: activationMessage,
           )
           .timeout(
-            const Duration(seconds: 30),
+            const Duration(seconds: 60),
             onTimeout: () => throw Exception('انتهت مهلة طلب التفعيل'),
           );
+      sasActivated = true;
 
       // جلب بيانات المشترك المحدثة من SAS
       dynamic userData;
@@ -907,16 +965,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           DateTime.now();
       final recordedAt = DateTime.now();
       _setStartDateAsActivationDay(s, at: activatedAt);
-
-      // استخراج تاريخ الانتهاء من userData إذا توفر
-      if (userData is Map) {
-        final extractedEndDate = _extractEndDateFromSas(
-          Map<String, dynamic>.from(userData),
-        );
-        if (extractedEndDate != null) {
-          s.endDate = extractedEndDate;
-        }
-      }
+      SasSyncService.applyUserSnapshot(s, userData);
 
       final sale = await _recordActivationSale(
         s,
@@ -925,19 +974,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         at: recordedAt,
         note: 'تفعيل من قائمة المشتركين',
       );
-
-      // تحديث بيانات SAS إذا تم جلبها
-      if (userData is Map) {
-        s.sasData.addAll(Map<String, dynamic>.from(userData));
-
-        // تحديث الحالة
-        final isActive = userData['is_active'] ?? userData['active'] ?? true;
-        final isDisabled =
-            userData['disabled'] ?? userData['is_disabled'] ?? false;
-
-        s.active = isActive == true || isActive == 1;
-        s.disabled = isDisabled == true || isDisabled == 1;
-      }
 
       // حفظ البيانات المحلية أولاً
       await AppStore.save();
@@ -954,8 +990,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           loadingDialogShown = false;
         }
 
-        await _sendActivationWhatsApp(s, paidAmount: sale.collected);
-        if (!mounted) return;
+        RenderWhatsAppService.dispatchInBackground(
+          _sendActivationWhatsApp(s, paidAmount: sale.collected),
+        );
+        _refreshAfterActivation(api, s, userId);
 
         setState(() {
           selected = null;
@@ -983,7 +1021,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         final errorStr = e.toString();
         String msg;
 
-        if (errorStr.contains('نقاط المكافآت غير كافية')) {
+        if (sasActivated) {
+          msg =
+              '⚠️ تم التفعيل في SAS لكن تعذر إكمال تسجيله. لا تعد التفعيل، وراجع مبالغ المشترك';
+        } else if (errorStr.contains('نقاط المكافآت غير كافية')) {
           msg = '❌ نقاط المكافآت غير كافية - اطلب من المشترك تجميع نقاط إضافية';
         } else if (errorStr.contains('لا يوجد رصيد متاح')) {
           msg =
@@ -1011,7 +1052,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         } else if (errorStr.contains('404')) {
           msg = '❌ خطأ 404: المشترك غير موجود في SAS (userId=$userId)';
         } else if (errorStr.contains('مهلة')) {
-          msg = '❌ انتهت المهلة الزمنية للتفعيل. تحقق من الاتصال بـ SAS';
+          msg =
+              '⚠️ انتهت المهلة وقد يكون التفعيل تم. اعمل مزامنة وتأكد من تاريخ الانتهاء قبل الإعادة';
         } else if (errorStr.contains('رفض SAS')) {
           msg = '❌ رفضت SAS عملية التفعيل. جرب لاحقاً';
         } else {
@@ -1038,6 +1080,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   void operations() {
     final s = selected;
     if (s == null) return;
+    // هذه العمليات تخاطب SAS فقط، ومعرف FTTH قد يطابق مشتركاً آخر فيه.
+    final isSas = s.source != 'ftth';
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1108,186 +1152,190 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     _activateSubscriber(s, modalContext: ctx);
                   }
                 }),
-                _op(Icons.calendar_month, Colors.orange, 'تمديد', () {
-                  Navigator.pop(ctx);
-                  _extend(s);
-                }),
-                _op(Icons.swap_horiz, Colors.purple, 'تغيير الباقة', () {
-                  Navigator.pop(ctx);
-                  _changePackage(s);
-                }),
-                _op(Icons.block, Colors.red, 'تعطيل', () async {
-                  // لا نغيّر الحالة محلياً إلا بعد نجاح التعطيل الحقيقي في SAS.
-                  final rawId = s.sasId.trim().isNotEmpty
-                      ? s.sasId.trim()
-                      : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
-                            .toString()
-                            .trim();
-                  final userId = int.tryParse(rawId);
+                if (isSas)
+                  _op(Icons.calendar_month, Colors.orange, 'تمديد', () {
+                    Navigator.pop(ctx);
+                    _extend(s);
+                  }),
+                if (isSas)
+                  _op(Icons.swap_horiz, Colors.purple, 'تغيير الباقة', () {
+                    Navigator.pop(ctx);
+                    _changePackage(s);
+                  }),
+                if (isSas)
+                  _op(Icons.block, Colors.red, 'تعطيل', () async {
+                    // لا نغيّر الحالة محلياً إلا بعد نجاح التعطيل الحقيقي في SAS.
+                    final rawId = s.sasId.trim().isNotEmpty
+                        ? s.sasId.trim()
+                        : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
+                              .toString()
+                              .trim();
+                    final userId = int.tryParse(rawId);
 
-                  if (userId == null || userId == 0) {
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'تعذر التعطيل: معرف SAS غير صحيح (rawId=$rawId)',
+                    if (userId == null || userId == 0) {
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'تعذر التعطيل: معرف SAS غير صحيح (rawId=$rawId)',
+                            ),
                           ),
-                        ),
-                      );
-                    }
-                    return;
-                  }
-
-                  try {
-                    final settings = await SasSettings.load();
-                    if (settings.username.trim().isEmpty ||
-                        settings.password.isEmpty) {
-                      throw Exception('أكمل إعدادات ربط SAS أولاً');
-                    }
-
-                    final api = SasApiService(settings);
-                    await api
-                        .disableUser(userId)
-                        .timeout(
-                          const Duration(seconds: 30),
-                          onTimeout: () =>
-                              throw Exception('انتهت مهلة طلب التعطيل'),
                         );
-
-                    s.disabled = true;
-                    s.active = false;
-                    await AppStore.save();
-                    await _recordSubscriberActivity(
-                      s,
-                      DailyTaskEvent.subscriberDisabledType,
-                      'تم تعطيل المشترك في SAS',
-                    );
-
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    if (mounted) {
-                      setState(() {});
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('✅ تم تعطيل المشترك في SAS بنجاح'),
-                        ),
-                      );
+                      }
+                      return;
                     }
-                  } catch (e) {
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    if (mounted) {
-                      final errorStr = e.toString();
-                      String msg;
 
-                      if (errorStr.contains('403')) {
-                        msg =
-                            '❌ خطأ 403: تحقق من صلاحيات المستخدم أو معرف SAS (userId=$userId)';
-                      } else if (errorStr.contains('401')) {
-                        msg =
-                            '❌ خطأ 401: فشل التحقق من البيانات. تحقق من بيانات الربط';
-                      } else if (errorStr.contains('404')) {
-                        msg =
-                            '❌ خطأ 404: المشترك غير موجود في SAS (userId=$userId)';
-                      } else {
-                        msg = '❌ فشل تعطيل المشترك في SAS: $errorStr';
+                    try {
+                      final settings = await SasSettings.load();
+                      if (settings.username.trim().isEmpty ||
+                          settings.password.isEmpty) {
+                        throw Exception('أكمل إعدادات ربط SAS أولاً');
                       }
 
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(msg),
-                          duration: const Duration(seconds: 5),
-                        ),
-                      );
-                    }
-                  }
-                }),
-                _op(Icons.lock_open, Colors.green, 'إلغاء التعطيل', () async {
-                  // لا نغيّر الحالة محلياً إلا بعد نجاح إلغاء التعطيل الحقيقي في SAS.
-                  final rawId = s.sasId.trim().isNotEmpty
-                      ? s.sasId.trim()
-                      : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
-                            .toString()
-                            .trim();
-                  final userId = int.tryParse(rawId);
+                      final api = SasApiService(settings);
+                      await api
+                          .disableUser(userId)
+                          .timeout(
+                            const Duration(seconds: 30),
+                            onTimeout: () =>
+                                throw Exception('انتهت مهلة طلب التعطيل'),
+                          );
 
-                  if (userId == null || userId == 0) {
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'تعذر إلغاء التعطيل: معرف SAS غير صحيح (rawId=$rawId)',
+                      s.disabled = true;
+                      s.active = false;
+                      await AppStore.save();
+                      await _recordSubscriberActivity(
+                        s,
+                        DailyTaskEvent.subscriberDisabledType,
+                        'تم تعطيل المشترك في SAS',
+                      );
+
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        setState(() {});
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('✅ تم تعطيل المشترك في SAS بنجاح'),
                           ),
-                        ),
-                      );
-                    }
-                    return;
-                  }
-
-                  try {
-                    final settings = await SasSettings.load();
-                    if (settings.username.trim().isEmpty ||
-                        settings.password.isEmpty) {
-                      throw Exception('أكمل إعدادات ربط SAS أولاً');
-                    }
-
-                    final api = SasApiService(settings);
-                    await api
-                        .enableUser(userId)
-                        .timeout(
-                          const Duration(seconds: 30),
-                          onTimeout: () =>
-                              throw Exception('انتهت مهلة طلب إلغاء التعطيل'),
                         );
+                      }
+                    } catch (e) {
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        final errorStr = e.toString();
+                        String msg;
 
-                    s.disabled = false;
-                    s.active = true;
-                    await AppStore.save();
-                    await _recordSubscriberActivity(
-                      s,
-                      DailyTaskEvent.subscriberEnabledType,
-                      'تم إلغاء تعطيل المشترك في SAS',
-                    );
+                        if (errorStr.contains('403')) {
+                          msg =
+                              '❌ خطأ 403: تحقق من صلاحيات المستخدم أو معرف SAS (userId=$userId)';
+                        } else if (errorStr.contains('401')) {
+                          msg =
+                              '❌ خطأ 401: فشل التحقق من البيانات. تحقق من بيانات الربط';
+                        } else if (errorStr.contains('404')) {
+                          msg =
+                              '❌ خطأ 404: المشترك غير موجود في SAS (userId=$userId)';
+                        } else {
+                          msg = '❌ فشل تعطيل المشترك في SAS: $errorStr';
+                        }
 
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    if (mounted) {
-                      setState(() {});
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            '✅ تم إلغاء تعطيل المشترك في SAS بنجاح',
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(msg),
+                            duration: const Duration(seconds: 5),
                           ),
-                        ),
-                      );
+                        );
+                      }
                     }
-                  } catch (e) {
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    if (mounted) {
-                      final errorStr = e.toString();
-                      String msg;
+                  }),
+                if (isSas)
+                  _op(Icons.lock_open, Colors.green, 'إلغاء التعطيل', () async {
+                    // لا نغيّر الحالة محلياً إلا بعد نجاح إلغاء التعطيل الحقيقي في SAS.
+                    final rawId = s.sasId.trim().isNotEmpty
+                        ? s.sasId.trim()
+                        : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
+                              .toString()
+                              .trim();
+                    final userId = int.tryParse(rawId);
 
-                      if (errorStr.contains('403')) {
-                        msg =
-                            '❌ خطأ 403: تحقق من صلاحيات المستخدم أو معرف SAS (userId=$userId)';
-                      } else if (errorStr.contains('401')) {
-                        msg =
-                            '❌ خطأ 401: فشل التحقق من البيانات. تحقق من بيانات الربط';
-                      } else if (errorStr.contains('404')) {
-                        msg =
-                            '❌ خطأ 404: المشترك غير موجود في SAS (userId=$userId)';
-                      } else {
-                        msg = '❌ فشل إلغاء التعطيل في SAS: $errorStr';
+                    if (userId == null || userId == 0) {
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'تعذر إلغاء التعطيل: معرف SAS غير صحيح (rawId=$rawId)',
+                            ),
+                          ),
+                        );
+                      }
+                      return;
+                    }
+
+                    try {
+                      final settings = await SasSettings.load();
+                      if (settings.username.trim().isEmpty ||
+                          settings.password.isEmpty) {
+                        throw Exception('أكمل إعدادات ربط SAS أولاً');
                       }
 
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(msg),
-                          duration: const Duration(seconds: 5),
-                        ),
+                      final api = SasApiService(settings);
+                      await api
+                          .enableUser(userId)
+                          .timeout(
+                            const Duration(seconds: 30),
+                            onTimeout: () =>
+                                throw Exception('انتهت مهلة طلب إلغاء التعطيل'),
+                          );
+
+                      s.disabled = false;
+                      s.active = true;
+                      await AppStore.save();
+                      await _recordSubscriberActivity(
+                        s,
+                        DailyTaskEvent.subscriberEnabledType,
+                        'تم إلغاء تعطيل المشترك في SAS',
                       );
+
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        setState(() {});
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              '✅ تم إلغاء تعطيل المشترك في SAS بنجاح',
+                            ),
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        final errorStr = e.toString();
+                        String msg;
+
+                        if (errorStr.contains('403')) {
+                          msg =
+                              '❌ خطأ 403: تحقق من صلاحيات المستخدم أو معرف SAS (userId=$userId)';
+                        } else if (errorStr.contains('401')) {
+                          msg =
+                              '❌ خطأ 401: فشل التحقق من البيانات. تحقق من بيانات الربط';
+                        } else if (errorStr.contains('404')) {
+                          msg =
+                              '❌ خطأ 404: المشترك غير موجود في SAS (userId=$userId)';
+                        } else {
+                          msg = '❌ فشل إلغاء التعطيل في SAS: $errorStr';
+                        }
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(msg),
+                            duration: const Duration(seconds: 5),
+                          ),
+                        );
+                      }
                     }
-                  }
-                }),
+                  }),
                 _op(
                   Icons.account_balance_wallet,
                   Colors.brown,
@@ -1432,6 +1480,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     bool loading = true;
     String? loadError;
     bool requested = false;
+    bool submitting = false;
 
     showDialog(
       context: context,
@@ -1564,13 +1613,14 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(ctx),
+                  onPressed: submitting ? null : () => Navigator.pop(ctx),
                   child: const Text('إلغاء'),
                 ),
                 FilledButton(
-                  onPressed: loading || selectedProfileId == null
+                  onPressed: loading || submitting || selectedProfileId == null
                       ? null
                       : () async {
+                          setLocal(() => submitting = true);
                           final rawUserId = s.sasId.trim().isNotEmpty
                               ? s.sasId.trim()
                               : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
@@ -1617,20 +1667,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                             // v091: لا ننتظر مزامنة جميع المشتركين بعد التمديد.
                             // نجلب المشترك نفسه فقط، ثم نحدّث الواجهة فوراً.
                             try {
-                              final fresh = await api.fetchUser(userId);
-                              if (fresh is Map) {
-                                s.sasData = Map<String, dynamic>.from(fresh);
-                                final endRaw =
-                                    fresh['expiration'] ??
-                                    fresh['expiration_date'] ??
-                                    fresh['expires_at'] ??
-                                    fresh['end_date'];
-                                final parsedEnd = DateTime.tryParse(
-                                  (endRaw ?? '').toString(),
-                                );
-                                if (parsedEnd != null) s.endDate = parsedEnd;
-                                await AppStore.save();
-                              }
+                              SasSyncService.applyUserSnapshot(
+                                s,
+                                await api.fetchUser(userId),
+                              );
+                              await AppStore.save();
                             } catch (_) {
                               // نجاح التمديد لا يُلغى إذا تعذر تحديث التفاصيل اللحظي.
                             }
@@ -1865,15 +1906,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             debugPrint('Could not fetch user data: $e');
           }
 
-          // استخراج تاريخ الانتهاء من userData إذا توفر
-          if (userData is Map) {
-            final extractedEndDate = _extractEndDateFromSas(
-              Map<String, dynamic>.from(userData),
-            );
-            if (extractedEndDate != null) {
-              s.endDate = extractedEndDate;
-            }
-          }
+          SasSyncService.applyUserSnapshot(s, userData);
 
           final activationAmount = _activationReceivedAmount(
             activationResponse,
@@ -1893,7 +1926,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             at: recordedAt,
           );
           if (mounted) Navigator.pop(context);
-          await _sendActivationWhatsApp(s, paidAmount: sale.collected);
+          RenderWhatsAppService.dispatchInBackground(
+            _sendActivationWhatsApp(s, paidAmount: sale.collected),
+          );
+          _refreshAfterActivation(api, s, userId);
           if (!mounted) return;
           if (mounted) {
             setState(() {});
@@ -2638,8 +2674,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         .length;
     final expiringSoonCount = data.where((s) {
       if (s.disabled || s.expired) return false;
-      final days = s.endDate.difference(DateTime.now()).inDays;
-      return days == 3;
+      return s.endDate.difference(DateTime.now()).inDays <= 3;
     }).length;
     final debtCount = data.where((s) => s.remaining > 0).length;
     final dataSource = _SubscribersDataSource(
@@ -2847,7 +2882,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           ),
           actions: [
             IconButton(
-              tooltip: 'تحديث',
+              tooltip: 'تحديث المتصلين وIP',
               onPressed: syncing || _isRefreshing ? null : _refreshSubscribers,
               icon: syncing || _isRefreshing
                   ? const SizedBox(
@@ -3635,13 +3670,20 @@ class _SubscribersDataSource extends DataTableSource {
                       );
                     } catch (_) {}
                   },
-                  child: Text(
-                    s.ip.isEmpty ? '—' : s.ip,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: Colors.blue.shade700,
+                  child: Tooltip(
+                    message: s.isOnline ? 'متصل الآن' : 'آخر IP معروف',
+                    child: Text(
+                      s.ip.isEmpty ? '—' : s.ip,
+                      style: TextStyle(
+                        fontWeight: s.isOnline
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                        color: s.isOnline
+                            ? Colors.blue.shade700
+                            : Colors.grey.shade500,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               )

@@ -181,6 +181,11 @@ class _SubscriptionRequestsAdminScreenState
                           itemBuilder: (context, index) {
                             final request = filtered[index];
                             final status = request.status;
+                            final canReview =
+                                SubscriptionRequestService.isOpenForReview({
+                                  'status': status,
+                                  'reviewedAt': request.reviewedAt,
+                                });
                             final planLabel =
                                 SubscriptionRequestService.planLabelFor(
                                   request.selectedPlan,
@@ -303,7 +308,7 @@ class _SubscriptionRequestsAdminScreenState
                                         Expanded(
                                           child: ElevatedButton.icon(
                                             onPressed:
-                                                status == 'pending' &&
+                                                canReview &&
                                                     request.uid.isNotEmpty
                                                 ? () => _approve(request)
                                                 : null,
@@ -321,7 +326,7 @@ class _SubscriptionRequestsAdminScreenState
                                         const SizedBox(width: 8),
                                         Expanded(
                                           child: OutlinedButton.icon(
-                                            onPressed: status == 'pending'
+                                            onPressed: canReview
                                                 ? () => _reject(request)
                                                 : null,
                                             icon: const Icon(

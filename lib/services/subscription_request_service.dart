@@ -115,7 +115,12 @@ class SubscriptionRequestService {
   static const String pendingStatus = 'pending';
   static const String approvedStatus = 'approved';
   static const String rejectedStatus = 'rejected';
+  static const String reviewingStatus = 'reviewing';
   static const String trustedAdminUid = 'wE10WciDVudIOJziBurjhBxpDfO2';
+
+  /// مهلة حجز الطلب أثناء القبول؛ بعدها يُعد الحجز متروكاً، كأن أُغلق التطبيق
+  /// في منتصف القبول.
+  static const Duration reviewClaimTimeout = Duration(minutes: 2);
 
   static DatabaseReference get _root => FirebaseDatabase.instance.ref();
 
@@ -166,31 +171,39 @@ class SubscriptionRequestService {
     }
   }
 
-  static String planPrice(String value) {
-    switch (value.trim()) {
-      case 'trial':
-      case 'free_15_days':
-        return 'مجاني';
-      case '3m':
-      case 'three_months':
-        return '40000';
-      case '6m':
-      case 'six_months':
-        return '50000';
-      case '1y':
-      case 'one_year':
-        return '70000';
-      default:
-        return 'مجاني';
-    }
-  }
-
   static String planLabelFor(String? value) => planLabel(value ?? 'trial');
 
   static bool isTrialPlan(String plan) =>
       plan == 'trial' || plan == 'free_15_days';
 
   static DateTime startDateForPlan({DateTime? now}) => now ?? DateTime.now();
+
+  /// الطلب المعلق، أو طلب تُرك محجوزاً بعد انقطاع القبول.
+  static bool isOpenForReview(Map<String, dynamic> request, {DateTime? now}) {
+    final status = request['status'];
+    if (status == pendingStatus) return true;
+    if (status != reviewingStatus) return false;
+    final claimedAt = _parseDateTime(request['reviewedAt']);
+    return claimedAt == null ||
+        (now ?? DateTime.now()).difference(claimedAt) >= reviewClaimTimeout;
+  }
+
+  static bool isMissingReceipt(Map<String, dynamic> request) {
+    final plan = (request['selectedPlan'] ?? '').toString().trim();
+    if (plan.isEmpty || isTrialPlan(plan)) return false;
+    final receipt = request['receiptImageUrl'] ?? request['receiptImage'];
+    return (receipt ?? '').toString().trim().isEmpty;
+  }
+
+  /// يُضاف الاشتراك بعد المدة المتبقية حتى لا تضيع بقبول طلب جديد.
+  static DateTime subscriptionStartDate({
+    required Object? existing,
+    required DateTime now,
+  }) {
+    if (existing is! Map || existing['status'] != 'active') return now;
+    final end = _parseDateTime(existing['endDate'])?.toUtc();
+    return end != null && end.isAfter(now) ? end : now;
+  }
 
   static DateTime _addCalendarMonths(DateTime date, int months) {
     final monthIndex = date.year * 12 + date.month - 1 + months;
@@ -364,6 +377,84 @@ class SubscriptionRequestService {
     return requestId;
   }
 
+  /// تفعيل ذاتي مرة واحدة لكل حساب. القواعد تمنعه لمن له صلاحية وكيل، وتفرض 15
+  /// يوماً؛ لذلك يُحفظ التاريخان رقمين لأن القواعد لا تستطيع فحص النص.
+  static Future<void> activateFreeTrial({
+    required String agentName,
+    required String phone,
+    required String amount,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.email == null) {
+      throw StateError('سجّل الدخول قبل تفعيل الباقة المجانية');
+    }
+    final uid = user.uid;
+    final role = await _root.child('agents/$uid/profile/role').get();
+    if (role.exists) {
+      throw StateError('هذا الحساب مسجل مسبقاً ولا تتوفر له الباقة المجانية');
+    }
+    final requestId = _root.child(_adminCollectionPath).push().key;
+    if (requestId == null) {
+      throw StateError('Could not allocate a subscription request ID.');
+    }
+    final names = agentName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
+    final firstName = names.isEmpty ? '' : names.first;
+    final lastName = names.skip(1).join(' ');
+    final now = DateTime.now();
+    final startDate = now.millisecondsSinceEpoch;
+    final request = SubscriptionRequestModel(
+      requestId: requestId,
+      uid: uid,
+      firstName: firstName,
+      lastName: lastName,
+      phone: phone,
+      email: user.email!,
+      selectedPlan: 'free_15_days',
+      amount: amount,
+      paymentMethod: 'free',
+      status: approvedStatus,
+      source: 'trial',
+      createdAt: now,
+    );
+    final profilePath = 'agents/$uid/profile';
+    try {
+      await _root.update({
+        '$_adminCollectionPath/$requestId': {
+          ...request.toMap(),
+          'agentName': names.join(' '),
+        },
+        '$profilePath/email': user.email,
+        '$profilePath/name': names.join(' '),
+        '$profilePath/firstName': firstName,
+        '$profilePath/lastName': lastName,
+        '$profilePath/phone': phone,
+        '$profilePath/role': 'agent',
+        '$profilePath/status': 'active',
+        '$profilePath/approvedAt': startDate,
+        '$profilePath/approvalRequestId': requestId,
+        'agents/$uid/subscription': {
+          'plan': 'free_15_days',
+          'status': 'active',
+          'durationDays': 15,
+          'startDate': startDate,
+          'endDate': startDate + const Duration(days: 15).inMilliseconds,
+          'autoExpire': true,
+          'lastPaymentId': requestId,
+          'updatedAt': now.toUtc().toIso8601String(),
+        },
+      });
+    } on FirebaseException catch (error) {
+      if (error.code != 'permission-denied') rethrow;
+      throw StateError(
+        'تعذر تفعيل الباقة المجانية. تأكد من صحة تاريخ ووقت جهازك',
+      );
+    }
+  }
+
   static Future<String?> uploadReceiptImage({
     required String requestId,
     required XFile file,
@@ -390,8 +481,9 @@ class SubscriptionRequestService {
         .runTransaction((value) {
           if (value is! Map) return Transaction.abort();
           final current = Map<String, dynamic>.from(value);
-          if (current['status'] != pendingStatus) return Transaction.abort();
+          if (!isOpenForReview(current)) return Transaction.abort();
           current
+            ..remove('reviewDecision')
             ..['status'] = rejectedStatus
             ..['rejectionReason'] = reason ?? ''
             ..['reviewerUid'] = trustedAdminUid
@@ -423,7 +515,9 @@ class SubscriptionRequestService {
     final result = await ref.runTransaction((value) {
       if (value is! Map) return Transaction.abort();
       final current = Map<String, dynamic>.from(value);
-      if (current['status'] == 'reviewing') return Transaction.abort();
+      if (current['status'] == reviewingStatus && !isOpenForReview(current)) {
+        return Transaction.abort();
+      }
       return Transaction.success(null);
     }, applyLocally: false);
     if (!result.committed) {
@@ -482,48 +576,61 @@ class SubscriptionRequestService {
       collectionPath: request.collectionPath,
     );
     final reviewedAtDate = DateTime.now().toUtc();
+    var missingReceipt = false;
     final claimResult = await reqRef.runTransaction((value) {
       if (value is! Map) return Transaction.abort();
       final current = Map<String, dynamic>.from(value);
-      if (current['status'] != pendingStatus ||
+      if (!isOpenForReview(current) ||
           (current['uid'] ?? '').toString().trim().isEmpty) {
         return Transaction.abort();
       }
+      missingReceipt = isMissingReceipt(current);
+      if (missingReceipt) return Transaction.abort();
       current
-        ..['status'] = 'reviewing'
+        ..['status'] = reviewingStatus
         ..['reviewDecision'] = approvedStatus
         ..['reviewerUid'] = trustedAdminUid
         ..['reviewedAt'] = reviewedAtDate.toIso8601String();
       return Transaction.success(current);
     }, applyLocally: false);
+    if (missingReceipt) {
+      throw StateError('لا يمكن قبول طلب مدفوع بلا وصل. ارفضه ليعيد الوكيل إرساله');
+    }
     if (!claimResult.committed || claimResult.snapshot.value is! Map) {
       throw StateError('Only pending subscription requests can be approved.');
     }
     final current = Map<String, dynamic>.from(
       claimResult.snapshot.value as Map,
     );
+    try {
+      return await _completeApproval(
+        request: request,
+        reqRef: reqRef,
+        current: current,
+        reviewedAtDate: reviewedAtDate,
+      );
+    } catch (_) {
+      await _releaseReviewClaim(reqRef);
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> _completeApproval({
+    required SubscriptionRequestModel request,
+    required DatabaseReference reqRef,
+    required Map<String, dynamic> current,
+    required DateTime reviewedAtDate,
+  }) async {
+    final requestId = request.requestId.trim();
     final uid = (current['uid'] ?? '').toString().trim();
-    if (uid.isEmpty) {
-      throw StateError('The request has no linked Firebase Auth UID.');
-    }
     final plan = current['selectedPlan']?.toString() ?? request.selectedPlan;
-    var startDate = reviewedAtDate;
-    if (current['isRenewal'] == true) {
-      final subscriptionSnapshot = await _root
-          .child('agents/$uid/subscription')
-          .get();
-      if (subscriptionSnapshot.value is Map) {
-        final existing = Map<String, dynamic>.from(
-          subscriptionSnapshot.value as Map,
-        );
-        final existingEnd = _parseDateTime(existing['endDate'])?.toUtc();
-        if (existing['status'] == 'active' &&
-            existingEnd != null &&
-            existingEnd.isAfter(startDate)) {
-          startDate = existingEnd;
-        }
-      }
-    }
+    final subscriptionSnapshot = await _root
+        .child('agents/$uid/subscription')
+        .get();
+    final startDate = subscriptionStartDate(
+      existing: subscriptionSnapshot.value,
+      now: reviewedAtDate,
+    );
     final endDate = endDateForPlan(plan, from: startDate);
     final reviewedAt = reviewedAtDate.toIso8601String();
     final profilePath = 'agents/$uid/profile';
@@ -566,5 +673,17 @@ class SubscriptionRequestService {
       'startDate': startDate.toIso8601String(),
       'endDate': endDate.toIso8601String(),
     };
+  }
+
+  /// إن فشل هذا أيضاً تنتهي مهلة الحجز ويعود الطلب قابلاً للمراجعة.
+  static Future<void> _releaseReviewClaim(DatabaseReference reqRef) async {
+    try {
+      await reqRef.update({
+        'status': pendingStatus,
+        'reviewDecision': null,
+        'reviewerUid': null,
+        'reviewedAt': null,
+      });
+    } catch (_) {}
   }
 }
