@@ -1693,29 +1693,7 @@ class AppStore {
           agentData['subscription'],
         );
         _applySubscriptionMap(subscription);
-        await p.setString('subscriptionPlan', subscriptionPlan);
-        await p.setString('subscriptionPlanLabel', subscriptionPlanLabel);
-        await p.setInt('subscriptionDurationDays', subscriptionDurationDays);
-        await p.setString('subscriptionPrice', subscriptionPrice);
-        await p.setString('paymentMethod', paymentMethod);
-        await p.setBool('subscriptionAutoExpire', subscriptionAutoExpire);
-        await p.setString(
-          'subscriptionLastPaymentId',
-          subscriptionLastPaymentId,
-        );
-        await p.setString('subscriptionStatus', subscriptionStatus);
-        if (subscriptionStartedAt != null) {
-          await p.setString(
-            'subscriptionStartedAt',
-            subscriptionStartedAt!.toIso8601String(),
-          );
-        }
-        if (subscriptionEndsAt != null) {
-          await p.setString(
-            'subscriptionEndsAt',
-            subscriptionEndsAt!.toIso8601String(),
-          );
-        }
+        await _saveSubscriptionLocally(p);
       } else {
         final legacyPlan = p.getString('subscriptionPlan') ?? '';
         final legacyStarted = p.getString('subscriptionStartedAt') ?? '';
@@ -2273,6 +2251,32 @@ class AppStore {
     }
   }
 
+  static Future<void> _saveSubscriptionLocally(SharedPreferences p) async {
+    await p.setString('subscriptionPlan', subscriptionPlan);
+    await p.setString('subscriptionPlanLabel', subscriptionPlanLabel);
+    await p.setInt('subscriptionDurationDays', subscriptionDurationDays);
+    await p.setString('subscriptionPrice', subscriptionPrice);
+    await p.setString('paymentMethod', paymentMethod);
+    await p.setBool('subscriptionAutoExpire', subscriptionAutoExpire);
+    await p.setString(
+      'subscriptionLastPaymentId',
+      subscriptionLastPaymentId,
+    );
+    await p.setString('subscriptionStatus', subscriptionStatus);
+    if (subscriptionStartedAt != null) {
+      await p.setString(
+        'subscriptionStartedAt',
+        subscriptionStartedAt!.toIso8601String(),
+      );
+    }
+    if (subscriptionEndsAt != null) {
+      await p.setString(
+        'subscriptionEndsAt',
+        subscriptionEndsAt!.toIso8601String(),
+      );
+    }
+  }
+
   static void _applySubscriptionMap(Map<String, dynamic> source) {
     final planValue = (source['plan'] ?? '').toString().trim();
     if (planValue.isNotEmpty) subscriptionPlan = planValue;
@@ -2317,6 +2321,23 @@ class AppStore {
     subscriptionStatus = reference.isBefore(subscriptionEndsAt!)
         ? 'active'
         : 'expired';
+  }
+
+  /// لا يُعد غير النشط ممنوعاً قبل قراءة الاشتراك من الخادم، حتى لا يخرج الوكيل
+  /// بسبب انقطاع الإنترنت.
+  static bool get isSubscriptionBlocked =>
+      subscriptionStatus == 'expired' ||
+      (subscriptionStatus != 'active' && _remoteLoadConfirmed);
+
+  /// تنبيه الوكيل قبل انتهاء اشتراكه بسبعة أيام.
+  static String? renewalNotice(DateTime now) {
+    final end = subscriptionEndsAt;
+    if (end == null || !end.isAfter(now)) return null;
+    final days = (end.difference(now).inHours / 24).ceil();
+    if (days > 7) return null;
+    return days <= 1
+        ? 'ينتهي اشتراكك خلال يوم واحد'
+        : 'ينتهي اشتراكك خلال $days أيام';
   }
 
   static List<Map<String, dynamic>> _packagesListPayload() =>
@@ -3040,6 +3061,13 @@ class AppStore {
                 if (chatListener == null) startChatSync();
               }
             }
+          }
+          // يصل تمديد المدير أو إنهاؤه للوكيل المتصل دون إعادة تسجيل الدخول.
+          if (agentData['subscription'] is Map) {
+            _applySubscriptionMap(
+              Map<String, dynamic>.from(agentData['subscription']),
+            );
+            await _saveSubscriptionLocally(p);
           }
           if (remoteRevision > localRevisionBeforeEvent ||
               allowRemoteBootstrap) {

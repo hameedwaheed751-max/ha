@@ -453,6 +453,99 @@ void main() {
     },
   );
 
+  group('message text', () {
+    Future<String?> sentText({
+      String? saved,
+      String? template,
+      bool composedText = false,
+    }) async {
+      final preferences = _InMemoryWhatsAppNotificationPreferences();
+      if (saved != null) {
+        await preferences.save(
+          'debt_reminder',
+          WhatsAppNotificationEventPreference(message: saved),
+        );
+      }
+      String? text;
+      await WhatsAppNotificationDispatcher(
+            preferences: preferences,
+            wahaSender:
+                ({
+                  required to,
+                  required text,
+                  required eventType,
+                  required idempotencyKey,
+                }) async {
+                  return WahaSendResult(success: true, messageId: text);
+                },
+          )
+          .notifyDebtReminder(
+            _subscriber(),
+            remainingBalance: 5000,
+            template: template,
+            composedText: composedText,
+            eventId: 'text-check',
+          )
+          .then((result) => text = result.messageId);
+      return text;
+    }
+
+    test('the saved event message is used automatically', () async {
+      expect(
+        await sentText(saved: 'محفوظة', template: 'تلقائية'),
+        contains('محفوظة'),
+      );
+    });
+
+    test('text reviewed before sending wins over the saved one', () async {
+      expect(
+        await sentText(saved: 'محفوظة', template: 'مكتوبة', composedText: true),
+        contains('مكتوبة'),
+      );
+    });
+
+    test('a blank template falls back to the default text', () async {
+      expect(await sentText(template: '   '), isNotEmpty);
+    });
+  });
+
+  group('send result', () {
+    test('an already sent message is skipped, not failed', () {
+      expect(
+        const WhatsAppDispatchResult(
+          success: false,
+          error: 'notification_already_sent_or_in_progress',
+        ).wasSkipped,
+        isTrue,
+      );
+      expect(
+        const WhatsAppDispatchResult(
+          success: false,
+          statusCode: 500,
+        ).wasSkipped,
+        isFalse,
+      );
+    });
+
+    test('technical errors are shown in Arabic', () {
+      expect(
+        const WhatsAppDispatchResult(
+          success: false,
+          error: 'WAHA gateway returned HTTP 502.',
+          statusCode: 502,
+        ).friendlyError,
+        isNot(contains('WAHA')),
+      );
+      expect(
+        const WhatsAppDispatchResult(
+          success: false,
+          statusCode: 429,
+        ).friendlyError,
+        contains('كثرة الرسائل'),
+      );
+    });
+  });
+
   test('all dispatcher entry points block disabled events', () async {
     final preferences = _InMemoryWhatsAppNotificationPreferences();
     await preferences.save(

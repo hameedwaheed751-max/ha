@@ -10,6 +10,7 @@ import 'package:file_picker/file_picker.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
+import '../services/app_notifications.dart';
 import '../services/auto_notification_service.dart';
 import '../services/render_whatsapp_service.dart';
 import '../services/subscriber_financial_ledger.dart';
@@ -17,17 +18,15 @@ import '../services/whatsapp_notification_dispatcher.dart';
 import 'subscribers_screen.dart';
 import 'settings_screen.dart';
 import 'whatsapp_linking_screen.dart';
-import 'alerts_screen.dart';
+import 'app_notifications_screen.dart';
 import 'subscriber_details_screen.dart';
 import 'packages_screen.dart';
-import 'message_templates_screen.dart';
 import 'sas_settings_screen.dart';
 import 'sas_project_national_screen.dart';
 import 'receipt_screen.dart';
 import 'quick_reports_screen.dart';
 import 'today_tasks_screen.dart';
 import 'activity_log_screen.dart';
-import 'payment_requests_admin_screen.dart';
 import 'plan_prices_admin_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'login_screen.dart';
@@ -58,6 +57,69 @@ class _DashboardScreenState extends State<DashboardScreen>
   Timer? _monthlyRolloverTimer;
   Timer? _expiryNotificationTimer;
   bool _handlingExpiredLockout = false;
+  DateTime? _notificationsSeenAt;
+  DateTime? _knownPlanEnd;
+
+  void _openRenewal() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RenewalRequestStatusScreen(
+          fromDashboard: true,
+          account: ExpiredAccountData(
+            uid: user.uid,
+            email: (user.email ?? AppStore.agentEmail).trim().toLowerCase(),
+            name: AppStore.agentName.trim(),
+            phone: AppStore.officePhone.trim(),
+            role: 'agent',
+            governorate: '',
+            region: '',
+            address: AppStore.officeAddress.trim(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _renewalBanner(String notice) => Card(
+    margin: const EdgeInsets.only(bottom: 12),
+    color: const Color(0xFFFFF3E0),
+    child: ListTile(
+      leading: const Icon(Icons.schedule_rounded, color: Color(0xFFEF6C00)),
+      title: Text(
+        notice,
+        style: const TextStyle(
+          color: Color(0xFF29323A),
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      trailing: FilledButton(
+        onPressed: _openRenewal,
+        child: const Text('تجديد'),
+      ),
+    ),
+  );
+
+  Future<void> _loadNotificationsSeenAt() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final seenAt = await AppNotifications.loadSeenAt(uid);
+    if (mounted) setState(() => _notificationsSeenAt = seenAt);
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AppNotificationsScreen()),
+    );
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final seenAt = DateTime.now();
+    await AppNotifications.markSeen(uid, seenAt);
+    if (mounted) setState(() => _notificationsSeenAt = seenAt);
+  }
 
   @override
   void initState() {
@@ -75,6 +137,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _loadSasWallet();
+      unawaited(_loadNotificationsSeenAt());
       unawaited(AutoNotificationService.runDailyExpiryAutomation());
       _handleSubscriptionGuardTick();
       _handleMonthlyRollover();
@@ -117,7 +180,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (!mounted || !widget.isAgentMode || _handlingExpiredLockout) return;
 
     AppStore.refreshSubscriptionStatus();
-    if (AppStore.subscriptionStatus != 'expired') return;
+    if (_knownPlanEnd != AppStore.subscriptionEndsAt) {
+      setState(() => _knownPlanEnd = AppStore.subscriptionEndsAt);
+    }
+    if (!AppStore.isSubscriptionBlocked) return;
 
     _handlingExpiredLockout = true;
     final user = FirebaseAuth.instance.currentUser;
@@ -1168,6 +1234,20 @@ class _DashboardScreenState extends State<DashboardScreen>
               ),
             ],
           ),
+          if (widget.isAgentMode) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _openRenewal();
+                },
+                icon: const Icon(Icons.autorenew_rounded, size: 18),
+                label: const Text('تجديد الاشتراك'),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1567,20 +1647,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 if (!widget.isAgentMode)
                   _drawerTile(
-                    icon: Icons.notifications_active_outlined,
-                    title: 'التنبيهات ورسائل واتساب',
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const MessageTemplatesScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                if (!widget.isAgentMode)
-                  _drawerTile(
                     icon: Icons.assignment_turned_in_outlined,
                     title: 'طلبات الاشتراك',
                     onTap: () {
@@ -1590,20 +1656,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                         MaterialPageRoute(
                           builder: (_) =>
                               const SubscriptionRequestsAdminScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                if (!widget.isAgentMode)
-                  _drawerTile(
-                    icon: Icons.payments_outlined,
-                    title: 'طلبات الدفع',
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const PaymentRequestsAdminScreen(),
                         ),
                       );
                     },
@@ -1785,18 +1837,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (mounted) setState(() {});
   }
 
-  int get _expiredToday {
-    final now = DateTime.now();
-    return AppStore.subscribers
-        .where(
-          (s) =>
-              s.endDate.year == now.year &&
-              s.endDate.month == now.month &&
-              s.endDate.day == now.day,
-        )
-        .length;
-  }
-
   int get _expiring3Days {
     final now = DateTime.now();
     return AppStore.subscribers.where((s) {
@@ -1891,7 +1931,12 @@ class _DashboardScreenState extends State<DashboardScreen>
     final expired = AppStore.subscribers.where((s) => s.expired).length;
     final debts = AppStore.subscribers.where((s) => s.remaining > 0).length;
     final daySummary = AppStore.summaryOfDay(_dashboardDate);
-    final alertsCount = _expiredToday + _expiring3Days;
+    final renewalNotice = AppStore.renewalNotice(DateTime.now());
+    final alertsCount = AppNotifications.unreadCount(
+      AppNotifications.current(),
+      seenAt: _notificationsSeenAt,
+      now: DateTime.now(),
+    );
     final latestSubscribers = List<Subscriber>.from(AppStore.subscribers)
       ..sort((a, b) => b.startDate.compareTo(a.startDate));
 
@@ -1978,13 +2023,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               children: [
                 IconButton(
                   tooltip: 'الإشعارات',
-                  onPressed: () async {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const AlertsScreen()),
-                    );
-                    if (mounted) setState(() {});
-                  },
+                  onPressed: _openNotifications,
                   icon: const Icon(Icons.notifications_none_rounded),
                 ),
                 if (alertsCount > 0)
@@ -2125,6 +2164,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        if (widget.isAgentMode && renewalNotice != null)
+                          _renewalBanner(renewalNotice),
                         _todayReportCard(daySummary),
                         const SizedBox(height: 12),
                         _dashboardStats(
@@ -3784,7 +3825,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
     if (!result.success) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('فشل إرسال واتساب: ${result.error ?? 'خطأ غير معروف'}'),
+          content: Text('فشل إرسال واتساب: ${result.friendlyError}'),
         ),
       );
       return;

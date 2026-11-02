@@ -743,6 +743,24 @@ class RenderWhatsAppService {
     );
   }
 
+  static Future<void> logCampaign({
+    required String title,
+    required int total,
+    required int sent,
+    required int failed,
+    String note = '',
+  }) => _appendLog(
+    WhatsAppSendLog(
+      at: DateTime.now(),
+      eventType: title,
+      total: total,
+      sent: sent,
+      failed: failed,
+      ok: failed == 0,
+      note: note,
+    ),
+  );
+
   static Future<void> clearLogs() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(logsKey);

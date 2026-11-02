@@ -188,11 +188,11 @@ class SubscriptionRequestService {
         (now ?? DateTime.now()).difference(claimedAt) >= reviewClaimTimeout;
   }
 
-  static bool isMissingReceipt(Map<String, dynamic> request) {
-    final plan = (request['selectedPlan'] ?? '').toString().trim();
-    if (plan.isEmpty || isTrialPlan(plan)) return false;
-    final receipt = request['receiptImageUrl'] ?? request['receiptImage'];
-    return (receipt ?? '').toString().trim().isEmpty;
+  /// الطلب المقبول هو سجل الدفع، فلا يُحذف.
+  static bool canDelete(Map<String, dynamic> request) {
+    final status = request['status'];
+    if (status == approvedStatus) return false;
+    return status != reviewingStatus || isOpenForReview(request);
   }
 
   /// يُضاف الاشتراك بعد المدة المتبقية حتى لا تضيع بقبول طلب جديد.
@@ -203,6 +203,46 @@ class SubscriptionRequestService {
     if (existing is! Map || existing['status'] != 'active') return now;
     final end = _parseDateTime(existing['endDate'])?.toUtc();
     return end != null && end.isAfter(now) ? end : now;
+  }
+
+  /// تصحيح باقة الاشتراك الحالي: تبقى بدايته، وتُحسب نهايته من الباقة الجديدة.
+  static Map<String, dynamic> subscriptionWithPlan(
+    Map<String, dynamic> existing, {
+    required String plan,
+    required DateTime now,
+  }) {
+    final start = _parseDateTime(existing['startDate'])?.toUtc() ?? now;
+    final end = endDateForPlan(plan, from: start);
+    return {
+      ...existing,
+      'plan': plan,
+      'status': end.isAfter(now) ? 'active' : 'expired',
+      'durationDays': end.difference(start).inDays,
+      'startDate': start.toIso8601String(),
+      'endDate': end.toIso8601String(),
+      'updatedAt': now.toIso8601String(),
+    };
+  }
+
+  /// تُضاف الأيام بعد المدة المتبقية، أو من اليوم إذا انتهى الاشتراك.
+  static Map<String, dynamic> extendedSubscription(
+    Map<String, dynamic> existing, {
+    required int days,
+    required DateTime now,
+  }) {
+    final from = subscriptionStartDate(existing: existing, now: now);
+    final start = from == now
+        ? now
+        : _parseDateTime(existing['startDate'])?.toUtc() ?? now;
+    final end = from.add(Duration(days: days));
+    return {
+      ...existing,
+      'status': 'active',
+      'durationDays': end.difference(start).inDays,
+      'startDate': start.toIso8601String(),
+      'endDate': end.toIso8601String(),
+      'updatedAt': now.toIso8601String(),
+    };
   }
 
   static DateTime _addCalendarMonths(DateTime date, int months) {
@@ -515,9 +555,7 @@ class SubscriptionRequestService {
     final result = await ref.runTransaction((value) {
       if (value is! Map) return Transaction.abort();
       final current = Map<String, dynamic>.from(value);
-      if (current['status'] == reviewingStatus && !isOpenForReview(current)) {
-        return Transaction.abort();
-      }
+      if (!canDelete(current)) return Transaction.abort();
       return Transaction.success(null);
     }, applyLocally: false);
     if (!result.committed) {
@@ -576,7 +614,6 @@ class SubscriptionRequestService {
       collectionPath: request.collectionPath,
     );
     final reviewedAtDate = DateTime.now().toUtc();
-    var missingReceipt = false;
     final claimResult = await reqRef.runTransaction((value) {
       if (value is! Map) return Transaction.abort();
       final current = Map<String, dynamic>.from(value);
@@ -584,8 +621,6 @@ class SubscriptionRequestService {
           (current['uid'] ?? '').toString().trim().isEmpty) {
         return Transaction.abort();
       }
-      missingReceipt = isMissingReceipt(current);
-      if (missingReceipt) return Transaction.abort();
       current
         ..['status'] = reviewingStatus
         ..['reviewDecision'] = approvedStatus
@@ -593,9 +628,6 @@ class SubscriptionRequestService {
         ..['reviewedAt'] = reviewedAtDate.toIso8601String();
       return Transaction.success(current);
     }, applyLocally: false);
-    if (missingReceipt) {
-      throw StateError('لا يمكن قبول طلب مدفوع بلا وصل. ارفضه ليعيد الوكيل إرساله');
-    }
     if (!claimResult.committed || claimResult.snapshot.value is! Map) {
       throw StateError('Only pending subscription requests can be approved.');
     }
@@ -673,6 +705,80 @@ class SubscriptionRequestService {
       'startDate': startDate.toIso8601String(),
       'endDate': endDate.toIso8601String(),
     };
+  }
+
+  static Future<Map<String, dynamic>> _subscriptionOf(String uid) async {
+    final snapshot = await _root.child('agents/$uid/subscription').get();
+    if (snapshot.value is! Map) {
+      throw StateError('لا يوجد اشتراك لهذا الوكيل');
+    }
+    return Map<String, dynamic>.from(snapshot.value as Map);
+  }
+
+  /// الطلب المقبول يغيّر اشتراك الوكيل معه، ما دام آخر طلب فُعّل له.
+  static Future<void> changeRequestPlan({
+    required String requestId,
+    required String plan,
+    required String amount,
+    String collectionPath = collectionName,
+  }) async {
+    _requireTrustedAdmin();
+    final reqRef = requestRef(requestId, collectionPath: collectionPath);
+    final snapshot = await reqRef.get();
+    if (snapshot.value is! Map) {
+      throw StateError('الطلب غير موجود');
+    }
+    final current = Map<String, dynamic>.from(snapshot.value as Map);
+    final patch = <String, dynamic>{
+      '${reqRef.path}/selectedPlan': plan,
+      '${reqRef.path}/amount': amount,
+    };
+    if (current['status'] == approvedStatus) {
+      final uid = (current['uid'] ?? '').toString().trim();
+      final existing = await _subscriptionOf(uid);
+      if (existing['lastPaymentId'] != requestId) {
+        throw StateError('هذا الطلب ليس آخر اشتراك مفعّل للوكيل');
+      }
+      patch['agents/$uid/subscription'] = subscriptionWithPlan(
+        existing,
+        plan: plan,
+        now: DateTime.now().toUtc(),
+      );
+    } else if (!isOpenForReview(current)) {
+      throw StateError('لا يمكن تغيير باقة طلب مرفوض');
+    }
+    await _root.update(patch);
+  }
+
+  static Future<DateTime> extendSubscription({
+    required String uid,
+    required int days,
+  }) async {
+    _requireTrustedAdmin();
+    final extended = extendedSubscription(
+      await _subscriptionOf(uid),
+      days: days,
+      now: DateTime.now().toUtc(),
+    );
+    await _root.child('agents/$uid/subscription').set(extended);
+    return DateTime.parse(extended['endDate'] as String);
+  }
+
+  /// نهاية الاشتراك هي ما يفحصه التطبيق، فلا يكفي تغيير الحالة وحدها.
+  static Future<void> endSubscription({required String uid}) async {
+    _requireTrustedAdmin();
+    await _subscriptionOf(uid);
+    final now = DateTime.now().toUtc().toIso8601String();
+    await _root.child('agents/$uid/subscription').update({
+      'status': 'expired',
+      'endDate': now,
+      'updatedAt': now,
+    });
+  }
+
+  static Future<void> sendPasswordReset({required String email}) async {
+    _requireTrustedAdmin();
+    await FirebaseAuth.instance.sendPasswordResetEmail(email: email.trim());
   }
 
   /// إن فشل هذا أيضاً تنتهي مهلة الحجز ويعود الطلب قابلاً للمراجعة.

@@ -52,31 +52,127 @@ void main() {
       });
     });
 
-    group('receipt', () {
-      test('a paid request needs a receipt', () {
+    group('deleting a request', () {
+      test('an approved request is the payment record and stays', () {
         expect(
-          SubscriptionRequestService.isMissingReceipt({
-            'selectedPlan': 'one_year',
-            'receiptImageUrl': ' ',
-          }),
-          isTrue,
-        );
-        expect(
-          SubscriptionRequestService.isMissingReceipt({
-            'selectedPlan': 'one_year',
-            'receiptImageUrl': 'https://x/y.jpg',
-          }),
+          SubscriptionRequestService.canDelete({'status': 'approved'}),
           isFalse,
         );
       });
 
-      test('a free request needs no receipt', () {
+      test('pending and rejected requests can be deleted', () {
         expect(
-          SubscriptionRequestService.isMissingReceipt({
-            'selectedPlan': 'free_15_days',
+          SubscriptionRequestService.canDelete({'status': 'pending'}),
+          isTrue,
+        );
+        expect(
+          SubscriptionRequestService.canDelete({'status': 'rejected'}),
+          isTrue,
+        );
+      });
+
+      test('a request being approved right now cannot be deleted', () {
+        expect(
+          SubscriptionRequestService.canDelete({
+            'status': 'reviewing',
+            'reviewedAt': DateTime.now().toIso8601String(),
           }),
           isFalse,
         );
+      });
+    });
+
+    group('administrator subscription changes', () {
+      final now = DateTime.utc(2026, 11, 2);
+
+      test('a plan change keeps the start date and recalculates the end', () {
+        final changed = SubscriptionRequestService.subscriptionWithPlan(
+          {
+            'plan': 'three_months',
+            'status': 'active',
+            'startDate': DateTime.utc(2026, 10, 1).toIso8601String(),
+            'endDate': DateTime.utc(2027, 1, 1).toIso8601String(),
+            'lastPaymentId': 'r1',
+          },
+          plan: 'one_year',
+          now: now,
+        );
+
+        expect(changed['plan'], 'one_year');
+        expect(changed['status'], 'active');
+        expect(changed['endDate'], DateTime.utc(2027, 10, 1).toIso8601String());
+        expect(changed['lastPaymentId'], 'r1');
+      });
+
+      test('a free trial with numeric dates can move to a paid plan', () {
+        final changed = SubscriptionRequestService.subscriptionWithPlan(
+          {
+            'plan': 'free_15_days',
+            'status': 'active',
+            'startDate': DateTime.utc(2026, 11, 1).millisecondsSinceEpoch,
+            'endDate': DateTime.utc(2026, 11, 16).millisecondsSinceEpoch,
+          },
+          plan: 'three_months',
+          now: now,
+        );
+
+        expect(
+          changed['startDate'],
+          DateTime.utc(2026, 11, 1).toIso8601String(),
+        );
+        expect(changed['endDate'], DateTime.utc(2027, 2, 1).toIso8601String());
+      });
+
+      test('a shorter plan that already ended marks it expired', () {
+        final changed = SubscriptionRequestService.subscriptionWithPlan(
+          {'startDate': DateTime.utc(2026, 1, 1).toIso8601String()},
+          plan: 'three_months',
+          now: now,
+        );
+
+        expect(changed['status'], 'expired');
+      });
+
+      test('an extension adds days after the remaining period', () {
+        final extended = SubscriptionRequestService.extendedSubscription(
+          {
+            'status': 'active',
+            'startDate': DateTime.utc(2026, 11, 1).toIso8601String(),
+            'endDate': DateTime.utc(2026, 11, 12).toIso8601String(),
+          },
+          days: 10,
+          now: now,
+        );
+
+        expect(
+          extended['endDate'],
+          DateTime.utc(2026, 11, 22).toIso8601String(),
+        );
+        expect(
+          extended['startDate'],
+          DateTime.utc(2026, 11, 1).toIso8601String(),
+        );
+        expect(extended['durationDays'], 21);
+      });
+
+      test('an extension of an ended subscription starts today', () {
+        final extended = SubscriptionRequestService.extendedSubscription(
+          {
+            'status': 'expired',
+            'startDate': DateTime.utc(2026, 1, 1).toIso8601String(),
+            'endDate': DateTime.utc(2026, 4, 1).toIso8601String(),
+          },
+          days: 30,
+          now: now,
+        );
+
+        expect(extended['status'], 'active');
+        expect(extended['startDate'], now.toIso8601String());
+        expect(
+          extended['endDate'],
+          DateTime.utc(2026, 12, 2).toIso8601String(),
+        );
+        expect(extended['durationDays'], 30);
       });
     });
 

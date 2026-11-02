@@ -62,6 +62,35 @@ void main() {
     }
   });
 
+  test('bulk messages wait at least ten seconds by default', () {
+    expect(
+      WhatsAppNotificationDispatcher.bulkMessageDelay,
+      greaterThanOrEqualTo(const Duration(seconds: 10)),
+    );
+  });
+
+  test('old and disabled expiries get no expired message', () async {
+    final sent = <String>[];
+    final automation = _automation(
+      store: _MemoryExpiryStore(),
+      subscribers: () => [
+        _subscriber('recent', now.subtract(const Duration(days: 2))),
+        _subscriber('old', now.subtract(const Duration(days: 4))),
+        _subscriber('off', now.subtract(const Duration(days: 1)))
+          ..disabled = true,
+      ],
+      now: () => now,
+      send: (subscriber, {required eventType, required eventId}) async {
+        sent.add(subscriber.name);
+        return const WhatsAppDispatchResult(success: true);
+      },
+    );
+
+    await automation.run();
+
+    expect(sent, ['Test recent']);
+  });
+
   test('expired subscriptions do not get near-expiry events', () async {
     final sent = <String>[];
     final automation = _automation(

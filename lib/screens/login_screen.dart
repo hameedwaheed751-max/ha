@@ -149,8 +149,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final role = await UserRoleService.resolveRole(uid: uid);
     AppStore.refreshSubscriptionStatus();
-    if (role == UserRoleService.agentRole &&
-        AppStore.subscriptionStatus == 'expired') {
+    if (role == UserRoleService.agentRole && AppStore.isSubscriptionBlocked) {
       await _enforceExpiredAccessForCurrentSession();
       return;
     }
@@ -238,9 +237,9 @@ class _LoginScreenState extends State<LoginScreen> {
         ? DateTime.fromMillisecondsSinceEpoch(endDateRaw.toInt(), isUtc: true)
         : DateTime.tryParse((endDateRaw ?? '').toString().trim())?.toUtc();
     final now = DateTime.now().toUtc();
-    final isExpired =
-        status == 'expired' || (endDate != null && !endDate.isAfter(now));
-    if (!isExpired) return null;
+    final isActive =
+        status == 'active' && endDate != null && endDate.isAfter(now);
+    if (isActive) return null;
 
     return ExpiredAccountData(
       uid: user.uid,
@@ -1383,7 +1382,7 @@ Future<void> _attachReceiptWithRetry(
         child: AlertDialog(
           title: const Text('لم يُرفع الوصل'),
           content: const Text(
-            'وصل طلبك إلى الإدارة دون صورة الوصل، ولن يُقبل بدونها. '
+            'وصل طلبك إلى الإدارة دون صورة الوصل. '
             'تأكد من الإنترنت وأعد المحاولة.',
           ),
           actions: [
@@ -1479,10 +1478,14 @@ class RenewalRequestStatusScreen extends StatefulWidget {
     super.key,
     required this.account,
     this.successNotice,
+    this.fromDashboard = false,
   });
 
   final ExpiredAccountData account;
   final String? successNotice;
+
+  /// الوكيل داخل التطبيق: طلب قديم مقبول لا يعيده إلى تسجيل الدخول.
+  final bool fromDashboard;
 
   @override
   State<RenewalRequestStatusScreen> createState() =>
@@ -1610,7 +1613,7 @@ class _RenewalRequestStatusScreenState
             final isPending = state?.isPending ?? false;
             final isRejected = state?.isRejected ?? false;
             final rejectedReason = (state?.rejectionReason ?? '').trim();
-            if (state?.isApproved == true) {
+            if (state?.isApproved == true && !widget.fromDashboard) {
               _handleApprovedOnce();
             }
 
@@ -1721,29 +1724,31 @@ class _RenewalRequestStatusScreenState
                               isPending ? 'بانتظار الموافقة' : 'إرسال طلب جديد',
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          OutlinedButton(
-                            onPressed: () {
-                              Navigator.of(context).pushAndRemoveUntil(
-                                MaterialPageRoute(
-                                  builder: (_) => LoginScreen(
-                                    forceExpiredMode: true,
-                                    expiredUid: widget.account.uid,
-                                    expiredEmail: widget.account.email,
-                                    expiredName: widget.account.name,
-                                    expiredPhone: widget.account.phone,
-                                    expiredRole: widget.account.role,
-                                    expiredGovernorate:
-                                        widget.account.governorate,
-                                    expiredRegion: widget.account.region,
-                                    expiredAddress: widget.account.address,
+                          if (!widget.fromDashboard) ...[
+                            const SizedBox(height: 8),
+                            OutlinedButton(
+                              onPressed: () {
+                                Navigator.of(context).pushAndRemoveUntil(
+                                  MaterialPageRoute(
+                                    builder: (_) => LoginScreen(
+                                      forceExpiredMode: true,
+                                      expiredUid: widget.account.uid,
+                                      expiredEmail: widget.account.email,
+                                      expiredName: widget.account.name,
+                                      expiredPhone: widget.account.phone,
+                                      expiredRole: widget.account.role,
+                                      expiredGovernorate:
+                                          widget.account.governorate,
+                                      expiredRegion: widget.account.region,
+                                      expiredAddress: widget.account.address,
+                                    ),
                                   ),
-                                ),
-                                (route) => false,
-                              );
-                            },
-                            child: const Text('العودة إلى تسجيل الدخول'),
-                          ),
+                                  (route) => false,
+                                );
+                              },
+                              child: const Text('العودة إلى تسجيل الدخول'),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -2099,7 +2104,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
       ).showSnackBar(const SnackBar(content: Text('يرجى إدخال رقم التحويل')));
       return;
     }
-    if (_receiptFile == null) {
+    if (PaymentRequestService.receiptUploadsEnabled && _receiptFile == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('يرجى إرفاق صورة وصل الدفع')),
       );
@@ -2405,16 +2410,18 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 10),
-                          OutlinedButton.icon(
-                            onPressed: _pickReceipt,
-                            icon: const Icon(Icons.attach_file_rounded),
-                            label: Text(
-                              _receiptFile == null
-                                  ? 'إرفاق إيصال'
-                                  : 'تم اختيار إيصال',
+                          if (PaymentRequestService.receiptUploadsEnabled) ...[
+                            const SizedBox(height: 10),
+                            OutlinedButton.icon(
+                              onPressed: _pickReceipt,
+                              icon: const Icon(Icons.attach_file_rounded),
+                              label: Text(
+                                _receiptFile == null
+                                    ? 'إرفاق إيصال'
+                                    : 'تم اختيار إيصال',
+                              ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ),

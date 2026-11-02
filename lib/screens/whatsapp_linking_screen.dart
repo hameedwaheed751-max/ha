@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../services/waha_notification_service.dart';
 import '../widgets/whatsapp_event_settings_section.dart';
+import 'alerts_screen.dart';
+import 'message_templates_screen.dart';
 
 class WhatsAppLinkingScreen extends StatefulWidget {
   const WhatsAppLinkingScreen({super.key});
@@ -131,6 +133,10 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
       'تعذر التحقق من جلسة Firebase. أعد تسجيل الدخول وحاول مجدداً.',
     'A signed-in Firebase user is required.' =>
       'يجب تسجيل الدخول إلى التطبيق قبل ربط WhatsApp.',
+    _
+        when message.startsWith('WAHA gateway') ||
+            message.startsWith('Gateway returned') =>
+      'تعذر الاتصال ببوابة WhatsApp. حاول مجدداً بعد قليل.',
     _ => message,
   };
 
@@ -330,6 +336,36 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: _connectionSection(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.campaign_outlined),
+              title: const Text('إرسال رسائل للمشتركين'),
+              subtitle: const Text(
+                'قرب الانتهاء، التفعيل، الديون، ورسالة عامة',
+              ),
+              trailing: const Icon(Icons.chevron_left),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AlertsScreen()),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.chat_outlined),
+              title: const Text('قوالب رسائل أخرى'),
+              subtitle: const Text('رسالة التمديد واستلام الدين'),
+              trailing: const Icon(Icons.chevron_left),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const MessageTemplatesScreen(),
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 20),

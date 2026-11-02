@@ -56,11 +56,7 @@ class _MessageTemplatesScreenState extends State<MessageTemplatesScreen> {
   @override
   Widget build(BuildContext context) {
     final items = <String, String>{
-      'activation': 'رسالة التفعيل',
       'extension': 'رسالة التمديد',
-      'nearExpiry': 'رسالة قرب الانتهاء',
-      'expired': 'رسالة انتهاء الاشتراك',
-      'debt': 'رسالة تنبيه دفع الديون',
       'debtPaid': 'رسالة استلام دين سابق',
     };
 
@@ -68,7 +64,7 @@ class _MessageTemplatesScreenState extends State<MessageTemplatesScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('التنبيهات ورسائل واتساب'),
+          title: const Text('قوالب رسائل أخرى'),
           centerTitle: true,
         ),
         body: ListView(
@@ -80,6 +76,14 @@ class _MessageTemplatesScreenState extends State<MessageTemplatesScreen> {
                 child: Text(
                   'المتغيرات المتاحة داخل الرسائل: {name} الاسم، {user} اليوزر، {office} اسم المكتب، {endDate} تاريخ الانتهاء، {price} مبلغ الاشتراك، {paid} الواصل، {remaining} المتبقي، {package} الباقة، {amount} المبلغ، {date} التاريخ. كما يمكنك استخدام الصيغة العربية: {{الاسم المشترك}}، {{اسم الوكيل}}، {{اسم الباقة}}، {{تاريخ البدء}}، {{تاريخ الانتهاء}}، {{مبلغ الاشتراك}}، {{الواصل}}، {{المتبقي}}، {{المبلغ}}، {{التاريخ}}.',
                   style: TextStyle(color: Colors.grey),
+                ),
+              ),
+            ),
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(12),
+                child: Text(
+                  'رسائل التفعيل وقرب الانتهاء وانتهاء الاشتراك وتذكير الدين تُعدَّل من "أحداث رسائل WhatsApp" في الشاشة السابقة.',
                 ),
               ),
             ),

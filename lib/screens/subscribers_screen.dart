@@ -17,7 +17,12 @@ import 'subscriber_details_screen.dart';
 
 class SubscribersScreen extends StatefulWidget {
   final String filter;
-  const SubscribersScreen({super.key, this.filter = 'all'});
+  final String initialSearch;
+  const SubscribersScreen({
+    super.key,
+    this.filter = 'all',
+    this.initialSearch = '',
+  });
 
   @override
   State<SubscribersScreen> createState() => _SubscribersScreenState();
@@ -28,7 +33,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
   bool operationBusy = false;
   Subscriber? selected;
-  String q = '';
+  late String q = widget.initialSearch;
+  late final TextEditingController _searchController = TextEditingController(
+    text: widget.initialSearch,
+  );
   bool syncing = false;
   bool _isRefreshing = false;
   String _sortBy = 'name';
@@ -333,6 +341,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   void dispose() {
     AppStore.subscribersChange.removeListener(_onSubscribersChanged);
     _verticalScrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -573,7 +582,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('فشل إرسال واتساب: ${result.error ?? 'خطأ غير معروف'}'),
+          content: Text('فشل إرسال واتساب: ${result.friendlyError}'),
         ),
       );
     }
@@ -3010,6 +3019,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       ),
                       const SizedBox(height: 12),
                       TextField(
+                        controller: _searchController,
                         onChanged: (v) {
                           q = v;
                           selected = null;
@@ -3023,6 +3033,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                               : IconButton(
                                   onPressed: () {
                                     q = '';
+                                    _searchController.clear();
                                     selected = null;
                                     _reloadSubscribers();
                                   },

@@ -7,6 +7,7 @@ import '../services/auto_notification_service.dart';
 import '../services/notification_export_service.dart';
 import '../services/render_whatsapp_service.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
+import '../services/whatsapp_notification_preferences.dart';
 
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
@@ -17,6 +18,9 @@ class AlertsScreen extends StatefulWidget {
 
 class _AlertsScreenState extends State<AlertsScreen> {
   bool _sendingAutomatic = false;
+  bool _stopRequested = false;
+  int _sendProgress = 0;
+  int _sendTotal = 0;
   List<WhatsAppSendLog> _logs = const [];
 
   @override
@@ -27,6 +31,12 @@ class _AlertsScreenState extends State<AlertsScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    _stopRequested = true;
+    super.dispose();
+  }
+
   Future<void> _loadLogs() async {
     final logs = await RenderWhatsAppService.loadLogs();
     if (!mounted) return;
@@ -35,12 +45,6 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
   String fmt(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
-
-  String normalizePhone(String phone) {
-    var n = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (n.startsWith('0')) n = '964${n.substring(1)}';
-    return n;
-  }
 
   String _applyTemplate(String template, Subscriber s) {
     final paid = s.paid.toStringAsFixed(0);
@@ -68,6 +72,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
   List<Subscriber> _recipients(String type) {
     final now = DateTime.now();
     return AppStore.subscribers.where((s) {
+      if (RenderWhatsAppService.normalizePhone(s.phone).isEmpty) return false;
       if (type == 'debt') return s.remaining > 0;
       if (type == 'threeDays') {
         final remaining = s.endDate.difference(now);
@@ -79,6 +84,26 @@ class _AlertsScreenState extends State<AlertsScreen> {
       if (type == 'activated') return !s.expired && !s.disabled;
       return true;
     }).toList();
+  }
+
+  String? _eventType(String type) => switch (type) {
+    'debt' => 'debt_reminder',
+    'threeDays' => 'expiry_3days',
+    'activated' => 'subscription_activated',
+    _ => null,
+  };
+
+  /// النص المعروض للمراجعة هو ما يُرسله الحدث نفسه تلقائياً.
+  Future<String?> _savedEventMessage(String type) async {
+    final eventType = _eventType(type);
+    if (eventType == null) return null;
+    try {
+      return (await FirebaseWhatsAppNotificationPreferences().load(
+        eventType,
+      )).message;
+    } catch (_) {
+      return null;
+    }
   }
 
   String _templateKey(String type) {
@@ -101,160 +126,131 @@ class _AlertsScreenState extends State<AlertsScreen> {
     return 'مرحباً {name}، رسالة عامة من {office}.';
   }
 
-  Future<void> _sendAutomaticCampaign(
+  Future<WhatsAppDispatchResult> _sendOne(
+    WhatsAppNotificationDispatcher dispatcher,
+    String type,
+    Subscriber s,
+    String template, {
+    required String runDay,
+    required int campaignId,
+  }) {
+    final rendered = _applyTemplate(template, s);
+    return switch (type) {
+      'threeDays' => AutoNotificationService.sendNearExpiryManually(
+        s,
+        template: rendered,
+      ),
+      'debt' => dispatcher.notifyDebtReminder(
+        s,
+        remainingBalance: s.remaining,
+        template: rendered,
+        composedText: true,
+        eventId:
+            '${runDay}_${s.subscriberId}_${s.remaining.toStringAsFixed(0)}',
+      ),
+      'activated' => dispatcher.notifySubscriptionActivated(
+        s,
+        template: rendered,
+        composedText: true,
+        eventId:
+            '${runDay}_${s.subscriberId}_${s.endDate.millisecondsSinceEpoch}',
+      ),
+      _ => dispatcher.sendSubscriberMessage(
+        s,
+        message: rendered,
+        eventType: 'broadcast',
+        eventId: '${runDay}_${campaignId}_${s.subscriberId}',
+      ),
+    };
+  }
+
+  Future<void> _sendCampaign(
     String type,
     List<Subscriber> recipients,
     String template, {
-    String eventType = 'manual_campaign',
-    String note = '',
+    required String title,
   }) async {
-    final notificationRunDay = DateTime.now().toUtc().toIso8601String().substring(0, 10);
-    final valid = recipients
-        .where((s) => normalizePhone(s.phone).isNotEmpty)
-        .toList();
-    if (valid.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('لا توجد أرقام هاتف صالحة للإرسال التلقائي'),
-        ),
-      );
-      return;
-    }
+    final runDay = DateTime.now().toUtc().toIso8601String().substring(0, 10);
+    final campaignId = DateTime.now().microsecondsSinceEpoch;
+    final dispatcher = WhatsAppNotificationDispatcher();
+    var sent = 0;
+    var skipped = 0;
+    var failed = 0;
+    var rateLimited = false;
+    String? firstError;
 
-    if (mounted) {
-      setState(() => _sendingAutomatic = true);
-    }
-
-    try {
-      RenderWhatsAppResult result;
-      final dispatcher = WhatsAppNotificationDispatcher();
-      final campaignId = DateTime.now().microsecondsSinceEpoch;
-      if (type == 'all') {
-        var sent = 0;
-        var failed = 0;
-        for (final s in valid) {
-          final dispatched = await dispatcher.sendSubscriberMessage(
-            s,
-            message: _applyTemplate(template, s),
-            eventType: 'broadcast',
-            eventId: '${notificationRunDay}_${campaignId}_${s.subscriberId}',
-          );
-          if (dispatched.success) {
-            sent += 1;
-          } else {
-            failed += 1;
-          }
-        }
-        result = RenderWhatsAppResult(
-          ok: failed == 0,
-          total: valid.length,
-          sent: sent,
-          failed: failed,
-          raw: {'eventType': eventType, 'note': note},
+    setState(() {
+      _sendingAutomatic = true;
+      _stopRequested = false;
+      _sendProgress = 0;
+      _sendTotal = recipients.length;
+    });
+    for (var index = 0; index < recipients.length; index++) {
+      if (_stopRequested) break;
+      if (mounted) setState(() => _sendProgress = index + 1);
+      WhatsAppDispatchResult result;
+      try {
+        result = await _sendOne(
+          dispatcher,
+          type,
+          recipients[index],
+          template,
+          runDay: runDay,
+          campaignId: campaignId,
         );
+      } on Exception {
+        result = const WhatsAppDispatchResult(success: false);
+      }
+      if (result.success) {
+        sent += 1;
+      } else if (result.wasSkipped) {
+        skipped += 1;
+        continue;
       } else {
-        var sent = 0;
-        var failed = 0;
-        for (final s in valid) {
-          final rendered = _applyTemplate(template, s);
-          late final RenderSingleWhatsAppResult single;
-          if (type == 'threeDays') {
-            final dispatched =
-                await AutoNotificationService.sendNearExpiryManually(
-                  s,
-                  template: rendered,
-                );
-            single = RenderSingleWhatsAppResult(
-              success: dispatched.success,
-              messageId: dispatched.messageId,
-              error: dispatched.error,
-              statusCode: dispatched.statusCode,
-            );
-          } else if (type == 'debt') {
-            final dispatched = await dispatcher.notifyDebtReminder(
-              s,
-              remainingBalance: s.remaining,
-              template: rendered,
-              eventId: '${notificationRunDay}_${s.subscriberId}_${s.remaining.toStringAsFixed(0)}',
-            );
-            single = RenderSingleWhatsAppResult(
-              success: dispatched.success,
-              messageId: dispatched.messageId,
-              error: dispatched.error,
-              statusCode: dispatched.statusCode,
-            );
-          } else if (type == 'activated') {
-            final dispatched = await dispatcher.notifySubscriptionActivated(
-              s,
-              template: rendered,
-              eventId: '${notificationRunDay}_${s.subscriberId}_${s.endDate.millisecondsSinceEpoch}',
-            );
-            single = RenderSingleWhatsAppResult(
-              success: dispatched.success,
-              messageId: dispatched.messageId,
-              error: dispatched.error,
-              statusCode: dispatched.statusCode,
-            );
-          } else {
-            final dispatched = await dispatcher.sendSubscriberMessage(
-              s,
-              message: rendered,
-              eventType: 'general_message',
-              eventId:
-                  '${notificationRunDay}_${s.subscriberId}_${s.endDate.millisecondsSinceEpoch}',
-            );
-            single = RenderSingleWhatsAppResult(
-              success: dispatched.success,
-              messageId: dispatched.messageId,
-              error: dispatched.error,
-              statusCode: dispatched.statusCode,
-            );
-          }
-
-          if (single.success) {
-            sent += 1;
-          } else {
-            failed += 1;
-          }
-        }
-
-        result = RenderWhatsAppResult(
-          ok: failed == 0,
-          total: valid.length,
-          sent: sent,
-          failed: failed,
-          raw: {'eventType': eventType, 'note': note},
+        failed += 1;
+        firstError ??= result.friendlyError;
+      }
+      if (result.statusCode == 429) {
+        rateLimited = true;
+        break;
+      }
+      if (index < recipients.length - 1 && !_stopRequested) {
+        await Future<void>.delayed(
+          WhatsAppNotificationDispatcher.bulkMessageDelay,
         );
       }
-
-      if (!mounted) return;
-      final sent = result.sent.toString();
-      final failed = result.failed.toString();
-      final total = result.total.toString();
-      final ok = result.ok;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            ok
-                ? 'تم الإرسال بنجاح'
-                : 'اكتمل الإرسال مع أخطاء: نجح $sent، وفشل $failed من $total',
-          ),
-          duration: const Duration(seconds: 5),
-        ),
-      );
-      await _loadLogs();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('فشل إرسال رسائل WhatsApp: $e')));
-    } finally {
-      if (mounted) {
-        setState(() => _sendingAutomatic = false);
-      }
     }
+
+    final notReached = recipients.length - sent - skipped - failed;
+    final parts = <String>[
+      'أُرسلت $sent',
+      if (skipped > 0) 'أُرسلت سابقاً $skipped',
+      if (failed > 0) 'فشلت $failed',
+      if (notReached > 0) 'لم تُرسل $notReached',
+    ];
+    final summary = parts.join('، ');
+    await RenderWhatsAppService.logCampaign(
+      title: title,
+      total: recipients.length,
+      sent: sent,
+      failed: failed,
+      note: summary,
+    );
+    if (!mounted) return;
+    setState(() => _sendingAutomatic = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          [
+            if (rateLimited) 'توقف الإرسال بطلب من بوابة WhatsApp',
+            summary,
+            ?firstError,
+          ].join('\n'),
+        ),
+        duration: const Duration(seconds: 8),
+      ),
+    );
+    await _loadLogs();
   }
 
   Future<void> _showExportMenu() async {
@@ -330,7 +326,10 @@ class _AlertsScreenState extends State<AlertsScreen> {
   Future<void> _composeCampaign(String type, String title) async {
     final recipients = _recipients(type);
     final key = _templateKey(type);
-    final initial = AppStore.messageTemplates[key] ?? _fallback(type);
+    final saved = AppStore.messageTemplates[key] ?? '';
+    final initial =
+        await _savedEventMessage(type) ??
+        (saved.trim().isEmpty ? _fallback(type) : saved);
     final c = TextEditingController(text: initial);
 
     if (!mounted) return;
@@ -396,7 +395,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
         child: AlertDialog(
           title: const Text('تأكيد الإرسال'),
           content: Text(
-            'سيتم تجهيز الرسالة إلى ${recipients.length} مشترك. هل تريد المتابعة؟',
+            'ستُرسل الرسالة إلى ${recipients.length} مشترك بفاصل ${WhatsAppNotificationDispatcher.bulkMessageDelay.inSeconds} ثانية، وتستغرق نحو ${_durationText(recipients.length)}. أبقِ هذه الشاشة مفتوحة حتى ينتهي الإرسال.',
           ),
           actions: [
             TextButton(
@@ -414,13 +413,14 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
     if (confirmed != true) return;
 
-    await _sendAutomaticCampaign(
-      type,
-      recipients,
-      c.text,
-      eventType: 'manual_$type',
-      note: 'Manual campaign: $title',
-    );
+    await _sendCampaign(type, recipients, c.text, title: title);
+  }
+
+  String _durationText(int recipients) {
+    final seconds =
+        (recipients - 1) *
+        WhatsAppNotificationDispatcher.bulkMessageDelay.inSeconds;
+    return seconds < 60 ? 'أقل من دقيقة' : '${(seconds / 60).ceil()} دقيقة';
   }
 
   String _fmtLogTime(DateTime d) {
@@ -471,7 +471,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                                   child: AlertDialog(
                                     title: Text(
                                       log.ok
-                                          ? 'رد Meta ${log.statusCode ?? ''}'
+                                          ? 'تفاصيل الرد ${log.statusCode ?? ''}'
                                           : 'تفاصيل الخطأ ${log.statusCode ?? ''}',
                                     ),
                                     content: SelectableText(
@@ -531,7 +531,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text('$subtitle • $count مشترك'),
         trailing: const Icon(Icons.chevron_left),
-        onTap: () => _composeCampaign(type, title),
+        onTap: _sendingAutomatic ? null : () => _composeCampaign(type, title),
       ),
     );
   }
@@ -546,15 +546,12 @@ class _AlertsScreenState extends State<AlertsScreen> {
           centerTitle: true,
           actions: [
             if (_sendingAutomatic)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Center(
-                  child: SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
+              TextButton.icon(
+                onPressed: _stopRequested
+                    ? null
+                    : () => setState(() => _stopRequested = true),
+                icon: const Icon(Icons.stop_circle_outlined),
+                label: Text('إيقاف $_sendProgress/$_sendTotal'),
               ),
             IconButton(
               tooltip: 'سجل الإرسال',
@@ -580,7 +577,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                     SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'اختر مجموعة المستلمين، راجع نص الرسالة، ثم أكد ليتم الإرسال التلقائي عبر خادم Render المرتبط بـ developers.facebook.',
+                        'اختر مجموعة المستلمين، راجع نص الرسالة، ثم أكد ليتم الإرسال عبر حساب WhatsApp المرتبط، برسالة كل 15 ثانية.',
                       ),
                     ),
                   ],

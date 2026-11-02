@@ -19,6 +19,26 @@ class WhatsAppDispatchResult {
   final String? error;
   final String? messageId;
   final int? statusCode;
+
+  /// لم يُرسل الآن لأن هذه الرسالة أُرسلت من قبل أو قيد الإرسال، وليس فشلاً.
+  bool get wasSkipped =>
+      statusCode == 409 ||
+      const {
+        'notification_already_sent_or_in_progress',
+        'notification_not_due_or_subscription_changed',
+        'notification_queue_busy',
+      }.contains(error);
+
+  String get friendlyError => switch (error) {
+    'notification_disabled' => 'هذا النوع من الرسائل متوقف من قائمة الواتساب',
+    'notification_settings_unavailable' =>
+      'تعذر قراءة إعدادات الرسائل، تحقق من الاتصال',
+    'Subscriber has no valid phone number.' => 'لا يوجد رقم هاتف صالح للمشترك',
+    'Recipient and message are required.' => 'رقم المشترك أو نص الرسالة فارغ',
+    _ when statusCode == 429 =>
+      'بوابة WhatsApp طلبت التوقف مؤقتاً بسبب كثرة الرسائل',
+    _ => 'تعذر الإرسال عبر WhatsApp، تأكد من اتصال الحساب في قائمة الواتساب',
+  };
 }
 
 typedef WahaTextSender =
@@ -30,6 +50,9 @@ typedef WahaTextSender =
     });
 
 class WhatsAppNotificationDispatcher {
+  /// الفاصل بين رسائل الدفعة الواحدة، لتجنب حظر رقم WhatsApp.
+  static const Duration bulkMessageDelay = Duration(seconds: 15);
+
   WhatsAppNotificationDispatcher({
     this.provider = WhatsAppProvider.waha,
     WahaTextSender? wahaSender,
@@ -51,6 +74,11 @@ class WhatsAppNotificationDispatcher {
   final WahaTextSender _wahaSender;
   final WhatsAppNotificationPreferences _preferences;
 
+  static String _firstFilled(List<String?> templates) => templates.firstWhere(
+    (template) => template != null && template.trim().isNotEmpty,
+    orElse: () => '',
+  )!;
+
   static Future<WahaSendResult> _defaultWahaSender({
     required String to,
     required String text,
@@ -68,16 +96,19 @@ class WhatsAppNotificationDispatcher {
     String? template,
     double? paidAmount,
     required String eventId,
+    bool composedText = false,
   }) => _dispatch(
     subscriber: subscriber,
     type: WhatsAppNotificationType.subscriptionActivated,
     eventType: 'subscription_activated',
     eventId: eventId,
-    template:
-        template ??
-        AppStore.messageTemplates['activation'] ??
-        AppStore.activationTemplate,
+    template: _firstFilled([
+      template,
+      AppStore.messageTemplates['activation'],
+      AppStore.activationTemplate,
+    ]),
     paidAmount: paidAmount,
+    composedText: composedText,
   );
 
   Future<WhatsAppDispatchResult> notifyDebtReminder(
@@ -86,30 +117,38 @@ class WhatsAppNotificationDispatcher {
     required double remainingBalance,
     String? template,
     required String eventId,
+    bool composedText = false,
   }) => _dispatch(
     subscriber: subscriber,
     type: WhatsAppNotificationType.debtAdded,
     eventType: 'debt_reminder',
     eventId: eventId,
-    template:
-        template ?? AppStore.messageTemplates['debt'] ?? AppStore.debtTemplate,
+    template: _firstFilled([
+      template,
+      AppStore.messageTemplates['debt'],
+      AppStore.debtTemplate,
+    ]),
     amount: amountAdded > 0 ? amountAdded : remainingBalance,
     balance: remainingBalance,
+    composedText: composedText,
   );
 
   Future<WhatsAppDispatchResult> notifySubscriptionExpiresIn3Days(
     Subscriber subscriber, {
     String? template,
     required String eventId,
+    bool composedText = false,
   }) => _dispatch(
     subscriber: subscriber,
     type: WhatsAppNotificationType.subscriptionExpiresIn3Days,
     eventType: 'expiry_3days',
     eventId: eventId,
-    template:
-        template ??
-        AppStore.messageTemplates['nearExpiry'] ??
-        AppStore.nearExpiryTemplate,
+    template: _firstFilled([
+      template,
+      AppStore.messageTemplates['nearExpiry'],
+      AppStore.nearExpiryTemplate,
+    ]),
+    composedText: composedText,
   );
 
   Future<WhatsAppDispatchResult> notifySubscriptionExpired(
@@ -121,10 +160,11 @@ class WhatsAppNotificationDispatcher {
     type: WhatsAppNotificationType.subscriptionExpired,
     eventType: 'subscription_expired',
     eventId: eventId,
-    template:
-        template ??
-        AppStore.messageTemplates['expired'] ??
-        'مرحباً {{customer_name}}،\n⚠️ اشتراكك لدى {{agent_name}} منتهي. يرجى التجديد لاستمرار الخدمة.\n📦 الباقة: {{package_name}}\n📅 تاريخ الانتهاء: {{subscription_end_date}}\n📱 {{whatsapp_number}}',
+    template: _firstFilled([
+      template,
+      AppStore.messageTemplates['expired'],
+      'مرحباً {{customer_name}}،\n⚠️ اشتراكك لدى {{agent_name}} منتهي. يرجى التجديد لاستمرار الخدمة.\n📦 الباقة: {{package_name}}\n📅 تاريخ الانتهاء: {{subscription_end_date}}\n📱 {{whatsapp_number}}',
+    ]),
   );
 
   Future<WhatsAppDispatchResult> notifyDebtPaid(
@@ -138,10 +178,11 @@ class WhatsAppNotificationDispatcher {
     type: WhatsAppNotificationType.debtPaid,
     eventType: 'debt_paid',
     eventId: eventId,
-    template:
-        template ??
-        AppStore.messageTemplates['debtPaid'] ??
-        'مرحباً {{customer_name}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المتبقي: {{remaining_amount}} دينار عراقي\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.',
+    template: _firstFilled([
+      template,
+      AppStore.messageTemplates['debtPaid'],
+      'مرحباً {{customer_name}}،\n✅ تم استلام مبلغ الدين المترتب بذمتكم.\n💰 المبلغ الواصل: {{paid_amount}} دينار عراقي\n💰 المتبقي: {{remaining_amount}} دينار عراقي\nنشكر لكم التزامكم بالسداد.\nللاستفسار يرجى التواصل مع:\n🏢 {{agent_name}}\n📱 {{whatsapp_number}}\n\nشكراً لاختياركم خدمتنا.',
+    ]),
     amount: amountPaid,
     paidAmount: amountPaid,
     balance: remainingBalance,
@@ -259,10 +300,14 @@ class WhatsAppNotificationDispatcher {
     double? amount,
     double? paidAmount,
     double? balance,
+    bool composedText = false,
   }) async {
     final eventCheck = await _checkEvent(eventType);
     if (eventCheck.blocked != null) return eventCheck.blocked!;
-    final resolvedTemplate = eventCheck.preference?.message ?? template;
+    // النص الذي راجعه الوكيل قبل الإرسال يتقدم على الرسالة المحفوظة.
+    final resolvedTemplate = composedText
+        ? template
+        : eventCheck.preference?.message ?? template;
 
     // تحديد الـ Provider بناءً على نوع الحدث
     // الرسائل الأربعة المطلوبة تذهب إلى WAHA

@@ -292,13 +292,16 @@ class FirebaseExpiryNotificationStore implements ExpiryNotificationStore {
 }
 
 class ExpiryNotificationAutomation {
+  /// لا تُرسل رسالة انتهاء لمن انتهى اشتراكه قبل هذه المدة.
+  static const Duration expiredNoticeWindow = Duration(days: 3);
+
   ExpiryNotificationAutomation({
     required this.store,
     required this.send,
     required this.subscribers,
     ExpiryAutomationClock? clock,
     ExpiryAutomationDelay? delay,
-    this.interMessageDelay = const Duration(seconds: 2),
+    this.interMessageDelay = WhatsAppNotificationDispatcher.bulkMessageDelay,
     this.leaseDuration = const Duration(minutes: 2),
     this.rateLimitPause = const Duration(minutes: 30),
     this.retryDelayForAttempt = _defaultRetryDelay,
@@ -504,7 +507,7 @@ class ExpiryNotificationAutomation {
           remaining > Duration.zero &&
           remaining <= const Duration(hours: 72)) {
         events.add(_eventFor(subscriber, 'expiry_3days'));
-      } else if (!subscriber.endDate.isAfter(now)) {
+      } else if (_justExpired(subscriber, now)) {
         events.add(_eventFor(subscriber, 'subscription_expired'));
       }
     }
@@ -549,8 +552,13 @@ class ExpiryNotificationAutomation {
           remaining > Duration.zero &&
           remaining <= const Duration(hours: 72);
     }
-    return !subscriber.endDate.isAfter(now);
+    return _justExpired(subscriber, now);
   }
+
+  static bool _justExpired(Subscriber subscriber, DateTime now) =>
+      !subscriber.disabled &&
+      !subscriber.endDate.isAfter(now) &&
+      now.difference(subscriber.endDate) <= expiredNoticeWindow;
 
   static ExpiryNotificationEvent _eventFor(
     Subscriber subscriber,
@@ -646,6 +654,7 @@ class AutoNotificationService {
             template:
                 nearExpiryTemplate ?? AppStore.messageTemplates['nearExpiry'],
             eventId: eventId,
+            composedText: nearExpiryTemplate != null,
           );
         }
         return dispatcher.notifySubscriptionExpired(
