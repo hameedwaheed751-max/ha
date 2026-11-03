@@ -1788,14 +1788,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   },
                 ),
                 _drawerTile(
-                  icon: Icons.analytics_outlined,
-                  title: 'تشخيص الاتصال',
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showConnectionDiagnostic();
-                  },
-                ),
-                _drawerTile(
                   icon: Icons.contrast_rounded,
                   title: 'تغيير المظهر',
                   onTap: () {
@@ -1890,45 +1882,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('خطأ المزامنة: $e')));
-      }
-    }
-  }
-
-  Future<void> _showConnectionDiagnostic() async {
-    try {
-      final settings = await SasSettings.load();
-      // TODO: Implement connection diagnostic feature
-      final diagnostic =
-          'Connection diagnostic: Connecting to ${settings.serverUrl}';
-
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (ctx) => Directionality(
-            textDirection: TextDirection.rtl,
-            child: AlertDialog(
-              title: const Text('تشخيص الاتصال'),
-              content: SingleChildScrollView(
-                child: SelectableText(
-                  diagnostic,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('إغلاق'),
-                ),
-              ],
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('خطأ: $e')));
       }
     }
   }
