@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:excel/excel.dart' as xls;
 import 'package:file_saver/file_saver.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
@@ -1815,12 +1816,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                 _drawerTile(
                   icon: Icons.info_outline,
                   title: 'حول التطبيق',
-                  onTap: () {
+                  onTap: () async {
                     Navigator.pop(context);
+                    final info = await PackageInfo.fromPlatform();
+                    if (!mounted) return;
                     showAboutDialog(
                       context: context,
                       applicationName: 'وكيل نت',
-                      applicationVersion: '4.0.0',
+                      applicationVersion: info.version,
                       applicationLegalese: 'إدارة مشتركي الإنترنت',
                     );
                   },

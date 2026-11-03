@@ -33,6 +33,7 @@ dependencies:
   firebase_storage: ^13.4.6
   firebase_functions: ^0.0.1-dev
   cloud_functions: ^6.3.6
+  package_info_plus: ^9.0.1
 
 dev_dependencies:
   flutter_test:
