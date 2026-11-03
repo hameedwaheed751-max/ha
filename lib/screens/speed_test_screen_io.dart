@@ -4,6 +4,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_network_speed_test/flutter_network_speed_test.dart';
 
+import '../services/speed_test_history.dart';
+import '../widgets/speed_test_extras.dart';
+
 class SpeedTestScreen extends StatefulWidget {
   const SpeedTestScreen({super.key});
 
@@ -26,12 +29,17 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
   double? _download;
   double? _upload;
   Future<void>? _activeRun;
+  SpeedTestRecord? _lastResult;
+  List<SpeedTestRecord> _history = const [];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadNetworkInfo();
+    });
+    SpeedTestHistory.load().then((history) {
+      if (mounted) setState(() => _history = history);
     });
   }
 
@@ -104,6 +112,7 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
       _ping = null;
       _download = null;
       _upload = null;
+      _lastResult = null;
     });
 
     // The package cannot abort a transfer, so a cancelled test runs its
@@ -173,12 +182,22 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
         },
       );
       if (!_isCurrentRun(run)) return;
+      final result = SpeedTestRecord(
+        at: DateTime.now(),
+        ping: ping,
+        download: download,
+        upload: upload,
+        server: 'Speedtest.net',
+      );
       setState(() {
         _upload = upload;
         _stage = 'اكتمل اختبار السرعة';
         _stageHint = 'النتائج المعروضة مقاسة من اتصالك الحالي';
         _overallProgress = 1;
+        _lastResult = result;
       });
+      final history = await SpeedTestHistory.add(result);
+      if (mounted) setState(() => _history = history);
     } catch (error) {
       if (!_isCurrentRun(run)) return;
       setState(() {
@@ -279,37 +298,60 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
                       ),
                     ],
                     const SizedBox(height: 28),
-                    Align(
-                      child: OutlinedButton.icon(
-                        onPressed: _isTesting ? _cancelTest : _startTest,
-                        icon: Icon(
-                          _isTesting
-                              ? Icons.close_rounded
-                              : Icons.refresh_rounded,
-                        ),
-                        label: Text(
-                          _isTesting
-                              ? 'إلغاء الاختبار'
-                              : (_ping == null
-                                    ? 'بدء الاختبار'
-                                    : 'إعادة الاختبار'),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: const BorderSide(
-                            color: Color(0xFF7C8BA8),
-                            width: 1.4,
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _isTesting ? _cancelTest : _startTest,
+                          icon: Icon(
+                            _isTesting
+                                ? Icons.close_rounded
+                                : Icons.refresh_rounded,
                           ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 28,
-                            vertical: 14,
+                          label: Text(
+                            _isTesting
+                                ? 'إلغاء الاختبار'
+                                : (_ping == null
+                                      ? 'بدء الاختبار'
+                                      : 'إعادة الاختبار'),
                           ),
-                          textStyle: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(
+                              color: Color(0xFF7C8BA8),
+                              width: 1.4,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 28,
+                              vertical: 14,
+                            ),
+                            textStyle: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
-                      ),
+                        if (_lastResult != null && !_isTesting)
+                          FilledButton.icon(
+                            onPressed: () =>
+                                shareSpeedTestResult(context, _lastResult!),
+                            icon: const Icon(Icons.share_rounded),
+                            label: const Text('مشاركة النتيجة'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF0B4DC7),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 28,
+                                vertical: 14,
+                              ),
+                              textStyle: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 28),
                     Text(
@@ -330,6 +372,10 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
                         color: const Color(0xFF23CFF1),
                       ),
                     ),
+                    if (_history.isNotEmpty) ...[
+                      const SizedBox(height: 24),
+                      SpeedTestHistoryPanel(records: _history),
+                    ],
                   ],
                 ),
               ),

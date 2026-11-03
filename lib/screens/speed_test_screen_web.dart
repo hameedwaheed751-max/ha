@@ -5,6 +5,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../services/speed_test_history.dart';
+import '../widgets/speed_test_extras.dart';
+
 class SpeedTestScreen extends StatefulWidget {
   const SpeedTestScreen({super.key});
 
@@ -27,12 +30,17 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
   double? _ping;
   double? _download;
   double? _upload;
+  SpeedTestRecord? _lastResult;
+  List<SpeedTestRecord> _history = const [];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadNetworkInfo();
+    });
+    SpeedTestHistory.load().then((history) {
+      if (mounted) setState(() => _history = history);
     });
   }
 
@@ -107,6 +115,7 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
       _ping = null;
       _download = null;
       _upload = null;
+      _lastResult = null;
     });
 
     try {
@@ -198,12 +207,23 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
       final uploadSeconds =
           uploadWatch.elapsedMicroseconds / Duration.microsecondsPerSecond;
       if (uploadSeconds <= 0) throw Exception('تعذر حساب سرعة الرفع');
+      final upload = uploadBytes * 8 / uploadSeconds / 1000000;
+      final result = SpeedTestRecord(
+        at: DateTime.now(),
+        ping: _ping ?? 0,
+        download: _download ?? 0,
+        upload: upload,
+        server: _server,
+      );
       setState(() {
-        _upload = uploadBytes * 8 / uploadSeconds / 1000000;
+        _upload = upload;
         _progress = 1;
         _stage = 'اكتمل اختبار السرعة';
         _stageHint = 'النتائج مقاسة من اتصال المتصفح الحالي';
+        _lastResult = result;
       });
+      final history = await SpeedTestHistory.add(result);
+      if (mounted) setState(() => _history = history);
     } catch (error) {
       if (!_isCurrent(run)) return;
       setState(() {
@@ -304,37 +324,60 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
                       ),
                     ],
                     const SizedBox(height: 28),
-                    Align(
-                      child: OutlinedButton.icon(
-                        onPressed: _isTesting ? _cancelTest : _startTest,
-                        icon: Icon(
-                          _isTesting
-                              ? Icons.close_rounded
-                              : Icons.speed_rounded,
-                        ),
-                        label: Text(
-                          _isTesting
-                              ? 'إلغاء الاختبار'
-                              : (_ping == null
-                                    ? 'بدء الاختبار'
-                                    : 'إعادة الاختبار'),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: const BorderSide(
-                            color: Color(0xFF7C8BA8),
-                            width: 1.4,
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _isTesting ? _cancelTest : _startTest,
+                          icon: Icon(
+                            _isTesting
+                                ? Icons.close_rounded
+                                : Icons.speed_rounded,
                           ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 28,
-                            vertical: 14,
+                          label: Text(
+                            _isTesting
+                                ? 'إلغاء الاختبار'
+                                : (_ping == null
+                                      ? 'بدء الاختبار'
+                                      : 'إعادة الاختبار'),
                           ),
-                          textStyle: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(
+                              color: Color(0xFF7C8BA8),
+                              width: 1.4,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 28,
+                              vertical: 14,
+                            ),
+                            textStyle: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
-                      ),
+                        if (_lastResult != null && !_isTesting)
+                          FilledButton.icon(
+                            onPressed: () =>
+                                shareSpeedTestResult(context, _lastResult!),
+                            icon: const Icon(Icons.share_rounded),
+                            label: const Text('مشاركة النتيجة'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF0B4DC7),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 28,
+                                vertical: 14,
+                              ),
+                              textStyle: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 24),
                     ClipRRect(
@@ -346,6 +389,10 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
                         color: const Color(0xFF23CFF1),
                       ),
                     ),
+                    if (_history.isNotEmpty) ...[
+                      const SizedBox(height: 24),
+                      SpeedTestHistoryPanel(records: _history),
+                    ],
                   ],
                 ),
               ),
