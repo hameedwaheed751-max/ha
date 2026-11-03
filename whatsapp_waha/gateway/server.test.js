@@ -587,7 +587,7 @@ test('unresolved idempotent sends are never automatically retried', async () => 
   temp.cleanup();
 });
 
-test('resolved idempotency entries older than 30 days are dropped on start and daily', async () => {
+test('idempotency entries of any status older than 30 days are dropped on start and daily', async () => {
   const temp = createTempStore();
   const day = 24 * 60 * 60 * 1000;
   let now = Date.parse('2026-11-03T12:00:00Z');
@@ -605,8 +605,7 @@ test('resolved idempotency entries older than 30 days are dropped on start and d
     const store = new JsonIdempotencyStore(temp.filePath, { now: () => now });
     assert.deepEqual(
       Object.keys(JSON.parse(fs.readFileSync(temp.filePath, 'utf8'))).sort(),
-      ['fresh', 'oldProcessing', 'oldUnknown', 'recentlyUpdated', 'undated'],
-      'unresolved entries are kept however old',
+      ['fresh', 'recentlyUpdated', 'undated'],
     );
 
     // Two days later the next send prunes what has aged past 30 days.
@@ -621,9 +620,9 @@ test('resolved idempotency entries older than 30 days are dropped on start and d
     assert.equal('recentlyUpdated' in kept, false);
     assert.deepEqual(
       Object.keys(kept).filter((key) => key.length < 20).sort(),
-      ['fresh', 'oldProcessing', 'oldUnknown', 'undated'],
+      ['fresh', 'undated'],
     );
-    assert.equal(Object.keys(kept).length, 5);
+    assert.equal(Object.keys(kept).length, 3);
   } finally {
     temp.cleanup();
   }
