@@ -106,9 +106,16 @@ function loadConfig(env = process.env) {
   };
 }
 
+// Entries only guard against a resent request; the Firebase notice records
+// are the lasting duplicate guard, so old entries can be dropped.
+const IDEMPOTENCY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const IDEMPOTENCY_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
 class JsonIdempotencyStore {
-  constructor(filePath) {
+  constructor(filePath, { now = Date.now } = {}) {
     this.filePath = filePath;
+    this.now = now;
+    this.lastPrunedAt = -Infinity;
     this.queue = Promise.resolve();
     fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
     try {
@@ -121,6 +128,24 @@ class JsonIdempotencyStore {
       if (error.code !== 'ENOENT') throw error;
       this.entries = {};
     }
+    if (this._prune()) this._persist();
+  }
+
+  // Drops entries older than the retention period, at most once a day.
+  // Entries without a readable date are kept. Returns true if any were dropped.
+  _prune() {
+    const now = this.now();
+    if (now - this.lastPrunedAt < IDEMPOTENCY_PRUNE_INTERVAL_MS) return false;
+    this.lastPrunedAt = now;
+    let removed = false;
+    for (const [key, entry] of Object.entries(this.entries)) {
+      const at = Date.parse(entry?.updatedAt || entry?.createdAt);
+      if (now - at > IDEMPOTENCY_RETENTION_MS) {
+        delete this.entries[key];
+        removed = true;
+      }
+    }
+    return removed;
   }
 
   _exclusive(action) {
@@ -138,6 +163,7 @@ class JsonIdempotencyStore {
 
   reserve({ uid, idempotencyKey, requestDigest }) {
     return this._exclusive(() => {
+      if (this._prune()) this._persist();
       const storeKey = sha256(`${uid}\0${idempotencyKey}`);
       const existing = this.entries[storeKey];
       if (existing) {

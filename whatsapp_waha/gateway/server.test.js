@@ -586,3 +586,39 @@ test('unresolved idempotent sends are never automatically retried', async () => 
   assert.equal(second.state, 'unknown');
   temp.cleanup();
 });
+
+test('idempotency entries older than 30 days are dropped on start and daily', async () => {
+  const temp = createTempStore();
+  const day = 24 * 60 * 60 * 1000;
+  let now = Date.parse('2026-11-03T12:00:00Z');
+  const at = (daysAgo) => new Date(now - daysAgo * day).toISOString();
+  fs.writeFileSync(temp.filePath, JSON.stringify({
+    old: { status: 'sent', createdAt: at(40), updatedAt: at(31) },
+    recentlyUpdated: { status: 'sent', createdAt: at(40), updatedAt: at(29) },
+    fresh: { status: 'processing', createdAt: at(1) },
+    undated: { status: 'sent' },
+  }));
+  try {
+    const store = new JsonIdempotencyStore(temp.filePath, { now: () => now });
+    assert.deepEqual(
+      Object.keys(JSON.parse(fs.readFileSync(temp.filePath, 'utf8'))).sort(),
+      ['fresh', 'recentlyUpdated', 'undated'],
+    );
+
+    // Two days later the next send prunes what has aged past 30 days.
+    now += 2 * day;
+    const reserve = (key) => store.reserve({
+      uid: 'uid-agent-a',
+      idempotencyKey: key,
+      requestDigest: 'digest-a',
+    });
+    await reserve('expiry:subscriber-a:event-2');
+    const kept = JSON.parse(fs.readFileSync(temp.filePath, 'utf8'));
+    assert.equal('recentlyUpdated' in kept, false);
+    assert.equal('fresh' in kept, true);
+    assert.equal('undated' in kept, true);
+    assert.equal(Object.keys(kept).length, 3);
+  } finally {
+    temp.cleanup();
+  }
+});
