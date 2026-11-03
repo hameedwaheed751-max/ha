@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -5,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../services/speed_measurement.dart';
 import '../services/speed_test_history.dart';
 import '../widgets/speed_test_extras.dart';
 
@@ -17,6 +19,15 @@ class SpeedTestScreen extends StatefulWidget {
 
 class _SpeedTestScreenState extends State<SpeedTestScreen> {
   static const _speedTestOrigin = 'https://speed.cloudflare.com';
+  static const _pingRequests = 6;
+  static const _phaseDuration = Duration(seconds: 10);
+  static const _warmUp = Duration(seconds: 2);
+  static const _downloadConnections = 4;
+  static const _downloadRequestBytes = 25 * 1000 * 1000;
+  static const _uploadConnections = 3;
+  static const _uploadStartBytes = 256 * 1024;
+  static const _uploadMaxBytes = 16 * 1024 * 1024;
+  static final _uploadPayload = Uint8List(_uploadMaxBytes);
 
   http.Client? _client;
   bool _isTesting = false;
@@ -119,8 +130,9 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
     });
 
     try {
+      // The first request also opens the TLS connection, so it is dropped.
       final pingSamples = <double>[];
-      for (var index = 0; index < 5; index++) {
+      for (var index = 0; index < _pingRequests; index++) {
         final stopwatch = Stopwatch()..start();
         final response = await client
             .get(_speedUri('/__down', {'bytes': '0'}))
@@ -130,84 +142,30 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
           throw Exception('خادم القياس أعاد الحالة ${response.statusCode}');
         }
         if (!_isCurrent(run)) return;
-        pingSamples.add(stopwatch.elapsedMicroseconds / 1000);
+        if (index > 0) pingSamples.add(stopwatch.elapsedMicroseconds / 1000);
         setState(() {
-          _ping = pingSamples.reduce((a, b) => a + b) / pingSamples.length;
-          _progress = 0.04 + ((index + 1) / 5) * 0.16;
+          if (pingSamples.isNotEmpty) _ping = medianOf(pingSamples);
+          _progress = 0.02 + ((index + 1) / _pingRequests) * 0.08;
         });
       }
 
       if (!_isCurrent(run)) return;
       setState(() {
         _stage = 'جاري اختبار التحميل...';
-        _stageHint = 'تنزيل بيانات فعلية من خادم القياس';
-        _progress = 0.20;
+        _stageHint = 'تنزيل بيانات فعلية عبر عدة اتصالات لمدة 10 ثوانٍ';
+        _progress = 0.10;
       });
-
-      const downloadBytes = 8 * 1024 * 1024;
-      final request = http.Request(
-        'GET',
-        _speedUri('/__down', {'bytes': '$downloadBytes'}),
-      );
-      final stopwatch = Stopwatch()..start();
-      final streamedResponse = await client
-          .send(request)
-          .timeout(const Duration(seconds: 15));
-      if (streamedResponse.statusCode < 200 ||
-          streamedResponse.statusCode >= 400) {
-        throw Exception(
-          'تعذر بدء اختبار التحميل (${streamedResponse.statusCode})',
-        );
-      }
-      var receivedBytes = 0;
-      await for (final chunk in streamedResponse.stream.timeout(
-        const Duration(seconds: 30),
-      )) {
-        receivedBytes += chunk.length;
-        if (!_isCurrent(run)) return;
-        final seconds =
-            stopwatch.elapsedMicroseconds / Duration.microsecondsPerSecond;
-        setState(() {
-          if (seconds > 0) _download = receivedBytes * 8 / seconds / 1000000;
-          _progress = 0.20 + (receivedBytes / downloadBytes).clamp(0, 1) * 0.42;
-        });
-      }
-      stopwatch.stop();
+      final download = await _measureDownload(run);
       if (!_isCurrent(run)) return;
-      final downloadSeconds =
-          stopwatch.elapsedMicroseconds / Duration.microsecondsPerSecond;
-      if (receivedBytes == 0 || downloadSeconds <= 0) {
-        throw Exception('لم تصل بيانات اختبار التحميل');
-      }
       setState(() {
-        _download = receivedBytes * 8 / downloadSeconds / 1000000;
+        _download = download;
         _stage = 'جاري اختبار الرفع...';
-        _stageHint = 'رفع بيانات فعلية إلى خادم القياس';
-        _progress = 0.64;
+        _stageHint = 'رفع بيانات فعلية عبر عدة اتصالات لمدة 10 ثوانٍ';
+        _progress = 0.55;
       });
 
-      const uploadBytes = 3 * 1024 * 1024;
-      final uploadData = Uint8List(uploadBytes);
-      for (var index = 0; index < uploadData.length; index += 4096) {
-        uploadData[index] = index % 251;
-      }
-      final uploadWatch = Stopwatch()..start();
-      final uploadResponse = await client
-          .post(
-            _speedUri('/__up'),
-            headers: const {'Content-Type': 'application/octet-stream'},
-            body: uploadData,
-          )
-          .timeout(const Duration(seconds: 45));
-      uploadWatch.stop();
-      if (uploadResponse.statusCode < 200 || uploadResponse.statusCode >= 400) {
-        throw Exception('تعذر اختبار الرفع (${uploadResponse.statusCode})');
-      }
+      final upload = await _measureUpload(run);
       if (!_isCurrent(run)) return;
-      final uploadSeconds =
-          uploadWatch.elapsedMicroseconds / Duration.microsecondsPerSecond;
-      if (uploadSeconds <= 0) throw Exception('تعذر حساب سرعة الرفع');
-      final upload = uploadBytes * 8 / uploadSeconds / 1000000;
       final result = SpeedTestRecord(
         at: DateTime.now(),
         ping: _ping ?? 0,
@@ -235,9 +193,147 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
     } finally {
       if (mounted && run == _testRun) {
         setState(() => _isTesting = false);
-        client.close();
-        if (identical(_client, client)) _client = null;
+        _client?.close();
+        _client = null;
       }
+    }
+  }
+
+  // Each phase gets its own client; closing it aborts every open request,
+  // whether the phase ended or the test was cancelled.
+  http.Client _phaseClient() {
+    _client?.close();
+    final client = http.Client();
+    _client = client;
+    return client;
+  }
+
+  Future<double> _measureDownload(int run) async {
+    final client = _phaseClient();
+    final meter = ThroughputMeter(warmUp: _warmUp);
+    final watch = Stopwatch()..start();
+
+    Future<void> connection() async {
+      while (watch.elapsed < _phaseDuration && _isCurrent(run)) {
+        final response = await client.send(
+          http.Request(
+            'GET',
+            _speedUri('/__down', {'bytes': '$_downloadRequestBytes'}),
+          ),
+        );
+        if (response.statusCode < 200 || response.statusCode >= 400) {
+          throw Exception('تعذر بدء اختبار التحميل (${response.statusCode})');
+        }
+        await for (final chunk in response.stream) {
+          meter.add(chunk.length, watch.elapsed);
+          if (watch.elapsed >= _phaseDuration || !_isCurrent(run)) break;
+        }
+      }
+    }
+
+    final progress = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      if (!_isCurrent(run)) return;
+      setState(() {
+        _download = meter.mbps(watch.elapsed);
+        _progress =
+            0.10 +
+            (watch.elapsed.inMilliseconds / _phaseDuration.inMilliseconds)
+                    .clamp(0, 1) *
+                0.45;
+      });
+    });
+    try {
+      await _runUntilDeadline(
+        List.generate(_downloadConnections, (_) => connection()),
+        watch,
+        client,
+      );
+    } finally {
+      progress.cancel();
+    }
+    final mbps = meter.mbps(watch.elapsed);
+    if (mbps == null || mbps <= 0) {
+      throw Exception('لم تصل بيانات اختبار التحميل');
+    }
+    return mbps;
+  }
+
+  Future<double> _measureUpload(int run) async {
+    final client = _phaseClient();
+    final watch = Stopwatch()..start();
+    final connections = List.generate(
+      _uploadConnections,
+      (_) => UploadConnectionMeter(),
+    );
+
+    Future<void> connection(UploadConnectionMeter meter) async {
+      var size = _uploadStartBytes;
+      while (watch.elapsed < _phaseDuration && _isCurrent(run)) {
+        final body = Uint8List.sublistView(_uploadPayload, 0, size);
+        final started = watch.elapsed;
+        final response = await client.post(
+          _speedUri('/__up'),
+          headers: const {'Content-Type': 'application/octet-stream'},
+          body: body,
+        );
+        if (response.statusCode < 200 || response.statusCode >= 400) {
+          throw Exception('تعذر اختبار الرفع (${response.statusCode})');
+        }
+        meter.add(size, watch.elapsed - started);
+        // Larger requests once the line is known to be fast, so request
+        // overhead does not lower the result.
+        if (size < _uploadMaxBytes) size *= 2;
+      }
+    }
+
+    double? total() => UploadConnectionMeter.totalMbps(connections);
+    final progress = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      if (!_isCurrent(run)) return;
+      setState(() {
+        _upload = total();
+        _progress =
+            0.55 +
+            (watch.elapsed.inMilliseconds / _phaseDuration.inMilliseconds)
+                    .clamp(0, 1) *
+                0.45;
+      });
+    });
+    try {
+      await _runUntilDeadline(
+        [for (final meter in connections) connection(meter)],
+        watch,
+        client,
+      );
+    } finally {
+      progress.cancel();
+    }
+    final mbps = total();
+    if (mbps == null || mbps <= 0) throw Exception('تعذر حساب سرعة الرفع');
+    return mbps;
+  }
+
+  // Waits for the connections until the phase ends, then aborts what is
+  // still open. Errors from the abort itself are expected and ignored.
+  Future<void> _runUntilDeadline(
+    List<Future<void>> connections,
+    Stopwatch watch,
+    http.Client client,
+  ) async {
+    final deadline = Timer(_phaseDuration - watch.elapsed, client.close);
+    try {
+      await Future.wait(
+        eagerError: true,
+        connections.map(
+          (connection) => connection.catchError((Object error) {
+            if (watch.elapsed < _phaseDuration && client == _client) {
+              throw error;
+            }
+          }),
+        ),
+      );
+    } finally {
+      deadline.cancel();
+      client.close();
     }
   }
 
