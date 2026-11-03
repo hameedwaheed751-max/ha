@@ -275,6 +275,7 @@ test('two users are isolated across status, QR, reconnect, disconnect, and send'
   });
   const userA = sessionNameForUid('uid-agent-a');
   const userB = sessionNameForUid('uid-agent-b');
+  let callsBeforeUserB = 0;
 
   try {
     await withServer(app, async (baseUrl) => {
@@ -290,6 +291,7 @@ test('two users are isolated across status, QR, reconnect, disconnect, and send'
       waha.sessions.get(userA).me = { id: '964700000001@c.us' };
       waha.sessions.get(userB).status = 'WORKING';
       waha.sessions.get(userB).me = { id: '964700000002@c.us' };
+      callsBeforeUserB = waha.calls.length;
 
       const status = await fetch(
         `${baseUrl}/api/waha/session/status?session=${userA}&uid=uid-agent-a`,
@@ -346,8 +348,14 @@ test('two users are isolated across status, QR, reconnect, disconnect, and send'
       assert.equal(disconnect.status, 200);
     });
 
-    assert.equal(waha.sessions.get(userA).status, 'WORKING');
+    // User B's requests name user A's session but must never reach it.
+    assert.equal(waha.sessions.get(userA).status, 'SCAN_QR_CODE');
     assert.equal(waha.sessions.get(userB).status, 'STOPPED');
+    assert.ok(
+      waha.calls
+        .slice(callsBeforeUserB)
+        .every((call) => !call.url.pathname.includes(userA) && call.body?.session !== userA),
+    );
     const sessionRequestPaths = waha.calls
       .filter((call) => call.url.pathname.startsWith('/api/sessions/'))
       .map((call) => decodeURIComponent(call.url.pathname.split('/')[3]));
