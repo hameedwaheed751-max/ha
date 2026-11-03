@@ -6,6 +6,8 @@ import 'package:dart_ping/dart_ping.dart';
 import 'package:dart_ping_ios/dart_ping_ios.dart';
 import 'package:flutter/material.dart';
 
+import '../sas_api_service.dart';
+
 class _PingAttempt {
   const _PingAttempt({
     required this.sequence,
@@ -39,6 +41,27 @@ class _PingScreenState extends State<PingScreen> {
   int _sent = 0;
   int _received = 0;
   Ping? _activePing;
+  String? _sasHost;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadSasHost());
+  }
+
+  Future<void> _loadSasHost() async {
+    try {
+      final settings = await SasSettings.load();
+      final host = _normalizeHost(settings.serverUrl);
+      if (mounted && host.isNotEmpty) setState(() => _sasHost = host);
+    } catch (_) {}
+  }
+
+  void _pingTarget(String host) {
+    if (_testing) return;
+    _targetController.text = host;
+    _runPing();
+  }
 
   @override
   void dispose() {
@@ -193,6 +216,13 @@ class _PingScreenState extends State<PingScreen> {
       error: _error,
       onRun: _runPing,
       onStop: _stopPing,
+      quickTargets: [
+        if (_sasHost != null) ('خادم SAS', _sasHost!),
+        ('Google DNS', '8.8.8.8'),
+        ('Cloudflare', '1.1.1.1'),
+        ('Google', 'google.com'),
+      ],
+      onQuickTarget: _pingTarget,
     );
   }
 }
@@ -213,6 +243,8 @@ class _PingPage extends StatelessWidget {
     required this.error,
     required this.onRun,
     required this.onStop,
+    required this.quickTargets,
+    required this.onQuickTarget,
   });
 
   final TextEditingController controller;
@@ -229,6 +261,8 @@ class _PingPage extends StatelessWidget {
   final String? error;
   final VoidCallback onRun;
   final VoidCallback onStop;
+  final List<(String, String)> quickTargets;
+  final ValueChanged<String> onQuickTarget;
 
   int get _packetBytes => Platform.isWindows ? 32 : 64;
 
@@ -278,6 +312,21 @@ class _PingPage extends StatelessWidget {
                       onPressed: onRun,
                       icon: const Icon(Icons.play_arrow_rounded),
                       label: const Text('ابدأ'),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (final (label, host) in quickTargets)
+                    ActionChip(
+                      label: Text(label),
+                      tooltip: host,
+                      onPressed: testing ? null : () => onQuickTarget(host),
                     ),
                 ],
               ),
