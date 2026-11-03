@@ -392,6 +392,31 @@ test('unresolved records 30 days past their end are deleted daily, sent ones kep
   assert.equal(env.sent.length, 0);
 });
 
+test('stopping lets the notice being sent finish and claims no more', async () => {
+  const subscribers = Array.from({ length: 5 }, (_, index) => subscriber(index + 1, localEnd(10 + index)));
+  let scheduler;
+  let stopped;
+  const env = setup({
+    subscribers,
+    sendStatus: () => {
+      // Docker stops the container while the first message is being sent.
+      if (!stopped) stopped = scheduler.stop();
+      return 200;
+    },
+  });
+  scheduler = env.makeScheduler();
+  const run = scheduler.run();
+  await stopped;
+  await run;
+
+  assert.equal(env.sent.length, 1);
+  const items = Object.values(env.items());
+  assert.deepEqual(items.map((item) => item.status), ['sent'], 'nothing left mid-send');
+  const control = env.database._get(`agents/${UID}/notificationAutomation/expiry3days/control`);
+  assert.ok(!control.owner, 'lease released');
+  assert.equal(await scheduler.run(), null, 'no run after stopping');
+});
+
 test('expired, disabled, and phone-less subscribers are handled like the app', () => {
   const now = START * 1000;
   const events = dueEvents([

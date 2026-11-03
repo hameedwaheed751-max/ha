@@ -602,8 +602,12 @@ function start() {
     console.log(`Expiry scheduler enabled every ${config.expiryScheduler.intervalMs / 1000}s`);
   }
   const shutdown = () => {
-    stopScheduler();
-    server.close(() => process.exit(0));
+    // Let a notice being sent finish and be saved, within Docker's 10 second
+    // stop timeout, so it is not left for manual review.
+    const timeout = new Promise((resolve) => setTimeout(resolve, 8000).unref());
+    Promise.race([stopScheduler(), timeout]).finally(() => {
+      server.close(() => process.exit(0));
+    });
   };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);

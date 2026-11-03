@@ -500,6 +500,13 @@ class ExpiryScheduler {
     this.subscriberCache = new Map();
     this.lastCleanupAt = new Map();
     this.activeRun = null;
+    this.stopping = false;
+  }
+
+  /** Stops claiming notices; resolves once the notice being sent is saved. */
+  stop() {
+    this.stopping = true;
+    return this.activeRun || Promise.resolve();
   }
 
   // Once a day per agent, deletes unresolved records 30 days past their end date.
@@ -517,6 +524,7 @@ class ExpiryScheduler {
   }
 
   run() {
+    if (this.stopping) return Promise.resolve(null);
     if (this.activeRun) return this.activeRun;
     this.activeRun = this._runOnce().finally(() => {
       this.activeRun = null;
@@ -529,7 +537,7 @@ class ExpiryScheduler {
     const pending = [...await this.listAgentUids()];
     // Agents send from separate WhatsApp numbers, so a few run side by side.
     const worker = async () => {
-      while (pending.length) {
+      while (pending.length && !this.stopping) {
         const uid = pending.shift();
         try {
           totals.removed += await this._cleanup(uid);
@@ -623,6 +631,8 @@ class ExpiryScheduler {
       for (const event of events) {
         if (attempted >= this.maxPerAgentPerRun) break;
         if (attempted > 0) await this.delay(this.messageDelayMs);
+        // Nothing is claimed once stopping, so no notice is left mid-send.
+        if (this.stopping) break;
         const nowMs = this.now();
         if (!await this.store.renewLease(uid, owner, nowMs, this.leaseMs)) break;
         const attempt = await this.store.claim(uid, event, owner, nowMs, this.leaseMs);
@@ -698,7 +708,10 @@ class ExpiryScheduler {
   }
 }
 
-/** Runs the scheduler every `intervalMs`; returns a function that stops it. */
+/**
+ * Runs the scheduler every `intervalMs`; returns a function that stops it and
+ * resolves once the notice being sent, if any, is saved.
+ */
 function startExpiryScheduler(scheduler, { intervalMs = 5 * 60 * 1000, firstRunDelayMs = 30000 } = {}) {
   const tick = () => {
     scheduler.run().catch((error) => {
@@ -710,6 +723,7 @@ function startExpiryScheduler(scheduler, { intervalMs = 5 * 60 * 1000, firstRunD
   return () => {
     clearTimeout(first);
     clearInterval(interval);
+    return scheduler.stop();
   };
 }
 
