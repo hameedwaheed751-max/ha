@@ -587,13 +587,16 @@ test('unresolved idempotent sends are never automatically retried', async () => 
   temp.cleanup();
 });
 
-test('idempotency entries older than 30 days are dropped on start and daily', async () => {
+test('resolved idempotency entries older than 30 days are dropped on start and daily', async () => {
   const temp = createTempStore();
   const day = 24 * 60 * 60 * 1000;
   let now = Date.parse('2026-11-03T12:00:00Z');
   const at = (daysAgo) => new Date(now - daysAgo * day).toISOString();
   fs.writeFileSync(temp.filePath, JSON.stringify({
     old: { status: 'sent', createdAt: at(40), updatedAt: at(31) },
+    oldRejected: { status: 'rejected', createdAt: at(40), updatedAt: at(31) },
+    oldUnknown: { status: 'unknown', createdAt: at(400), updatedAt: at(400) },
+    oldProcessing: { status: 'processing', createdAt: at(400) },
     recentlyUpdated: { status: 'sent', createdAt: at(40), updatedAt: at(29) },
     fresh: { status: 'processing', createdAt: at(1) },
     undated: { status: 'sent' },
@@ -602,7 +605,8 @@ test('idempotency entries older than 30 days are dropped on start and daily', as
     const store = new JsonIdempotencyStore(temp.filePath, { now: () => now });
     assert.deepEqual(
       Object.keys(JSON.parse(fs.readFileSync(temp.filePath, 'utf8'))).sort(),
-      ['fresh', 'recentlyUpdated', 'undated'],
+      ['fresh', 'oldProcessing', 'oldUnknown', 'recentlyUpdated', 'undated'],
+      'unresolved entries are kept however old',
     );
 
     // Two days later the next send prunes what has aged past 30 days.
@@ -615,9 +619,35 @@ test('idempotency entries older than 30 days are dropped on start and daily', as
     await reserve('expiry:subscriber-a:event-2');
     const kept = JSON.parse(fs.readFileSync(temp.filePath, 'utf8'));
     assert.equal('recentlyUpdated' in kept, false);
-    assert.equal('fresh' in kept, true);
-    assert.equal('undated' in kept, true);
-    assert.equal(Object.keys(kept).length, 3);
+    assert.deepEqual(
+      Object.keys(kept).filter((key) => key.length < 20).sort(),
+      ['fresh', 'oldProcessing', 'oldUnknown', 'undated'],
+    );
+    assert.equal(Object.keys(kept).length, 5);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test('a request WAHA rejected may be retried, an unresolved one may not', async () => {
+  const temp = createTempStore();
+  try {
+    const store = new JsonIdempotencyStore(temp.filePath);
+    const reserve = (key) => store.reserve({ uid: 'uid-agent-a', idempotencyKey: key, requestDigest: 'digest-a' });
+
+    const rejected = await reserve('expiry:subscriber-a:event-1');
+    await store.complete(rejected.storeKey, 'rejected', { success: false });
+    const retry = await reserve('expiry:subscriber-a:event-1');
+    assert.equal(retry.state, 'reserved');
+    await store.complete(retry.storeKey, 'sent', { success: true, messageId: 'm1' });
+    assert.deepEqual(await reserve('expiry:subscriber-a:event-1'), {
+      state: 'sent',
+      response: { success: true, messageId: 'm1' },
+    });
+
+    const pending = await reserve('expiry:subscriber-a:event-2');
+    assert.equal(pending.state, 'reserved');
+    assert.equal((await reserve('expiry:subscriber-a:event-2')).state, 'unknown', 'still processing');
   } finally {
     temp.cleanup();
   }

@@ -103,12 +103,14 @@ function setup({ subscribers, agent = {}, sessionStatus = 'WORKING', sendStatus 
       assert.equal(session, sessionNameForUid(UID));
       return sessionStatus ? { status: sessionStatus } : null;
     },
+    // sendStatus returns a status code, or { status, error } for a specific error.
     sendText: async (request) => {
-      const status = sendStatus(request, sent.length);
+      const result = sendStatus(request, sent.length);
+      const { status, error } = typeof result === 'object' ? result : { status: result };
       if (status === 200) sent.push({ ...request, at: clock.now });
       return status === 200
         ? { status, body: { success: true, messageId: `m${sent.length}` } }
-        : { status, body: { success: false, error: status === 409 ? 'idempotency_key_conflict' : 'x' } };
+        : { status, body: { success: false, error: error || (status === 409 ? 'idempotency_key_conflict' : 'x') } };
     },
   };
   const delays = [];
@@ -297,6 +299,64 @@ test('failures are retried later, conflicts wait for review, 429 pauses', async 
   env.clock.now += 31 * 60 * 1000;
   await env.makeScheduler().run();
   assert.deepEqual(env.sent.map((item) => item.to).sort(), ['07700000001', '07700000003']);
+});
+
+test('an unknown delivery outcome waits for review and is never resent', async () => {
+  let calls = 0;
+  const env = setup({
+    subscribers: [subscriber(1, localEnd(10))],
+    sendStatus: () => {
+      calls += 1;
+      return calls === 1 ? { status: 504, error: 'delivery_outcome_unknown' } : 200;
+    },
+  });
+  await env.makeScheduler().run();
+  const [item] = Object.values(env.items());
+  assert.equal(item.status, 'manual_review');
+  assert.equal(item.retryAt, undefined);
+
+  // The sender would now succeed, but the Firebase record alone blocks a resend.
+  env.clock.now += 2 * HOUR;
+  await env.makeScheduler().run();
+  assert.equal(calls, 1);
+  assert.equal(env.sent.length, 0);
+});
+
+test('a confirmed failure is retried and sent once', async () => {
+  let status = { status: 502, error: 'waha_rejected_request' };
+  const env = setup({ subscribers: [subscriber(1, localEnd(10))], sendStatus: () => status });
+  await env.makeScheduler().run();
+  assert.equal(Object.values(env.items())[0].status, 'retry');
+
+  status = 200;
+  env.clock.now += 10 * 60 * 1000;
+  await env.makeScheduler().run();
+  env.clock.now += 10 * 60 * 1000;
+  await env.makeScheduler().run();
+  assert.equal(env.sent.length, 1);
+  assert.equal(Object.values(env.items())[0].status, 'sent');
+});
+
+test('a notice left mid-send is held for review, not resent', async () => {
+  // E.g. the message went out but saving "sent" to Firebase failed, and the
+  // gateway's local record is gone: Firebase alone must stop a resend.
+  const raw = subscriber(1, localEnd(10));
+  const env = setup({ subscribers: [raw] });
+  const [event] = dueEvents([raw], START * 1000, 180);
+  env.database._set(`agents/${UID}/notificationAutomation/expiry3days/items/${event.storageKey}`, {
+    status: 'sending',
+    owner: 'crashed-server',
+    attempts: 1,
+    leaseUntil: START - 60 * 1000,
+  });
+
+  await env.makeScheduler().run();
+  env.clock.now += 2 * HOUR;
+  await env.makeScheduler().run();
+  assert.equal(env.sent.length, 0);
+  const item = env.items()[event.storageKey];
+  assert.equal(item.status, 'manual_review');
+  assert.equal(item.reason, 'outcome_unknown');
 });
 
 test('expired, disabled, and phone-less subscribers are handled like the app', () => {

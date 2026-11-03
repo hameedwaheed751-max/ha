@@ -106,9 +106,11 @@ function loadConfig(env = process.env) {
   };
 }
 
-// Entries only guard against a resent request; the Firebase notice records
-// are the lasting duplicate guard, so old entries can be dropped.
+// Resolved entries only guard against a resent request; the Firebase notice
+// records are the lasting duplicate guard, so old resolved entries can be
+// dropped. Entries whose outcome is unresolved are kept forever.
 const IDEMPOTENCY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const IDEMPOTENCY_RESOLVED_STATUSES = new Set(['sent', 'rejected']);
 const IDEMPOTENCY_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 class JsonIdempotencyStore {
@@ -131,14 +133,15 @@ class JsonIdempotencyStore {
     if (this._prune()) this._persist();
   }
 
-  // Drops entries older than the retention period, at most once a day.
-  // Entries without a readable date are kept. Returns true if any were dropped.
+  // Drops resolved entries older than the retention period, at most once a
+  // day. Unresolved or undated entries are kept. Returns true if any were dropped.
   _prune() {
     const now = this.now();
     if (now - this.lastPrunedAt < IDEMPOTENCY_PRUNE_INTERVAL_MS) return false;
     this.lastPrunedAt = now;
     let removed = false;
     for (const [key, entry] of Object.entries(this.entries)) {
+      if (!IDEMPOTENCY_RESOLVED_STATUSES.has(entry?.status)) continue;
       const at = Date.parse(entry?.updatedAt || entry?.createdAt);
       if (now - at > IDEMPOTENCY_RETENTION_MS) {
         delete this.entries[key];
@@ -169,7 +172,8 @@ class JsonIdempotencyStore {
       if (existing) {
         if (existing.requestDigest !== requestDigest) return { state: 'conflict' };
         if (existing.status === 'sent') return { state: 'sent', response: existing.response };
-        return { state: 'unknown' };
+        // WAHA refused the earlier request, so nothing was sent and it may be retried.
+        if (existing.status !== 'rejected') return { state: 'unknown' };
       }
       this.entries[storeKey] = {
         requestDigest,

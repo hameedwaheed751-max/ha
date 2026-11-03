@@ -384,10 +384,12 @@ class FirebaseNoticeStore {
   /** Returns the attempt number, or null when the notice is not claimable. */
   async claim(uid, event, owner, nowMs, leaseMs) {
     let attempts = 0;
+    let claimed = false;
     const committed = await this._transaction(
       this._queue(uid).child(`items/${event.storageKey}`),
       (current) => {
         const data = asMap(current);
+        claimed = false;
         if (
           data.status === 'sent' ||
           data.status === 'manual_review' ||
@@ -396,6 +398,16 @@ class FirebaseNoticeStore {
         ) {
           return undefined;
         }
+        // A sender stopped mid-send, so the message may have gone out.
+        if (data.status === 'sending') {
+          return {
+            status: 'manual_review',
+            attempts: toInt(data.attempts),
+            endDateMicros: event.endDateMicros,
+            reason: 'outcome_unknown',
+          };
+        }
+        claimed = true;
         attempts = toInt(data.attempts) + 1;
         return {
           status: 'sending',
@@ -406,7 +418,7 @@ class FirebaseNoticeStore {
         };
       },
     );
-    return committed ? attempts : null;
+    return committed && claimed ? attempts : null;
   }
 
   async finish(uid, event, owner, build) {
@@ -586,7 +598,9 @@ class ExpiryScheduler {
         }
 
         result.failed += 1;
-        const reviewNeeded = outcome.status === 409 && outcome.body?.error !== 'session_not_connected';
+        // A message that may have gone out is never retried automatically.
+        const reviewNeeded = outcome.body?.error === 'delivery_outcome_unknown' ||
+          (outcome.status === 409 && outcome.body?.error !== 'session_not_connected');
         await this.store.finish(uid, event, owner, (data) => reviewNeeded
           ? {
             status: 'manual_review',
