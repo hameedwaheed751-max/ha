@@ -485,23 +485,19 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          if (amountLabel != null)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '$amountLabel: ${_money(amount)}',
-                  style: TextStyle(color: color, fontWeight: FontWeight.w800),
-                ),
-                Text(
-                  'المتبقي: ${_money(event.remainingAfter)}',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF64748B),
-                  ),
-                ),
-              ],
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '$amountLabel: ${_money(amount)}',
+                style: TextStyle(color: color, fontWeight: FontWeight.w800),
+              ),
+              Text(
+                'المتبقي: ${_money(event.remainingAfter)}',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+              ),
+            ],
+          ),
         ],
       ),
     );
