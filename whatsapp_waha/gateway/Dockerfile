@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
-COPY server.js ./
+COPY server.js expiry_scheduler.js ./
 USER node
 EXPOSE 3001
 CMD ["node", "server.js"]

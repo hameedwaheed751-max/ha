@@ -12,7 +12,6 @@ import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
 import '../services/app_notifications.dart';
-import '../services/auto_notification_service.dart';
 import '../services/render_whatsapp_service.dart';
 import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
@@ -56,7 +55,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   DateTime _dashboardDate = DateTime.now();
   Timer? _subscriptionGuardTimer;
   Timer? _monthlyRolloverTimer;
-  Timer? _expiryNotificationTimer;
   bool _handlingExpiredLockout = false;
   DateTime? _notificationsSeenAt;
   DateTime? _knownPlanEnd;
@@ -131,15 +129,10 @@ class _DashboardScreenState extends State<DashboardScreen>
       const Duration(minutes: 1),
       (_) => _handleMonthlyRollover(),
     );
-    _expiryNotificationTimer = Timer.periodic(
-      AutoNotificationService.expiryCheckInterval,
-      (_) => unawaited(AutoNotificationService.runDailyExpiryAutomation()),
-    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _loadSasWallet();
       unawaited(_loadNotificationsSeenAt());
-      unawaited(AutoNotificationService.runDailyExpiryAutomation());
       _handleSubscriptionGuardTick();
       _handleMonthlyRollover();
     });
@@ -150,14 +143,12 @@ class _DashboardScreenState extends State<DashboardScreen>
     WidgetsBinding.instance.removeObserver(this);
     _subscriptionGuardTimer?.cancel();
     _monthlyRolloverTimer?.cancel();
-    _expiryNotificationTimer?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(AutoNotificationService.runDailyExpiryAutomation());
       _handleSubscriptionGuardTick();
       _handleMonthlyRollover();
     }

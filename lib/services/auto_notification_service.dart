@@ -5,7 +5,6 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter/foundation.dart';
 
 import '../models.dart';
 import 'render_whatsapp_service.dart';
@@ -591,31 +590,10 @@ class ExpiryNotificationAutomation {
   }
 }
 
+/// التنبيهات التلقائية لقرب الانتهاء والانتهاء يرسلها خادم بوابة WAHA
+/// (whatsapp_waha/gateway/expiry_scheduler.js) بنفس سجل منع التكرار، ولا
+/// يرسلها التطبيق بنفسه. يبقى هنا الإرسال اليدوي فقط.
 class AutoNotificationService {
-  static const Duration expiryCheckInterval = Duration(minutes: 15);
-  static Future<void>? _activeExpiryRun;
-
-  static Future<void> runDailyExpiryAutomation() {
-    final activeRun = _activeExpiryRun;
-    if (activeRun != null) return activeRun;
-
-    final run = _runExpiryAutomation();
-    final sharedRun = run
-        .catchError((Object error) {
-          debugPrint('Expiry notification automation failed: $error');
-        })
-        .whenComplete(() => _activeExpiryRun = null);
-    _activeExpiryRun = sharedRun;
-    return sharedRun;
-  }
-
-  static Future<void> _runExpiryAutomation() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.isEmpty) return;
-
-    await _createExpiryAutomation(uid).run();
-  }
-
   static Future<WhatsAppDispatchResult> sendNearExpiryManually(
     Subscriber subscriber, {
     String? template,

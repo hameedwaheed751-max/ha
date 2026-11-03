@@ -19,6 +19,9 @@ services:
       WAHA_TIMEOUT_MS: "15000"
       CORS_ALLOWED_ORIGINS: "${NETAGENT_WEB_ORIGIN:?Set the existing exact NetAgent web origin(s) in /opt/gateway/.env},https://wakeel-unel.onrender.com"
       CORS_ALLOW_LOCALHOST_ORIGINS: "false"
+      EXPIRY_SCHEDULER_ENABLED: "true"
+      EXPIRY_SCHEDULER_INTERVAL_MS: "300000"
+      NETAGENT_UTC_OFFSET_MINUTES: "180"
     volumes:
       - ./gateway/secrets/firebase-service-account.json:/run/secrets/firebase-service-account.json:ro
       - ./gateway/data:/app/data

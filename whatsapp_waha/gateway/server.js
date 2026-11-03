@@ -97,6 +97,12 @@ function loadConfig(env = process.env) {
       env.WAHA_IDEMPOTENCY_FILE || path.join(__dirname, 'data', 'idempotency.json'),
     ),
     allowedOrigins: new Set(allowedOrigins),
+    expiryScheduler: {
+      enabled: String(env.EXPIRY_SCHEDULER_ENABLED || '').trim() === 'true',
+      intervalMs: Math.max(Number(env.EXPIRY_SCHEDULER_INTERVAL_MS || 300000), 60000),
+      // Subscriber dates without a zone are device-local; Iraq is UTC+3.
+      utcOffsetMinutes: Number(env.NETAGENT_UTC_OFFSET_MINUTES || 180),
+    },
   };
 }
 
@@ -161,15 +167,149 @@ class JsonIdempotencyStore {
   }
 }
 
+/**
+ * Talks to WAHA for one UID-derived session. The HTTP routes and the expiry
+ * scheduler share one instance so they also share one idempotency store.
+ */
+function createWahaSender({ config, fetchImpl = fetch, idempotencyStore }) {
+  const store = idempotencyStore || new JsonIdempotencyStore(config.idempotencyFile);
+
+  async function callWaha(method, route, body) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+    try {
+      return await fetchImpl(`${config.wahaBaseUrl}${route}`, {
+        method,
+        headers: {
+          'X-Api-Key': config.wahaApiKey,
+          Accept: 'application/json',
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function getSession(sessionName) {
+    const session = encodeURIComponent(sessionName);
+    const upstream = await callWaha('GET', `/api/sessions/${session}`);
+    if (upstream.status === 404) return null;
+    if (!upstream.ok) throw new Error('WAHA session status request failed.');
+    return upstream.json();
+  }
+
+  /** Returns the HTTP status and body that `/api/waha/send` responds with. */
+  async function sendText({ uid, session, to, text, eventType, idempotencyKey }) {
+    const recipient = normalizePhone(to);
+    const message = typeof text === 'string' ? text.trim() : '';
+    const key = String(idempotencyKey || '').trim();
+
+    if (!isAllowedEventType(eventType)) {
+      return { status: 400, body: { success: false, error: 'unsupported_event_type' } };
+    }
+    if (recipient.length < 8 || recipient.length > 15 || !message || message.length > 4096) {
+      return { status: 400, body: { success: false, error: 'invalid_message' } };
+    }
+    if (!/^[A-Za-z0-9:._-]{8,200}$/.test(key)) {
+      return { status: 400, body: { success: false, error: 'invalid_idempotency_key' } };
+    }
+
+    let sessionData;
+    try {
+      sessionData = await getSession(session);
+    } catch (_) {
+      return { status: 502, body: { success: false, error: 'session_status_unavailable' } };
+    }
+    if (!sessionData || sessionData.status !== 'WORKING') {
+      return { status: 409, body: { success: false, error: 'session_not_connected' } };
+    }
+
+    const requestDigest = sha256(JSON.stringify({
+      uid,
+      eventType,
+      recipient,
+      message,
+    }));
+    let reservation;
+    try {
+      reservation = await store.reserve({
+        uid,
+        idempotencyKey: key,
+        requestDigest,
+      });
+    } catch (_) {
+      return { status: 503, body: { success: false, error: 'idempotency_store_unavailable' } };
+    }
+
+    if (reservation.state === 'conflict') {
+      return { status: 409, body: { success: false, error: 'idempotency_key_conflict' } };
+    }
+    if (reservation.state === 'unknown') {
+      return { status: 409, body: { success: false, error: 'delivery_outcome_unknown' } };
+    }
+    if (reservation.state === 'sent') return { status: 200, body: reservation.response };
+
+    try {
+      const upstream = await callWaha('POST', '/api/sendText', {
+        session,
+        chatId: `${recipient}@c.us`,
+        text: message,
+      });
+      let upstreamBody = {};
+      try {
+        upstreamBody = await upstream.json();
+      } catch (_) {
+        // Do not persist upstream response bodies that could contain private data.
+      }
+      if (upstream.ok) {
+        const response = {
+          success: true,
+          messageId: String(upstreamBody.id || upstreamBody.key?.id || ''),
+        };
+        await store.complete(reservation.storeKey, 'sent', response);
+        return { status: 200, body: response };
+      }
+
+      const knownRejection = upstream.status >= 400 && upstream.status < 500;
+      const response = {
+        success: false,
+        error: knownRejection ? 'waha_rejected_request' : 'delivery_outcome_unknown',
+      };
+      await store.complete(
+        reservation.storeKey,
+        knownRejection ? 'rejected' : 'unknown',
+        response,
+      );
+      return { status: knownRejection ? 502 : 504, body: response };
+    } catch (_) {
+      try {
+        await store.complete(reservation.storeKey, 'unknown', {
+          success: false,
+          error: 'delivery_outcome_unknown',
+        });
+      } catch (_) {
+        // The pre-send reservation remains durable and blocks an unsafe resend.
+      }
+      return { status: 504, body: { success: false, error: 'delivery_outcome_unknown' } };
+    }
+  }
+
+  return { callWaha, getSession, sendText };
+}
+
 function createApp({
   config,
   verifyIdToken,
   authorizeAccount,
   fetchImpl = fetch,
   idempotencyStore,
+  wahaSender,
 }) {
   const app = express();
-  const store = idempotencyStore || new JsonIdempotencyStore(config.idempotencyFile);
+  const sender = wahaSender || createWahaSender({ config, fetchImpl, idempotencyStore });
   const sessionOperations = new Map();
   app.disable('x-powered-by');
   app.use((req, res, next) => {
@@ -234,32 +374,8 @@ function createApp({
     next();
   });
 
-  async function callWaha(req, method, route, body) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
-    try {
-      return await fetchImpl(`${config.wahaBaseUrl}${route}`, {
-        method,
-        headers: {
-          'X-Api-Key': config.wahaApiKey,
-          Accept: 'application/json',
-          ...(body ? { 'Content-Type': 'application/json' } : {}),
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  async function getWahaSession(req) {
-    const session = encodeURIComponent(req.wahaIdentity.session);
-    const upstream = await callWaha(req, 'GET', `/api/sessions/${session}`);
-    if (upstream.status === 404) return null;
-    if (!upstream.ok) throw new Error('WAHA session status request failed.');
-    return upstream.json();
-  }
+  const callWaha = (_req, method, route, body) => sender.callWaha(method, route, body);
+  const getWahaSession = (req) => sender.getSession(req.wahaIdentity.session);
 
   async function withSessionOperation(session, operation) {
     const previous = sessionOperations.get(session) || Promise.resolve();
@@ -387,98 +503,15 @@ function createApp({
 
   app.post('/api/waha/send', async (req, res) => {
     const { to, text, eventType } = req.body || {};
-    const idempotencyKey = String(req.headers['idempotency-key'] || '').trim();
-    const recipient = normalizePhone(to);
-    const message = typeof text === 'string' ? text.trim() : '';
-
-    if (!isAllowedEventType(eventType)) {
-      return res.status(400).json({ success: false, error: 'unsupported_event_type' });
-    }
-    if (recipient.length < 8 || recipient.length > 15 || !message || message.length > 4096) {
-      return res.status(400).json({ success: false, error: 'invalid_message' });
-    }
-    if (!/^[A-Za-z0-9:._-]{8,200}$/.test(idempotencyKey)) {
-      return res.status(400).json({ success: false, error: 'invalid_idempotency_key' });
-    }
-
-    let sessionData;
-    try {
-      sessionData = await getWahaSession(req);
-    } catch (_) {
-      return res.status(502).json({ success: false, error: 'session_status_unavailable' });
-    }
-    if (!sessionData || sessionData.status !== 'WORKING') {
-      return res.status(409).json({ success: false, error: 'session_not_connected' });
-    }
-
-    const requestDigest = sha256(JSON.stringify({
+    const result = await sender.sendText({
       uid: req.wahaIdentity.uid,
+      session: req.wahaIdentity.session,
+      to,
+      text,
       eventType,
-      recipient,
-      message,
-    }));
-    let reservation;
-    try {
-      reservation = await store.reserve({
-        uid: req.wahaIdentity.uid,
-        idempotencyKey,
-        requestDigest,
-      });
-    } catch (_) {
-      return res.status(503).json({ success: false, error: 'idempotency_store_unavailable' });
-    }
-
-    if (reservation.state === 'conflict') {
-      return res.status(409).json({ success: false, error: 'idempotency_key_conflict' });
-    }
-    if (reservation.state === 'unknown') {
-      return res.status(409).json({ success: false, error: 'delivery_outcome_unknown' });
-    }
-    if (reservation.state === 'sent') return res.status(200).json(reservation.response);
-
-    try {
-      const upstream = await callWaha(req, 'POST', '/api/sendText', {
-        session: req.wahaIdentity.session,
-        chatId: `${recipient}@c.us`,
-        text: message,
-      });
-      let upstreamBody = {};
-      try {
-        upstreamBody = await upstream.json();
-      } catch (_) {
-        // Do not persist upstream response bodies that could contain private data.
-      }
-      if (upstream.ok) {
-        const response = {
-          success: true,
-          messageId: String(upstreamBody.id || upstreamBody.key?.id || ''),
-        };
-        await store.complete(reservation.storeKey, 'sent', response);
-        return res.status(200).json(response);
-      }
-
-      const knownRejection = upstream.status >= 400 && upstream.status < 500;
-      const response = {
-        success: false,
-        error: knownRejection ? 'waha_rejected_request' : 'delivery_outcome_unknown',
-      };
-      await store.complete(
-        reservation.storeKey,
-        knownRejection ? 'rejected' : 'unknown',
-        response,
-      );
-      return res.status(knownRejection ? 502 : 504).json(response);
-    } catch (_) {
-      try {
-        await store.complete(reservation.storeKey, 'unknown', {
-          success: false,
-          error: 'delivery_outcome_unknown',
-        });
-      } catch (_) {
-        // The pre-send reservation remains durable and blocks an unsafe resend.
-      }
-      return res.status(504).json({ success: false, error: 'delivery_outcome_unknown' });
-    }
+      idempotencyKey: req.headers['idempotency-key'],
+    });
+    return res.status(result.status).json(result.body);
   });
 
   return app;
@@ -505,12 +538,45 @@ function start() {
     }
     return isAuthorizedAccount(authUser, uid);
   };
-  const app = createApp({ config, verifyIdToken, authorizeAccount });
+  const wahaSender = createWahaSender({ config });
+  const app = createApp({ config, verifyIdToken, authorizeAccount, wahaSender });
   // Docker publishes only a loopback-bound host port in the local pilot compose file.
   const server = app.listen(config.port, '0.0.0.0', () => {
     console.log(`WAHA gateway listening on container port ${config.port}`);
   });
-  const shutdown = () => server.close(() => process.exit(0));
+
+  let stopScheduler = () => {};
+  if (config.expiryScheduler.enabled) {
+    const { getDatabase } = require('firebase-admin/database');
+    const { ExpiryScheduler, FirebaseNoticeStore, startExpiryScheduler } = require('./expiry_scheduler');
+    const listAgentUids = async () => {
+      const uids = [];
+      let pageToken;
+      do {
+        const page = await auth.listUsers(1000, pageToken);
+        for (const user of page.users) {
+          if (isAuthorizedAccount(user, user.uid)) uids.push(user.uid);
+        }
+        pageToken = page.pageToken;
+      } while (pageToken);
+      return uids;
+    };
+    const scheduler = new ExpiryScheduler({
+      store: new FirebaseNoticeStore(getDatabase(firebaseApp)),
+      sender: wahaSender,
+      listAgentUids,
+      sessionNameForUid,
+      utcOffsetMinutes: config.expiryScheduler.utcOffsetMinutes,
+    });
+    stopScheduler = startExpiryScheduler(scheduler, {
+      intervalMs: config.expiryScheduler.intervalMs,
+    });
+    console.log(`Expiry scheduler enabled every ${config.expiryScheduler.intervalMs / 1000}s`);
+  }
+  const shutdown = () => {
+    stopScheduler();
+    server.close(() => process.exit(0));
+  };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 }
@@ -526,6 +592,7 @@ if (require.main === module) {
 
 module.exports = {
   createApp,
+  createWahaSender,
   isAuthorizedAccount,
   isAllowedEventType,
   loadConfig,
