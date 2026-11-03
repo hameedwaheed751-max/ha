@@ -428,11 +428,11 @@ class _StatisticsPanel extends StatelessWidget {
         children: [
           Row(
             children: [
-              _Statistic(label: 'Sent', value: '$sent'),
-              _Statistic(label: 'Received', value: '$received'),
-              _Statistic(label: 'Lost', value: '$lost'),
+              _Statistic(label: 'المرسلة', value: '$sent'),
+              _Statistic(label: 'المستلمة', value: '$received'),
+              _Statistic(label: 'المفقودة', value: '$lost'),
               _Statistic(
-                label: 'Loss',
+                label: 'نسبة الفقد',
                 value: '${lossPercentage.toStringAsFixed(2)}%',
               ),
             ],
@@ -440,10 +440,13 @@ class _StatisticsPanel extends StatelessWidget {
           const SizedBox(height: 8),
           Row(
             children: [
-              _Statistic(label: 'Min', value: _latency(minimum)),
-              _Statistic(label: 'Avg', value: _latency(average)),
-              _Statistic(label: 'Max', value: _latency(maximum)),
-              _Statistic(label: 'Stddev', value: _latency(standardDeviation)),
+              _Statistic(label: 'الأقل ms', value: _latency(minimum)),
+              _Statistic(label: 'المتوسط ms', value: _latency(average)),
+              _Statistic(label: 'الأعلى ms', value: _latency(maximum)),
+              _Statistic(
+                label: 'التذبذب ms',
+                value: _latency(standardDeviation),
+              ),
             ],
           ),
         ],

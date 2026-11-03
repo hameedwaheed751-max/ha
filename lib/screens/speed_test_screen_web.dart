@@ -271,7 +271,7 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
                                 'التحميل',
                                 _download,
                                 'Mbps',
-                                100,
+                                _speedScale(_download),
                                 const Color(0xFFFFAA00),
                                 false,
                               ),
@@ -283,7 +283,7 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
                                 'الرفع',
                                 _upload,
                                 'Mbps',
-                                100,
+                                _speedScale(_upload),
                                 const Color(0xFF26D8F6),
                                 false,
                               ),
@@ -553,6 +553,14 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
         ),
       ],
     );
+  }
+
+  // The smallest gauge scale that fits the speed, so fast lines don't pin it.
+  double _speedScale(double? mbps) {
+    for (final scale in const [100.0, 200.0, 500.0, 1000.0]) {
+      if ((mbps ?? 0) <= scale) return scale;
+    }
+    return 2500;
   }
 
   String _rating(double? value, bool lowerIsBetter) {

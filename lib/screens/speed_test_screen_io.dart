@@ -25,6 +25,7 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
   double? _ping;
   double? _download;
   double? _upload;
+  Future<void>? _activeRun;
 
   @override
   void initState() {
@@ -85,6 +86,13 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
 
   Future<void> _startTest() async {
     if (_isTesting) return;
+    final previous = _activeRun;
+    final current = _runTest(previous);
+    _activeRun = current;
+    await current;
+  }
+
+  Future<void> _runTest(Future<void>? previous) async {
     final run = ++_testRun;
     setState(() {
       _isTesting = true;
@@ -97,6 +105,11 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
       _download = null;
       _upload = null;
     });
+
+    // The package cannot abort a transfer, so a cancelled test runs its
+    // current stage to the end; wait for it so it does not share the line.
+    if (previous != null) await previous;
+    if (!_isCurrentRun(run)) return;
 
     final speedTest = SpeedTest(
       const SpeedTestArgs(
@@ -171,7 +184,8 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
       setState(() {
         _stage = 'تعذر إكمال الاختبار';
         _stageHint = 'تحقق من اتصال الإنترنت ثم أعد المحاولة';
-        _error = error.toString();
+        _error =
+            'تعذر الوصول إلى خوادم Speedtest أو انقطع الاتصال أثناء القياس.';
         _overallProgress = 0;
       });
     } finally {
@@ -233,7 +247,7 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
                                 'التحميل',
                                 _download,
                                 'Mbps',
-                                100,
+                                _speedScale(_download),
                                 const Color(0xFFFFAA00),
                                 false,
                               ),
@@ -244,7 +258,7 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
                                 'الرفع',
                                 _upload,
                                 'Mbps',
-                                100,
+                                _speedScale(_upload),
                                 const Color(0xFF26D8F6),
                                 false,
                               ),
@@ -540,6 +554,14 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
         ),
       ],
     );
+  }
+
+  // The smallest gauge scale that fits the speed, so fast lines don't pin it.
+  double _speedScale(double? mbps) {
+    for (final scale in const [100.0, 200.0, 500.0, 1000.0]) {
+      if ((mbps ?? 0) <= scale) return scale;
+    }
+    return 2500;
   }
 
   String _rating(double? value, bool lowerIsBetter) {
