@@ -359,6 +359,39 @@ test('a notice left mid-send is held for review, not resent', async () => {
   assert.equal(item.reason, 'outcome_unknown');
 });
 
+test('unresolved records 30 days past their end are deleted daily, sent ones kept', async () => {
+  const lapsed = subscriber(1, localEnd(-31 * 24));
+  const env = setup({ subscribers: [lapsed] });
+  const root = `agents/${UID}/notificationAutomation/expiry3days/items`;
+  const endedDaysAgo = (days) => (START - days * 24 * HOUR) * 1000;
+  const records = {
+    oldReview: { status: 'manual_review', endDateMicros: endedDaysAgo(31) },
+    oldRetry: { status: 'retry', endDateMicros: endedDaysAgo(31), retryAt: START + HOUR },
+    oldStaleSending: { status: 'sending', endDateMicros: endedDaysAgo(31), leaseUntil: START - HOUR },
+    oldSent: { status: 'sent', endDateMicros: endedDaysAgo(400), sentAt: 1 },
+    recentReview: { status: 'manual_review', endDateMicros: endedDaysAgo(25) },
+    undatedReview: { status: 'manual_review' },
+  };
+  for (const [key, value] of Object.entries(records)) env.database._set(`${root}/${key}`, value);
+
+  const scheduler = env.makeScheduler();
+  await scheduler.run();
+  assert.deepEqual(Object.keys(env.items()).sort(), ['oldSent', 'recentReview', 'undatedReview']);
+  assert.deepEqual(env.items().oldSent, records.oldSent, 'sent record unchanged');
+  assert.equal(env.sent.length, 0, 'a lapsed subscription is not notified again');
+
+  // Within a day nothing more is deleted; after a day the next run deletes.
+  env.clock.now += 12 * HOUR;
+  env.database._set(`${root}/lateReview`, { status: 'manual_review', endDateMicros: endedDaysAgo(31) });
+  await scheduler.run();
+  assert.ok(env.items().lateReview);
+  env.clock.now += 13 * HOUR;
+  await scheduler.run();
+  assert.equal(env.items().lateReview, undefined);
+  assert.ok(env.items().recentReview);
+  assert.equal(env.sent.length, 0);
+});
+
 test('expired, disabled, and phone-less subscribers are handled like the app', () => {
   const now = START * 1000;
   const events = dueEvents([

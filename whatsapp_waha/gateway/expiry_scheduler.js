@@ -14,6 +14,12 @@ const NEAR_EXPIRY_EVENT = 'expiry_3days';
 const EXPIRED_EVENT = 'subscription_expired';
 const NEAR_EXPIRY_WINDOW_MS = 72 * 60 * 60 * 1000;
 const EXPIRED_NOTICE_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+// A notice is only due within days of its end date, and a renewal gets a new
+// record, so unresolved records 30 days past their end date are deleted.
+// Sent records are kept.
+const UNRESOLVED_STATUSES = new Set(['manual_review', 'retry', 'sending']);
+const UNRESOLVED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SUBSCRIBER_ID_PATTERN =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
@@ -433,6 +439,27 @@ class FirebaseNoticeStore {
     if (!committed) throw new Error('Could not persist the expiry notice state.');
   }
 
+  async items(uid) {
+    return asMap((await this._queue(uid).child('items').once('value')).val());
+  }
+
+  /** Deletes an unresolved notice whose subscription ended before `cutoffMs`. */
+  async removeUnresolved(uid, storageKey, cutoffMs, nowMs) {
+    return this._transaction(this._queue(uid).child(`items/${storageKey}`), (current) => {
+      const data = asMap(current);
+      const ended = toInt(data.endDateMicros) / 1000;
+      if (
+        !UNRESOLVED_STATUSES.has(data.status) ||
+        !ended ||
+        ended >= cutoffMs ||
+        (data.status === 'sending' && toInt(data.leaseUntil) > nowMs)
+      ) {
+        return undefined;
+      }
+      return null;
+    });
+  }
+
   async read(path) {
     const snapshot = await this.database.ref(path).once('value');
     return snapshot.val();
@@ -471,7 +498,22 @@ class ExpiryScheduler {
       rateLimitPauseMs,
     });
     this.subscriberCache = new Map();
+    this.lastCleanupAt = new Map();
     this.activeRun = null;
+  }
+
+  // Once a day per agent, deletes unresolved records 30 days past their end date.
+  async _cleanup(uid) {
+    const nowMs = this.now();
+    if (nowMs - (this.lastCleanupAt.get(uid) ?? -Infinity) < CLEANUP_INTERVAL_MS) return 0;
+    this.lastCleanupAt.set(uid, nowMs);
+    const cutoffMs = nowMs - UNRESOLVED_RETENTION_MS;
+    let removed = 0;
+    for (const [storageKey, item] of Object.entries(await this.store.items(uid))) {
+      if (!UNRESOLVED_STATUSES.has(asMap(item).status)) continue;
+      if (await this.store.removeUnresolved(uid, storageKey, cutoffMs, nowMs)) removed += 1;
+    }
+    return removed;
   }
 
   run() {
@@ -483,12 +525,17 @@ class ExpiryScheduler {
   }
 
   async _runOnce() {
-    const totals = { agents: 0, sent: 0, failed: 0 };
+    const totals = { agents: 0, sent: 0, failed: 0, removed: 0 };
     const pending = [...await this.listAgentUids()];
     // Agents send from separate WhatsApp numbers, so a few run side by side.
     const worker = async () => {
       while (pending.length) {
         const uid = pending.shift();
+        try {
+          totals.removed += await this._cleanup(uid);
+        } catch (error) {
+          this.log(`Expiry scheduler: cleanup failed (${error?.code || error?.constructor?.name || 'error'})`);
+        }
         try {
           const result = await this._processAgent(uid);
           if (result) {
@@ -506,6 +553,7 @@ class ExpiryScheduler {
     if (totals.agents) {
       this.log(`Expiry scheduler: agents=${totals.agents} sent=${totals.sent} failed=${totals.failed}`);
     }
+    if (totals.removed) this.log(`Expiry scheduler: removed ${totals.removed} unresolved records`);
     return totals;
   }
 
