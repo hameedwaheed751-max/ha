@@ -8,19 +8,22 @@ import 'package:untitled/sas_project_national_service.dart';
 // الردود منسوخة من ملفات HAR لموقع admin.ftth.iq، دون أي اتصال حقيقي.
 Map<String, dynamic> _subscriptionModel({
   String expiredAt = '2026-09-28T16:59:52.000Z',
+  String basePlan = 'BASIC',
+  bool vas = true,
 }) => {
   'model': {
     'applicableSubscription': {
       'bundleId': 'FTTH_BASIC',
       'variants': [
         {
-          'id': 'BASIC',
+          'id': basePlan,
           'type': {'displayValue': 'Base'},
         },
-        {
-          'id': 'IPTV',
-          'type': {'displayValue': 'Vas'},
-        },
+        if (vas)
+          {
+            'id': 'IPTV',
+            'type': {'displayValue': 'Vas'},
+          },
       ],
     },
     'customer': {'id': '2276234'},
@@ -36,6 +39,7 @@ class _Fake {
   int unauthorizedOnce = 0;
   Object? changeResponse = {'paymentUrl': null, 'orderNumber': null};
   int subscriptionPages = 1;
+  bool catalog = false;
 
   late final client = MockClient((request) async {
     requests.add(request);
@@ -51,6 +55,69 @@ class _Fake {
       return http.Response('', 401);
     }
     if (path == '/api/subscriptions/8010490') return json(_subscriptionModel());
+    if (path == '/api/subscriptions/6816362') {
+      return json(_subscriptionModel(basePlan: 'FIBER 40', vas: false));
+    }
+    if (path == '/api/plans/bundles' && catalog) {
+      return json({
+        'totalCount': 1,
+        'items': [
+          {
+            'commitmentPeriods': [1, 2, 3, 4, 6, 12],
+            'applicableSubscriptions': [
+              for (final (id, speed) in [
+                ('BASIC', '60 Mbps'),
+                ('PLUS', '125 Mbps'),
+              ])
+                {
+                  'planName': id,
+                  'basePlanId': id,
+                  'bundleId': 'FTTH_BASIC',
+                  'speed': speed,
+                  'variants': [
+                    {
+                      'id': id,
+                      'type': {'displayValue': 'Base'},
+                    },
+                    if (request.url.queryParameters['subscriptionId'] ==
+                        '8010490')
+                      {
+                        'id': 'IPTV',
+                        'type': {'displayValue': 'Vas'},
+                      },
+                  ],
+                },
+            ],
+          },
+        ],
+      });
+    }
+    if (path == '/api/subscriptions/allowed-actions' && catalog) {
+      final id = request.url.queryParameters['subscriptionIds'];
+      return json({
+        'totalCount': 1,
+        'items': [
+          {
+            'subscriptionId': id,
+            'allowedActions': [
+              {'id': 2, 'displayValue': 'ImmediateChange'},
+              if (id == '8010490') {'id': 9, 'displayValue': 'Renew'},
+            ],
+          },
+        ],
+      });
+    }
+    if (path == '/api/subscriptions/6816362/change') {
+      return json(changeResponse!);
+    }
+    if (path == '/api/subscriptions/9999/change') {
+      return json({
+        'message': 'Plan FIBER 40 is not sellable',
+        'errors': {
+          'services': ['Invalid base plan'],
+        },
+      }, 400);
+    }
     if (path == '/api/subscriptions/calculate-price') {
       return json({
         'model': {
@@ -293,5 +360,94 @@ void main() {
         );
     expect(restored.confirmedBy(detail('2026-09-28T16:59:52.000Z')), isFalse);
     expect(restored.confirmedBy(detail('2026-10-28T16:59:52.000Z')), isTrue);
+  });
+
+  test(
+    'a legacy plan is changed to a sold plan, as the FTTH site does',
+    () async {
+      final fake = _Fake()
+        ..catalog = true
+        ..changeResponse = {
+          'paymentUrl': 'https://epg.tabadul.iq/pay',
+          'orderNumber': 'order-1',
+        };
+      final service = fake.service();
+      final quote = await service.fetchActivationQuote(
+        subscriptionId: '6816362',
+        customerId: '2276234',
+      );
+      expect(quote.currentPlanSold, isFalse);
+      expect(quote.renewAllowed, isFalse);
+      expect(quote.order.basePlanId, 'BASIC');
+      expect(quote.order.renew, isFalse);
+      expect(quote.commitmentPeriods, [1, 2, 3, 4, 6, 12]);
+      final price = fake.last('/api/subscriptions/calculate-price').url;
+      expect(price.queryParameters['planOperationType'], 'Change');
+      expect(price.queryParametersAll['services'], [
+        '{"value":"BASIC","type":"Base"}',
+      ]);
+
+      await service.activateSubscription(
+        detail: quote.detail,
+        price: quote.price,
+        method: FtthPaymentMethod.card,
+        order: quote.order,
+      );
+      final body = jsonDecode(
+        fake.last('/api/subscriptions/6816362/change').body,
+      );
+      expect(body['bundleId'], 'FTTH_BASIC');
+      expect(body['services'], [
+        {'value': 'BASIC', 'type': 'Base'},
+      ]);
+      expect(body['changeType'], 1);
+    },
+  );
+
+  test('a sold plan renews and keeps its extra services', () async {
+    final fake = _Fake()..catalog = true;
+    final quote = await fake.service().fetchActivationQuote(
+      subscriptionId: '8010490',
+      customerId: '2276234',
+    );
+    expect(quote.order.renew, isTrue);
+    expect(quote.order.services, [
+      {'value': 'BASIC', 'type': 'Base'},
+      {'value': 'IPTV', 'type': 'Vas'},
+    ]);
+
+    final plus = quote.plans.firstWhere((p) => p.basePlanId == 'PLUS');
+    final changed = quote.orderFor(plus, 3);
+    expect(changed.renew, isFalse);
+    expect(changed.commitmentPeriodValue, 3);
+    expect(changed.services, [
+      {'value': 'PLUS', 'type': 'Base'},
+      {'value': 'IPTV', 'type': 'Vas'},
+    ]);
+  });
+
+  test('a rejected activation shows the reason FTTH gives', () async {
+    final fake = _Fake();
+    final service = fake.service();
+    final detail = FtthSubscriptionDetail.fromModel(
+      '9999',
+      _subscriptionModel(basePlan: 'FIBER 40')['model'],
+    );
+    await expectLater(
+      service.activateSubscription(
+        detail: detail,
+        price: 29000,
+        method: FtthPaymentMethod.customerWallet,
+      ),
+      throwsA(
+        isA<SasProjectNationalException>()
+            .having((e) => e.statusCode, 'statusCode', 400)
+            .having(
+              (e) => e.message,
+              'message',
+              contains('Plan FIBER 40 is not sellable | Invalid base plan'),
+            ),
+      ),
+    );
   });
 }

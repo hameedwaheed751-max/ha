@@ -819,6 +819,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           subscriptionId: ids.subscriptionId,
           customerId: ids.customerId,
         ),
+        priceFor: (quote, order) =>
+            service.calculatePrice(quote.detail, order: order),
       ),
     );
     if (choice == null || !mounted) return;
@@ -849,6 +851,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           detail: detail,
           price: choice.quote.price,
           method: choice.method,
+          order: choice.quote.order,
         ),
       );
     } catch (e) {

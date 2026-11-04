@@ -126,6 +126,16 @@ class FtthSubscriptionDetail {
   bool get expired =>
       expiresAt == null || !expiresAt!.isAfter(DateTime.now().toUtc());
 
+  /// الخطة الأساسية الحالية، وقد تكون خطة قديمة لم تعد تُباع مثل FIBER 40.
+  String get basePlanId =>
+      services
+          .firstWhere(
+            (s) => s['type'] == 'Base',
+            orElse: () => const {},
+          )['value']
+          ?.toString() ??
+      '';
+
   factory FtthSubscriptionDetail.fromModel(
     String subscriptionId,
     Map<String, dynamic> model,
@@ -158,19 +168,170 @@ class FtthSubscriptionDetail {
   }
 }
 
-/// ما يحتاجه الوكيل لاختيار طريقة التفعيل.
+/// خطة يبيعها FTTH الآن، كما تعرضها خطوة اختيار الباقة في الموقع.
+class FtthPlan {
+  const FtthPlan({
+    required this.basePlanId,
+    required this.bundleId,
+    required this.name,
+    required this.speed,
+    required this.vasIds,
+  });
+
+  final String basePlanId;
+  final String bundleId;
+  final String name;
+  final String speed;
+
+  /// الخدمات الإضافية المسموحة مع هذه الخطة لهذا الاشتراك.
+  final Set<String> vasIds;
+
+  String get label => speed.isEmpty ? name : '$name — $speed';
+
+  static FtthPlan? fromJson(dynamic json) {
+    if (json is! Map) return null;
+    final id = (json['basePlanId'] ?? '').toString().trim();
+    final bundleId = (json['bundleId'] ?? '').toString().trim();
+    if (id.isEmpty || bundleId.isEmpty) return null;
+    final variants = json['variants'];
+    return FtthPlan(
+      basePlanId: id,
+      bundleId: bundleId,
+      name: (json['planName'] ?? id).toString(),
+      speed: (json['speed'] ?? '').toString(),
+      vasIds: {
+        if (variants is List)
+          for (final v in variants.whereType<Map>())
+            if (v['type'] is Map && v['type']['displayValue'] == 'Vas')
+              (v['id'] ?? '').toString(),
+      },
+    );
+  }
+}
+
+/// ما سيُطلب من FTTH: الخطة والخدمات وعدد الأشهر، وهل هو تجديد أم تغيير.
+class FtthRenewalOrder {
+  const FtthRenewalOrder({
+    required this.bundleId,
+    required this.basePlanId,
+    required this.services,
+    required this.commitmentPeriodValue,
+    required this.renew,
+  });
+
+  final String bundleId;
+  final String basePlanId;
+  final List<Map<String, String>> services;
+  final int commitmentPeriodValue;
+
+  /// موقع FTTH يجدد بنفس الخطة إن سمح الاشتراك بالتجديد، وإلا يطلب "تغيير".
+  final bool renew;
+
+  String get planOperationType => renew ? 'Renew' : 'Change';
+
+  factory FtthRenewalOrder.current(FtthSubscriptionDetail detail) =>
+      FtthRenewalOrder(
+        bundleId: detail.bundleId,
+        basePlanId: detail.basePlanId,
+        services: detail.services,
+        commitmentPeriodValue: detail.commitmentPeriodValue,
+        renew: true,
+      );
+}
+
+/// ما يحتاجه الوكيل لاختيار الخطة والمدة وطريقة التفعيل.
 class FtthActivationQuote {
   const FtthActivationQuote({
     required this.detail,
     required this.price,
     required this.partnerBalance,
     required this.customerBalance,
+    this.selectedOrder,
+    this.plans = const [],
+    this.commitmentPeriods = const [],
+    this.renewAllowed,
   });
 
   final FtthSubscriptionDetail detail;
   final double price;
   final double? partnerBalance;
   final double? customerBalance;
+
+  /// الطلب الذي حُسب له السعر؛ null يعني الخطة الحالية كما هي.
+  final FtthRenewalOrder? selectedOrder;
+  final List<FtthPlan> plans;
+  final List<int> commitmentPeriods;
+
+  /// null حين تعذرت قراءة الإجراءات المسموحة من FTTH.
+  final bool? renewAllowed;
+
+  FtthRenewalOrder get order =>
+      selectedOrder ?? FtthRenewalOrder.current(detail);
+
+  /// الخطة الحالية إن كانت ما تزال تُباع، وإلا BASIC أو أول خطة متاحة.
+  FtthPlan? get defaultPlan {
+    for (final id in [detail.basePlanId, 'BASIC']) {
+      for (final plan in plans) {
+        if (plan.basePlanId == id) return plan;
+      }
+    }
+    return plans.isEmpty ? null : plans.first;
+  }
+
+  bool get currentPlanSold =>
+      plans.isEmpty || plans.any((p) => p.basePlanId == detail.basePlanId);
+
+  int get defaultPeriod {
+    if (commitmentPeriods.isEmpty ||
+        commitmentPeriods.contains(detail.commitmentPeriodValue)) {
+      return detail.commitmentPeriodValue;
+    }
+    return commitmentPeriods.contains(1) ? 1 : commitmentPeriods.first;
+  }
+
+  /// يبني الطلب كما يبنيه موقع FTTH: الخطة الأساسية ثم الخدمات الإضافية
+  /// الحالية التي تسمح بها الخطة المختارة.
+  FtthRenewalOrder orderFor(FtthPlan? plan, int months) {
+    if (plan == null) {
+      final current = FtthRenewalOrder.current(detail);
+      return FtthRenewalOrder(
+        bundleId: current.bundleId,
+        basePlanId: current.basePlanId,
+        services: current.services,
+        commitmentPeriodValue: months,
+        renew: renewAllowed != false,
+      );
+    }
+    return FtthRenewalOrder(
+      bundleId: plan.bundleId,
+      basePlanId: plan.basePlanId,
+      services: [
+        {'value': plan.basePlanId, 'type': 'Base'},
+        for (final service in detail.services)
+          if (service['type'] == 'Vas' &&
+              plan.vasIds.contains(service['value']))
+            service,
+      ],
+      commitmentPeriodValue: months,
+      renew:
+          renewAllowed != false &&
+          plan.basePlanId == detail.basePlanId &&
+          plan.bundleId == detail.bundleId &&
+          months == detail.commitmentPeriodValue,
+    );
+  }
+
+  FtthActivationQuote withOrder(FtthRenewalOrder order, double price) =>
+      FtthActivationQuote(
+        detail: detail,
+        price: price,
+        partnerBalance: partnerBalance,
+        customerBalance: customerBalance,
+        selectedOrder: order,
+        plans: plans,
+        commitmentPeriods: commitmentPeriods,
+        renewAllowed: renewAllowed,
+      );
 
   double? balanceFor(FtthPaymentMethod method) => switch (method) {
     FtthPaymentMethod.card => null,
@@ -221,7 +382,9 @@ class FtthPendingActivation {
     final now = detail.expiresAt;
     if (now == null) return false;
     final before = previousExpiresAt;
-    return before == null ? now.isAfter(createdAt.toUtc()) : now.isAfter(before);
+    return before == null
+        ? now.isAfter(createdAt.toUtc())
+        : now.isAfter(before);
   }
 
   Map<String, dynamic> toJson() => {
@@ -253,8 +416,8 @@ class FtthPendingActivation {
 
 class SasProjectNationalService {
   SasProjectNationalService(this.settings, {http.Client? client})
-      : _client = client ?? http.Client(),
-        _baseUrl = _normalizeBaseUrl(settings.baseUrl);
+    : _client = client ?? http.Client(),
+      _baseUrl = _normalizeBaseUrl(settings.baseUrl);
 
   final SasProjectNationalSettings settings;
   final http.Client _client;
@@ -340,7 +503,7 @@ class SasProjectNationalService {
         )
         .timeout(const Duration(seconds: 45));
 
-      _log('login response: HTTP ${response.statusCode}');
+    _log('login response: HTTP ${response.statusCode}');
     final data = _decodeObject(response, 'FTTH login');
     final accessToken = (data['access_token'] ?? data['token'] ?? '')
         .toString()
@@ -404,11 +567,12 @@ class SasProjectNationalService {
           ? (self['displayValue'] ?? '').toString()
           : '';
       final username = (subscription['username'] ?? '').toString().trim();
-      final subscriptionId = (subscription['self'] is Map
-              ? subscription['self']['id']
-              : subscription['id'])
-          ?.toString()
-          .trim();
+      final subscriptionId =
+          (subscription['self'] is Map
+                  ? subscription['self']['id']
+                  : subscription['id'])
+              ?.toString()
+              .trim();
       final startDate = _parseDate(subscription['startedAt']) ?? DateTime.now();
       final endDate = _parseDate(subscription['expires']) ?? startDate;
       final bundle = subscription['bundle'];
@@ -485,8 +649,7 @@ class SasProjectNationalService {
           ..sasOnline = next.sasOnline
           ..sasData = {
             for (final key in localSasKeys)
-              if (existing.sasData.containsKey(key))
-                key: existing.sasData[key],
+              if (existing.sasData.containsKey(key)) key: existing.sasData[key],
             ...next.sasData,
           };
         updated++;
@@ -506,9 +669,7 @@ class SasProjectNationalService {
     return text.isEmpty ? null : DateTime.tryParse(text);
   }
 
-  Future<List<Map<String, dynamic>>> fetchCustomers({
-    int pageSize = 100,
-  }) {
+  Future<List<Map<String, dynamic>>> fetchCustomers({int pageSize = 100}) {
     return _fetchPage('/api/customers', pageSize: pageSize);
   }
 
@@ -531,9 +692,7 @@ class SasProjectNationalService {
     return all.values.toList();
   }
 
-  Future<List<Map<String, dynamic>>> fetchSessions({
-    int pageSize = 100,
-  }) {
+  Future<List<Map<String, dynamic>>> fetchSessions({int pageSize = 100}) {
     return _fetchPage('/api/sessions', pageSize: pageSize);
   }
 
@@ -568,15 +727,19 @@ class SasProjectNationalService {
   }
 
   /// السعر الذي سيخصمه FTTH، بعد العروض، كما تحسبه صفحة التجديد.
-  Future<double> calculatePrice(FtthSubscriptionDetail detail) async {
+  Future<double> calculatePrice(
+    FtthSubscriptionDetail detail, {
+    FtthRenewalOrder? order,
+  }) async {
+    final o = order ?? FtthRenewalOrder.current(detail);
     final data = await _getJson(
       '/api/subscriptions/calculate-price',
       query: {
-        'bundleId': detail.bundleId,
-        'commitmentPeriodValue': '${detail.commitmentPeriodValue}',
-        'planOperationType': detail.expired ? 'Renew' : 'Change',
+        'bundleId': o.bundleId,
+        'commitmentPeriodValue': '${o.commitmentPeriodValue}',
+        'planOperationType': o.planOperationType,
         'subscriptionId': detail.subscriptionId,
-        'services': [for (final service in detail.services) jsonEncode(service)],
+        'services': [for (final service in o.services) jsonEncode(service)],
         'salesType': '0',
       },
     );
@@ -584,11 +747,52 @@ class SasProjectNationalService {
     final total = model is Map ? model['totalPrice'] : null;
     final price = total is Map ? _asDouble(total['value']) : null;
     if (price == null || price <= 0) {
-      throw const SasProjectNationalException(
-        'لم يرجع موقع FTTH سعر التجديد',
-      );
+      throw const SasProjectNationalException('لم يرجع موقع FTTH سعر التجديد');
     }
     return price;
+  }
+
+  /// الخطط وفترات الالتزام التي يعرضها FTTH لهذا الاشتراك.
+  Future<({List<FtthPlan> plans, List<int> periods})> fetchPlans(
+    String subscriptionId,
+  ) async {
+    final data = await _getJson(
+      '/api/plans/bundles',
+      query: {'includePrices': 'false', 'subscriptionId': subscriptionId},
+    );
+    final plans = <FtthPlan>[];
+    final periods = <int>{};
+    for (final item in _extractRows(data)) {
+      final subs = item['applicableSubscriptions'];
+      if (subs is List) plans.addAll(subs.map(FtthPlan.fromJson).nonNulls);
+      final months = item['commitmentPeriods'];
+      if (months is List) {
+        periods.addAll(months.map((m) => int.tryParse('$m')).nonNulls);
+      }
+    }
+    return (plans: plans, periods: periods.toList()..sort());
+  }
+
+  /// هل يسمح FTTH بـ"تجديد" الاشتراك. الاشتراكات على خطط قديمة لا تسمح إلا
+  /// بـ"تغيير" الخطة.
+  Future<bool?> fetchRenewAllowed({
+    required String subscriptionId,
+    required String customerId,
+  }) async {
+    final data = await _getJson(
+      '/api/subscriptions/allowed-actions',
+      query: {
+        'subscriptionIds': subscriptionId,
+        if (customerId.trim().isNotEmpty) 'customerId': customerId,
+      },
+    );
+    for (final item in _extractRows(data)) {
+      if ('${item['subscriptionId']}' != subscriptionId) continue;
+      final actions = item['allowedActions'];
+      if (actions is! List) return null;
+      return actions.whereType<Map>().any((a) => a['displayValue'] == 'Renew');
+    }
+    return null;
   }
 
   Future<double?> fetchPartnerBalance(String partnerId) =>
@@ -612,28 +816,52 @@ class SasProjectNationalService {
       subscriptionId: subscriptionId,
       customerId: customerId,
     );
-    final price = await calculatePrice(detail);
-    Future<double?> safely(Future<double?> Function() read) async {
+    Future<T?> safely<T>(String what, Future<T?> Function() read) async {
       try {
         return await read();
       } catch (error) {
-        _log('balance read failed: $error');
+        _log('$what read failed: $error');
         return null;
       }
     }
 
+    // تعذر قراءة الخطط أو الإجراءات لا يمنع التفعيل بنفس الخطة الحالية.
+    final catalog = await safely(
+      'plans',
+      () => fetchPlans(detail.subscriptionId),
+    );
+    final renewAllowed = await safely(
+      'allowed actions',
+      () => fetchRenewAllowed(
+        subscriptionId: detail.subscriptionId,
+        customerId: detail.customerId.isNotEmpty
+            ? detail.customerId
+            : customerId,
+      ),
+    );
     final partnerBalance = detail.partnerId.isEmpty
         ? null
-        : await safely(() => fetchPartnerBalance(detail.partnerId));
+        : await safely(
+            'partner balance',
+            () => fetchPartnerBalance(detail.partnerId),
+          );
     final customerBalance = detail.customerId.isEmpty
         ? null
-        : await safely(() => fetchCustomerBalance(detail.customerId));
-    return FtthActivationQuote(
+        : await safely(
+            'customer balance',
+            () => fetchCustomerBalance(detail.customerId),
+          );
+    final base = FtthActivationQuote(
       detail: detail,
-      price: price,
+      price: 0,
       partnerBalance: partnerBalance,
       customerBalance: customerBalance,
+      plans: catalog?.plans ?? const [],
+      commitmentPeriods: catalog?.periods ?? const [],
+      renewAllowed: renewAllowed,
     );
+    final order = base.orderFor(base.defaultPlan, base.defaultPeriod);
+    return base.withOrder(order, await calculatePrice(detail, order: order));
   }
 
   /// يرسل طلب التجديد مرة واحدة فقط، ولا يعيده تلقائياً عند الفشل أو انتهاء المهلة.
@@ -641,16 +869,18 @@ class SasProjectNationalService {
     required FtthSubscriptionDetail detail,
     required double price,
     required FtthPaymentMethod method,
+    FtthRenewalOrder? order,
   }) async {
     if (!method.available) {
       throw SasProjectNationalException('${method.label} غير متاح بعد');
     }
     final id = detail.subscriptionId;
+    final o = order ?? FtthRenewalOrder.current(detail);
     final body = <String, dynamic>{
       'simulatedPrice': price,
-      'bundleId': detail.bundleId,
-      'services': detail.services,
-      'commitmentPeriodValue': detail.commitmentPeriodValue,
+      'bundleId': o.bundleId,
+      'services': o.services,
+      'commitmentPeriodValue': o.commitmentPeriodValue,
       'salesType': 0,
       'paymentDetails': switch (method) {
         FtthPaymentMethod.card => {
@@ -679,9 +909,7 @@ class SasProjectNationalService {
     final paymentUrl = (map['paymentUrl'] ?? '').toString().trim();
     final orderNumber = (map['orderNumber'] ?? '').toString().trim();
     if (method.waitsForPayment && paymentUrl.isEmpty) {
-      throw const SasProjectNationalException(
-        'لم يرجع موقع FTTH رابط الدفع',
-      );
+      throw const SasProjectNationalException('لم يرجع موقع FTTH رابط الدفع');
     }
     return FtthActivationResult(
       method: method,
@@ -743,10 +971,7 @@ class SasProjectNationalService {
     return all;
   }
 
-  Future<dynamic> _getJson(
-    String path, {
-    Map<String, dynamic>? query,
-  }) {
+  Future<dynamic> _getJson(String path, {Map<String, dynamic>? query}) {
     return _send(
       'GET $path',
       () => _client.get(_uri(path, query), headers: _headers()),
@@ -798,8 +1023,10 @@ class SasProjectNationalService {
 
   static dynamic _decode(http.Response response, String operation) {
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      final reason = _serverReason(response.body);
       throw SasProjectNationalException(
-        '$operation failed with HTTP ${response.statusCode}',
+        '$operation failed with HTTP ${response.statusCode}'
+        '${reason.isEmpty ? '' : ' — $reason'}',
         statusCode: response.statusCode,
         response: response.body.length > 300
             ? response.body.substring(0, 300)
@@ -817,6 +1044,39 @@ class SasProjectNationalService {
       );
     }
     return data;
+  }
+
+  /// سبب الرفض كما يكتبه FTTH، مختصراً، ليظهر للوكيل بدل رقم الخطأ وحده.
+  static String _serverReason(String body) {
+    dynamic json;
+    try {
+      json = jsonDecode(body);
+    } catch (_) {
+      return '';
+    }
+    final parts = <String>[];
+    void add(dynamic value) {
+      final text = value?.toString().trim() ?? '';
+      if (text.isNotEmpty && !parts.contains(text)) parts.add(text);
+    }
+
+    if (json is Map) {
+      for (final key in ['message', 'title', 'detail', 'error_description']) {
+        add(json[key]);
+      }
+      final errors = json['errors'];
+      if (errors is Map) {
+        for (final value in errors.values) {
+          value is List ? value.forEach(add) : add(value);
+        }
+      } else if (errors is List) {
+        for (final e in errors) {
+          add(e is Map ? (e['message'] ?? e['description'] ?? e) : e);
+        }
+      }
+    }
+    final text = parts.join(' | ');
+    return text.length > 200 ? '${text.substring(0, 200)}…' : text;
   }
 
   static Map<String, dynamic> _decodeObject(
@@ -837,7 +1097,15 @@ class SasProjectNationalService {
   static List<Map<String, dynamic>> _extractRows(dynamic data) {
     dynamic rows = data;
     if (data is Map) {
-      for (final key in ['items', 'content', 'results', 'data', 'customers', 'subscriptions', 'sessions']) {
+      for (final key in [
+        'items',
+        'content',
+        'results',
+        'data',
+        'customers',
+        'subscriptions',
+        'sessions',
+      ]) {
         if (data[key] is List) {
           rows = data[key];
           break;
