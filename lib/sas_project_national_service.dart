@@ -309,7 +309,17 @@ class SasProjectNationalService {
     };
   }
 
+  /// موقع FTTH يسمح للمتصفح بكل الرؤوس عبر `*`، والمتصفحات لا تعدّ ذلك
+  /// سماحاً بـ Authorization، فتُحجب كل الطلبات بعد الدخول. وبروكسي الويب
+  /// لا يصل إلى admin.ftth.iq (يرد 520)، لذلك يعمل FTTH من تطبيق الهاتف فقط.
+  static const webUnsupportedMessage =
+      'ساس المشروع الوطني لا يعمل من المتصفح لأن موقع FTTH يمنع ذلك. '
+      'استخدم تطبيق أندرويد للمزامنة والتفعيل.';
+
   Future<void> login() async {
+    if (kIsWeb) {
+      throw const SasProjectNationalException(webUnsupportedMessage);
+    }
     _log('login start: POST /api/auth/Contractor/token');
     final response = await _client
         .post(

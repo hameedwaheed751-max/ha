@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../sas_project_national_service.dart';
@@ -135,9 +136,19 @@ class _SasProjectNationalScreenState extends State<SasProjectNationalScreen> {
                 ),
               ),
             ),
+            if (kIsWeb) ...[
+              const SizedBox(height: 16),
+              Text(
+                SasProjectNationalService.webUnsupportedMessage,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: _loading || _settingsLoading ? null : _sync,
+              onPressed: kIsWeb || _loading || _settingsLoading ? null : _sync,
               icon: _loading
                   ? const SizedBox(
                       width: 18,
