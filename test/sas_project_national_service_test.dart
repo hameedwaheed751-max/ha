@@ -416,6 +416,10 @@ void main() {
       {'value': 'IPTV', 'type': 'Vas'},
     ]);
 
+    // نفس الخطة لعدة أشهر تبقى تجديداً، فيُمدَّد المشترك الفعّال.
+    final basic = quote.plans.firstWhere((p) => p.basePlanId == 'BASIC');
+    expect(quote.orderFor(basic, 3).renew, isTrue);
+
     final plus = quote.plans.firstWhere((p) => p.basePlanId == 'PLUS');
     final changed = quote.orderFor(plus, 3);
     expect(changed.renew, isFalse);

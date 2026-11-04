@@ -25,9 +25,13 @@ class FtthActivationDialog extends StatefulWidget {
     required this.subscriberName,
     required this.loadQuote,
     required this.priceFor,
+    this.renewal = false,
   });
 
   final String subscriberName;
+
+  /// المشترك فعّال، فالعملية تجديد (تمديد) لا تفعيل.
+  final bool renewal;
   final Future<FtthActivationQuote> Function() loadQuote;
   final Future<double> Function(
     FtthActivationQuote quote,
@@ -182,9 +186,23 @@ class _FtthActivationDialogState extends State<FtthActivationDialog> {
       ),
       const SizedBox(height: 8),
       Text(
-        quote.order.renew ? 'العملية: تجديد' : 'العملية: تغيير الخطة',
+        !quote.order.renew
+            ? 'العملية: تغيير الخطة'
+            : quote.detail.expired
+            ? 'العملية: تجديد'
+            : 'العملية: تمديد — تُضاف المدة لاشتراك فعّال',
         style: TextStyle(color: colors.onSurfaceVariant),
       ),
+      // تغيير خطة مشترك فعّال ليس تمديداً، وقد يبدأ الخطة الجديدة من الآن.
+      if (!quote.order.renew && !quote.detail.expired)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            'المشترك فعّال: للتمديد أبقِ خطته الحالية. تغيير الخطة قد يبدأ '
+            'الخطة الجديدة من الآن بدل إضافتها بعد تاريخ الانتهاء.',
+            style: TextStyle(color: colors.error),
+          ),
+        ),
     ];
   }
 
@@ -196,7 +214,7 @@ class _FtthActivationDialogState extends State<FtthActivationDialog> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: AlertDialog(
-        title: const Text('تفعيل اشتراك FTTH'),
+        title: Text(widget.renewal ? 'تجديد اشتراك FTTH' : 'تفعيل اشتراك FTTH'),
         content: SizedBox(
           width: 420,
           child: _error != null

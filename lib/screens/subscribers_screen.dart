@@ -816,6 +816,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       context: context,
       builder: (_) => FtthActivationDialog(
         subscriberName: s.name,
+        renewal: !s.expired,
         loadQuote: () => service.fetchActivationQuote(
           subscriptionId: ids.subscriptionId,
           customerId: ids.customerId,
@@ -877,7 +878,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     await _recordSubscriberActivity(
       s,
       DailyTaskEvent.activationRequestedType,
-      'طلب تفعيل FTTH — ${choice.method.label}',
+      '${detail.expired ? 'طلب تفعيل' : 'طلب تجديد'} FTTH — ${choice.method.label}',
     );
 
     if (choice.method.waitsForPayment) {
@@ -951,7 +952,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, 'discard'),
                 child: Text(
-                  pending.orderNumber.isNotEmpty ? 'إلغاء الطلب' : 'تجاهل الطلب',
+                  pending.orderNumber.isNotEmpty
+                      ? 'إلغاء الطلب'
+                      : 'تجاهل الطلب',
                 ),
               ),
               if (pending.paymentUrl.isNotEmpty)
@@ -1079,8 +1082,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     Subscriber s,
     FtthPendingActivation pending,
   ) async {
-    s.sasData[SasProjectNationalService.pendingActivationKey] =
-        pending.toJson();
+    s.sasData[SasProjectNationalService.pendingActivationKey] = pending
+        .toJson();
     await AppStore.save();
   }
 
@@ -1426,13 +1429,18 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   Navigator.pop(ctx);
                   add();
                 }),
-                _op(Icons.check_circle, Colors.green, 'تفعيل', () async {
-                  if (s.source == 'ftth') {
-                    _activateFtthSubscriber(s, modalContext: ctx);
-                  } else {
-                    _activateSubscriber(s, modalContext: ctx);
-                  }
-                }),
+                _op(
+                  Icons.check_circle,
+                  Colors.green,
+                  s.source == 'ftth' && !s.expired ? 'تجديد' : 'تفعيل',
+                  () async {
+                    if (s.source == 'ftth') {
+                      _activateFtthSubscriber(s, modalContext: ctx);
+                    } else {
+                      _activateSubscriber(s, modalContext: ctx);
+                    }
+                  },
+                ),
                 if (isSas)
                   _op(Icons.calendar_month, Colors.orange, 'تمديد', () {
                     Navigator.pop(ctx);

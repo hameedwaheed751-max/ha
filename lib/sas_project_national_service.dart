@@ -377,11 +377,12 @@ class FtthActivationQuote {
             service,
       ],
       commitmentPeriodValue: months,
+      // نفس الخطة تجديد ولو تغيّر عدد الأشهر، فيُمدَّد المشترك الفعّال بدل
+      // أن تُستبدل خطته.
       renew:
           renewAllowed != false &&
           plan.basePlanId == detail.basePlanId &&
-          plan.bundleId == detail.bundleId &&
-          months == detail.commitmentPeriodValue,
+          plan.bundleId == detail.bundleId,
     );
   }
 
