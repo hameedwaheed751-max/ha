@@ -12,6 +12,7 @@ import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
 import 'activation_payment_dialog.dart';
 import 'add_subscriber_screen.dart';
+import 'ftth_activation_dialog.dart';
 import 'dashboard_widgets.dart';
 import 'partial_payment_flow.dart';
 import 'quick_reports_screen.dart';
@@ -761,106 +762,354 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
   }
 
+  /// طلب تجديد FTTH قد يخصم مالاً، فلا يُرسل طلب ثانٍ ما دام السابق لم يُحسم.
   Future<void> _activateFtthSubscriber(
     Subscriber s, {
     BuildContext? modalContext,
   }) async {
+    if (modalContext != null && modalContext.mounted) {
+      Navigator.pop(modalContext);
+    }
+    if (operationBusy) return;
+    operationBusy = true;
+    SasProjectNationalService? service;
     try {
-      if (modalContext != null && modalContext.mounted) {
-        Navigator.pop(modalContext);
-      }
-
       final settings = await SasProjectNationalSettings.load();
-      final service = SasProjectNationalService(settings);
-
-      final subscriptionId = s.sasId.trim().isNotEmpty
-          ? s.sasId.trim()
-          : (s.sasData['subscription_id'] ?? s.sasData['id'] ?? '')
-                .toString()
-                .trim();
-      if (subscriptionId.isEmpty) {
-        throw Exception('معرّف اشتراك FTTH غير موجود في بيانات المشترك');
+      if (settings.username.trim().isEmpty || settings.password.isEmpty) {
+        throw Exception('أكمل إعدادات ساس المشروع الوطني أولاً');
       }
-
-      final customerId =
-          (s.sasData['customer_id'] ?? s.sasData['customerId'] ?? '')
-              .toString()
-              .trim();
-      final rawSubscription = s.sasData['rawSubscription'];
-      final bundleId =
-          (rawSubscription is Map && rawSubscription['bundle'] is Map)
-          ? ((rawSubscription['bundle']['id'] ??
-                        rawSubscription['bundle']['code']) ??
-                    'FTTH_BASIC')
-                .toString()
-          : 'FTTH_BASIC';
-      final services = [
-        {'value': 'BASIC', 'type': 'Base'},
-        {'value': 'PARENTAL_CONTROL', 'type': 'Vas'},
-        {'value': 'IPTV', 'type': 'Vas'},
-      ];
-
-      final result = await service.activateSubscription(
-        subscriptionId: subscriptionId,
-        customerId: customerId,
-        paymentMethod: 'Tabadul',
-        extraPayload: {
-          'simulatedPrice': s.price,
-          'bundleId': bundleId,
-          'services': services,
-          'commitmentPeriodValue': 1,
-          'salesType': 0,
-          'changeType': 1,
-        },
+      service = SasProjectNationalService(settings);
+      final pending = FtthPendingActivation.fromJson(
+        s.sasData[SasProjectNationalService.pendingActivationKey],
       );
-
-      await _recordSubscriberActivity(
-        s,
-        DailyTaskEvent.activationRequestedType,
-        'تم إنشاء طلب تفعيل FTTH',
-      );
-
-      final paymentUrl = ((result['paymentUrl'] ?? result['payment_url']) ?? '')
-          .toString()
-          .trim();
-      final orderNumber =
-          ((result['orderNumber'] ?? result['order_number']) ?? '')
-              .toString()
-              .trim();
-
-      if (!mounted) return;
-
-      if (paymentUrl.isNotEmpty) {
-        final uri = Uri.tryParse(paymentUrl);
-        if (uri != null) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              orderNumber.isNotEmpty
-                  ? '✅ تم إنشاء طلب FTTH بنجاح — Order: $orderNumber'
-                  : '✅ تم إنشاء طلب FTTH بنجاح وإعادة توجيه الدفع',
-            ),
-            backgroundColor: Colors.green.shade600,
-            duration: const Duration(seconds: 5),
-          ),
-        );
+      if (pending != null) {
+        await _resolveFtthPending(s, service, pending);
+      } else {
+        await _startFtthActivation(s, service);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ فشل تفعيل FTTH: $e'),
-            backgroundColor: Colors.red.shade600,
-            duration: const Duration(seconds: 5),
-          ),
+      _showFtthMessage('❌ فشل تفعيل FTTH: $e', color: Colors.red.shade600);
+    } finally {
+      service?.dispose();
+      operationBusy = false;
+    }
+  }
+
+  ({String subscriptionId, String customerId}) _ftthIds(Subscriber s) {
+    final subscriptionId = s.sasId.trim().isNotEmpty
+        ? s.sasId.trim()
+        : (s.sasData['subscription_id'] ?? '').toString().trim();
+    final customerId = (s.sasData['customer_id'] ?? '').toString().trim();
+    return (subscriptionId: subscriptionId, customerId: customerId);
+  }
+
+  Future<void> _startFtthActivation(
+    Subscriber s,
+    SasProjectNationalService service,
+  ) async {
+    final ids = _ftthIds(s);
+    if (ids.subscriptionId.isEmpty) {
+      throw Exception('معرّف اشتراك FTTH غير موجود في بيانات المشترك');
+    }
+    final choice = await showDialog<FtthActivationChoice>(
+      context: context,
+      builder: (_) => FtthActivationDialog(
+        subscriberName: s.name,
+        loadQuote: () => service.fetchActivationQuote(
+          subscriptionId: ids.subscriptionId,
+          customerId: ids.customerId,
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    // الدفع بالمحفظة يخصم فوراً، فيُسأل عن الواصل قبل الإرسال كما في SAS.
+    ActivationPayment? payment;
+    if (!choice.method.waitsForPayment) {
+      payment = await _confirmActivation(s);
+      if (payment == null || !mounted) return;
+    }
+
+    final detail = choice.quote.detail;
+    final sentAt = DateTime.now();
+    FtthPendingActivation pendingWith({String url = '', String order = ''}) =>
+        FtthPendingActivation(
+          method: choice.method,
+          price: choice.quote.price,
+          previousExpiresAt: detail.expiresAt,
+          createdAt: sentAt,
+          paymentUrl: url,
+          orderNumber: order,
         );
+
+    final FtthActivationResult result;
+    try {
+      result = await _withFtthLoading(
+        () => service.activateSubscription(
+          detail: detail,
+          price: choice.quote.price,
+          method: choice.method,
+        ),
+      );
+    } catch (e) {
+      // رفض صريح من الخادم يعني أن شيئاً لم يُنفَّذ. أما الانقطاع أو المهلة
+      // أو رد ناقص فقد يكون الطلب نُفّذ، فيبقى معلقاً للتحقق.
+      if (e is SasProjectNationalException && (e.statusCode ?? 0) >= 400) {
+        rethrow;
+      }
+      await _saveFtthPending(s, pendingWith());
+      _showFtthMessage(
+        '⚠️ لم تُعرف نتيجة طلب التفعيل. لا تعد الإرسال؛ اضغط تفعيل لاحقاً للتحقق',
+        color: Colors.orange.shade800,
+      );
+      return;
+    }
+
+    final pending = pendingWith(
+      url: result.paymentUrl,
+      order: result.orderNumber,
+    );
+    await _saveFtthPending(s, pending);
+    await _recordSubscriberActivity(
+      s,
+      DailyTaskEvent.activationRequestedType,
+      'طلب تفعيل FTTH — ${choice.method.label}',
+    );
+
+    if (choice.method.waitsForPayment) {
+      await _openFtthPayment(pending);
+      if (mounted) await _resolveFtthPending(s, service, pending);
+      return;
+    }
+
+    // التفعيل بالمحفظة فوري، لكن لا نعتمده قبل أن يظهر التاريخ الجديد في FTTH.
+    final renewed = await _withFtthLoading(
+      () => _waitForFtthRenewal(service, s, pending),
+    );
+    if (renewed != null) {
+      await _finishFtthActivation(s, pending, renewed, payment: payment);
+    } else {
+      _showFtthMessage(
+        '⚠️ أُرسل الطلب ولم يظهر التجديد في FTTH بعد. لا تعد الإرسال؛ اضغط تفعيل بعد قليل للتحقق',
+        color: Colors.orange.shade800,
+      );
+    }
+  }
+
+  Future<FtthSubscriptionDetail?> _waitForFtthRenewal(
+    SasProjectNationalService service,
+    Subscriber s,
+    FtthPendingActivation pending, {
+    int attempts = 3,
+  }) async {
+    final ids = _ftthIds(s);
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      if (attempt > 0) await Future<void>.delayed(const Duration(seconds: 3));
+      try {
+        final detail = await service.fetchSubscription(
+          subscriptionId: ids.subscriptionId,
+          customerId: ids.customerId,
+        );
+        if (pending.confirmedBy(detail)) return detail;
+      } catch (error) {
+        debugPrint('FTTH renewal check failed: $error');
       }
     }
+    return null;
+  }
+
+  Future<void> _resolveFtthPending(
+    Subscriber s,
+    SasProjectNationalService service,
+    FtthPendingActivation pending,
+  ) async {
+    while (true) {
+      if (!mounted) return;
+      final action = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            title: const Text('طلب تفعيل FTTH بانتظار التأكيد'),
+            content: Text(
+              '${s.name}\n'
+              'الطريقة: ${pending.method.label}\n'
+              'المبلغ: ${formatIqd(pending.price)}\n'
+              'أُرسل: ${fmt(pending.createdAt)}\n\n'
+              '${pending.method.waitsForPayment ? 'أكمل الدفع في الصفحة ثم اضغط تحقق.' : 'تحقق من ظهور التجديد في FTTH.'}',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, 'close'),
+                child: const Text('لاحقاً'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, 'discard'),
+                child: Text(
+                  pending.orderNumber.isNotEmpty ? 'إلغاء الطلب' : 'تجاهل الطلب',
+                ),
+              ),
+              if (pending.paymentUrl.isNotEmpty)
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, 'open'),
+                  child: const Text('صفحة الدفع'),
+                ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, 'verify'),
+                child: const Text('تحقق'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (!mounted || action == null || action == 'close') return;
+      if (action == 'open') {
+        await _openFtthPayment(pending);
+        continue;
+      }
+
+      // قبل الإلغاء أيضاً نتحقق، حتى لا يُلغى طلب دُفع فعلاً.
+      final renewed = await _withFtthLoading(
+        () => _waitForFtthRenewal(service, s, pending, attempts: 1),
+      );
+      if (renewed != null) {
+        await _finishFtthActivation(s, pending, renewed);
+        return;
+      }
+      if (action == 'verify') {
+        _showFtthMessage(
+          'لم يظهر التجديد في FTTH بعد',
+          color: Colors.orange.shade800,
+        );
+        continue;
+      }
+
+      if (!await _confirmFtthDiscard(pending)) continue;
+      if (pending.orderNumber.isNotEmpty) {
+        await _withFtthLoading(() => service.cancelOrder(pending.orderNumber));
+      }
+      s.sasData.remove(SasProjectNationalService.pendingActivationKey);
+      await AppStore.save();
+      _showFtthMessage('تم إلغاء طلب التفعيل');
+      return;
+    }
+  }
+
+  Future<bool> _confirmFtthDiscard(FtthPendingActivation pending) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => Directionality(
+            textDirection: TextDirection.rtl,
+            child: AlertDialog(
+              title: Text(
+                pending.orderNumber.isNotEmpty ? 'إلغاء الطلب' : 'تجاهل الطلب',
+              ),
+              content: Text(
+                pending.orderNumber.isNotEmpty
+                    ? 'سيُلغى طلب الدفع في FTTH. لا تلغه إن كان المشترك قد دفع.'
+                    : 'تأكد من موقع FTTH أن الاشتراك لم يُجدَّد ولم يُخصم المبلغ قبل التجاهل.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('رجوع'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('تأكيد'),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
+  }
+
+  /// يسجل البيع بعد تأكد التجديد. إن أُغلقت نافذة الواصل يبقى الطلب معلقاً
+  /// حتى يُسجَّل لاحقاً، فلا يضيع المبلغ ولا يُعاد التفعيل.
+  Future<void> _finishFtthActivation(
+    Subscriber s,
+    FtthPendingActivation pending,
+    FtthSubscriptionDetail renewed, {
+    ActivationPayment? payment,
+  }) async {
+    payment ??= await _confirmActivation(s);
+    if (payment == null) {
+      _showFtthMessage(
+        '✅ تم التجديد في FTTH. اضغط تفعيل مرة أخرى لتسجيل المبلغ',
+        color: Colors.orange.shade800,
+      );
+      return;
+    }
+    final at = DateTime.now();
+    s.active = true;
+    s.disabled = false;
+    if (renewed.expiresAt != null) s.endDate = renewed.expiresAt!;
+    _setStartDateAsActivationDay(s, at: at);
+    s.sasData.remove(SasProjectNationalService.pendingActivationKey);
+    final sale = await _recordActivationSale(
+      s,
+      payment: payment,
+      // رصيد المشترك لا يُخصم من الوكيل.
+      sasDeduction: pending.method == FtthPaymentMethod.customerWallet
+          ? 0
+          : pending.price,
+      at: at,
+      note: 'تفعيل FTTH — ${pending.method.label}',
+    );
+    await AppStore.save();
+    await _recordActivationLedger(s, payment: payment, sale: sale, at: at);
+    if (!mounted) return;
+    setState(() {
+      selected = null;
+      _filteredSubscribers = _buildFilteredSubscribers();
+    });
+    _showFtthMessage(
+      '✅ تم تفعيل FTTH حتى ${fmt(s.endDate)}',
+      color: Colors.green.shade600,
+    );
+  }
+
+  Future<void> _saveFtthPending(
+    Subscriber s,
+    FtthPendingActivation pending,
+  ) async {
+    s.sasData[SasProjectNationalService.pendingActivationKey] =
+        pending.toJson();
+    await AppStore.save();
+  }
+
+  Future<void> _openFtthPayment(FtthPendingActivation pending) async {
+    final uri = Uri.tryParse(pending.paymentUrl);
+    if (uri == null) return;
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      _showFtthMessage('تعذر فتح صفحة الدفع', color: Colors.red.shade600);
+    }
+  }
+
+  Future<T> _withFtthLoading<T>(Future<T> Function() task) async {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      return await task();
+    } finally {
+      if (mounted) Navigator.of(context).pop();
+    }
+  }
+
+  void _showFtthMessage(String text, {Color? color}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(text),
+        backgroundColor: color,
+        duration: const Duration(seconds: 6),
+      ),
+    );
   }
 
   /// ضغطتان متتاليتان تعنيان خصمين من رصيد SAS.
@@ -1156,8 +1405,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 }),
                 _op(Icons.check_circle, Colors.green, 'تفعيل', () async {
                   if (s.source == 'ftth') {
-                    final confirmed = await _confirmFtthActivation(s);
-                    if (!confirmed || !ctx.mounted) return;
                     _activateFtthSubscriber(s, modalContext: ctx);
                   } else {
                     _activateSubscriber(s, modalContext: ctx);
@@ -1411,30 +1658,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     } catch (error) {
       debugPrint('Could not save subscriber activity: $error');
     }
-  }
-
-  Future<bool> _confirmFtthActivation(Subscriber subscriber) async {
-    return await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => Directionality(
-            textDirection: TextDirection.rtl,
-            child: AlertDialog(
-              title: const Text('تأكيد التفعيل'),
-              content: Text('هل تريد تفعيل اشتراك ${subscriber.name}؟'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
-                  child: const Text('إلغاء'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(dialogContext, true),
-                  child: const Text('تفعيل'),
-                ),
-              ],
-            ),
-          ),
-        ) ??
-        false;
   }
 
   String _newGuid() {

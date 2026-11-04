@@ -80,6 +80,177 @@ class SasProjectNationalSyncResult {
   final int updated;
 }
 
+/// طرق الدفع التي يعرضها موقع FTTH عند تجديد الاشتراك.
+enum FtthPaymentMethod {
+  card('الماستر (بطاقة Tabadul)'),
+  customerWallet('رصيد المشترك'),
+  partnerWallet('رصيد الوكيل');
+
+  const FtthPaymentMethod(this.label);
+  final String label;
+
+  /// قيمة رصيد الوكيل لم تُسجَّل بعد من الموقع، فتبقى معطلة حتى نتأكد منها.
+  bool get available => this != FtthPaymentMethod.partnerWallet;
+
+  /// الدفع بالمحفظة يفعّل مباشرة، والبطاقة تنتظر إكمال الدفع خارج التطبيق.
+  bool get waitsForPayment => this == FtthPaymentMethod.card;
+
+  static FtthPaymentMethod? fromName(String? name) {
+    for (final method in values) {
+      if (method.name == name) return method;
+    }
+    return null;
+  }
+}
+
+/// بيانات الاشتراك كما يقرؤها موقع FTTH قبل التجديد.
+class FtthSubscriptionDetail {
+  const FtthSubscriptionDetail({
+    required this.subscriptionId,
+    required this.customerId,
+    required this.partnerId,
+    required this.bundleId,
+    required this.services,
+    required this.commitmentPeriodValue,
+    required this.expiresAt,
+  });
+
+  final String subscriptionId;
+  final String customerId;
+  final String partnerId;
+  final String bundleId;
+  final List<Map<String, String>> services;
+  final int commitmentPeriodValue;
+  final DateTime? expiresAt;
+
+  bool get expired =>
+      expiresAt == null || !expiresAt!.isAfter(DateTime.now().toUtc());
+
+  factory FtthSubscriptionDetail.fromModel(
+    String subscriptionId,
+    Map<String, dynamic> model,
+  ) {
+    String idOf(dynamic node) =>
+        node is Map ? (node['id'] ?? '').toString().trim() : '';
+    final applicable = model['applicableSubscription'];
+    final variants = applicable is Map ? applicable['variants'] : null;
+    final services = <Map<String, String>>[
+      if (variants is List)
+        for (final variant in variants.whereType<Map>())
+          if (idOf(variant).isNotEmpty && variant['type'] is Map)
+            {
+              'value': idOf(variant),
+              'type': (variant['type']['displayValue'] ?? '').toString(),
+            },
+    ];
+    return FtthSubscriptionDetail(
+      subscriptionId: subscriptionId,
+      customerId: idOf(model['customer']),
+      partnerId: idOf(model['partner']),
+      bundleId: applicable is Map
+          ? (applicable['bundleId'] ?? '').toString().trim()
+          : '',
+      services: services,
+      commitmentPeriodValue:
+          int.tryParse('${model['commitmentPeriodValue'] ?? ''}') ?? 1,
+      expiresAt: SasProjectNationalService._parseDate(model['expiredAt']),
+    );
+  }
+}
+
+/// ما يحتاجه الوكيل لاختيار طريقة التفعيل.
+class FtthActivationQuote {
+  const FtthActivationQuote({
+    required this.detail,
+    required this.price,
+    required this.partnerBalance,
+    required this.customerBalance,
+  });
+
+  final FtthSubscriptionDetail detail;
+  final double price;
+  final double? partnerBalance;
+  final double? customerBalance;
+
+  double? balanceFor(FtthPaymentMethod method) => switch (method) {
+    FtthPaymentMethod.card => null,
+    FtthPaymentMethod.customerWallet => customerBalance,
+    FtthPaymentMethod.partnerWallet => partnerBalance,
+  };
+
+  bool canUse(FtthPaymentMethod method) {
+    if (!method.available) return false;
+    final balance = balanceFor(method);
+    return balance == null && method == FtthPaymentMethod.card ||
+        balance != null && balance + 0.0001 >= price;
+  }
+}
+
+class FtthActivationResult {
+  const FtthActivationResult({
+    required this.method,
+    required this.paymentUrl,
+    required this.orderNumber,
+  });
+
+  final FtthPaymentMethod method;
+  final String paymentUrl;
+  final String orderNumber;
+}
+
+/// طلب تجديد أُرسل ولم يتأكد تغيّر الاشتراك بعد، فلا يُرسل غيره حتى يُحسم.
+class FtthPendingActivation {
+  const FtthPendingActivation({
+    required this.method,
+    required this.price,
+    required this.previousExpiresAt,
+    required this.createdAt,
+    this.paymentUrl = '',
+    this.orderNumber = '',
+  });
+
+  final FtthPaymentMethod method;
+  final double price;
+  final DateTime? previousExpiresAt;
+  final DateTime createdAt;
+  final String paymentUrl;
+  final String orderNumber;
+
+  /// يتأكد التجديد حين يصبح تاريخ الانتهاء أبعد مما كان عند الإرسال.
+  bool confirmedBy(FtthSubscriptionDetail detail) {
+    final now = detail.expiresAt;
+    if (now == null) return false;
+    final before = previousExpiresAt;
+    return before == null ? now.isAfter(createdAt.toUtc()) : now.isAfter(before);
+  }
+
+  Map<String, dynamic> toJson() => {
+    'method': method.name,
+    'price': price,
+    'previousExpiresAt': previousExpiresAt?.toUtc().toIso8601String(),
+    'createdAt': createdAt.toUtc().toIso8601String(),
+    'paymentUrl': paymentUrl,
+    'orderNumber': orderNumber,
+  };
+
+  static FtthPendingActivation? fromJson(dynamic json) {
+    if (json is! Map) return null;
+    final method = FtthPaymentMethod.fromName(json['method']?.toString());
+    final createdAt = SasProjectNationalService._parseDate(json['createdAt']);
+    if (method == null || createdAt == null) return null;
+    return FtthPendingActivation(
+      method: method,
+      price: SasProjectNationalService._asDouble(json['price']) ?? 0,
+      previousExpiresAt: SasProjectNationalService._parseDate(
+        json['previousExpiresAt'],
+      ),
+      createdAt: createdAt.toLocal(),
+      paymentUrl: (json['paymentUrl'] ?? '').toString(),
+      orderNumber: (json['orderNumber'] ?? '').toString(),
+    );
+  }
+}
+
 class SasProjectNationalService {
   SasProjectNationalService(this.settings, {http.Client? client})
       : _client = client ?? http.Client(),
@@ -94,6 +265,14 @@ class SasProjectNationalService {
   void _log(String message) {
     debugPrint('[FTTH SAS] $message');
   }
+
+  /// مفاتيح يكتبها التطبيق في sasData ولا تأتي من FTTH، فتبقى عند المزامنة.
+  static const pendingActivationKey = 'ftth_pending_activation';
+  static const localSasKeys = [
+    pendingActivationKey,
+    'local_activation_date',
+    'activation_date',
+  ];
 
   bool get isAuthenticated => _accessToken?.isNotEmpty == true;
   String? get accessToken => _accessToken;
@@ -115,7 +294,7 @@ class SasProjectNationalService {
     return normalized;
   }
 
-  Uri _uri(String path, [Map<String, String>? query]) {
+  Uri _uri(String path, [Map<String, dynamic>? query]) {
     final cleanPath = path.startsWith('/') ? path : '/$path';
     return Uri.parse('$_baseUrl$cleanPath').replace(queryParameters: query);
   }
@@ -294,7 +473,12 @@ class SasProjectNationalService {
           ..active = next.active
           ..disabled = next.disabled
           ..sasOnline = next.sasOnline
-          ..sasData = next.sasData;
+          ..sasData = {
+            for (final key in localSasKeys)
+              if (existing.sasData.containsKey(key))
+                key: existing.sasData[key],
+            ...next.sasData,
+          };
         updated++;
       }
     }
@@ -343,72 +527,168 @@ class SasProjectNationalService {
     return _fetchPage('/api/sessions', pageSize: pageSize);
   }
 
-  Future<Map<String, dynamic>> activateSubscription({
+  Future<FtthSubscriptionDetail> fetchSubscription({
     required String subscriptionId,
-    String? customerId,
-    String? paymentMethod,
-    Map<String, dynamic>? extraPayload,
+    required String customerId,
   }) async {
     final id = subscriptionId.trim();
     if (id.isEmpty) {
+      throw const SasProjectNationalException('معرّف اشتراك FTTH غير موجود');
+    }
+    final data = await _getJson(
+      '/api/subscriptions/$id',
+      query: {if (customerId.trim().isNotEmpty) 'customerId': customerId},
+    );
+    final model = data is Map ? data['model'] : null;
+    if (model is! Map) {
       throw const SasProjectNationalException(
-        'معرّف الاشتراك المطلوب للتفعيل FTTH غير موجود',
+        'لم يرجع موقع FTTH بيانات الاشتراك',
       );
     }
+    final detail = FtthSubscriptionDetail.fromModel(
+      id,
+      Map<String, dynamic>.from(model),
+    );
+    if (detail.bundleId.isEmpty || detail.services.isEmpty) {
+      throw const SasProjectNationalException(
+        'لم يرجع موقع FTTH باقة الاشتراك أو خدماته',
+      );
+    }
+    return detail;
+  }
 
-    final body = <String, dynamic>{
-      'simulatedPrice': extraPayload?['simulatedPrice'] ?? 0,
-      'bundleId': extraPayload?['bundleId'] ?? 'FTTH_BASIC',
-      'services': extraPayload?['services'] ?? const [
-        {'value': 'BASIC', 'type': 'Base'},
-        {'value': 'PARENTAL_CONTROL', 'type': 'Vas'},
-        {'value': 'IPTV', 'type': 'Vas'},
-      ],
-      'commitmentPeriodValue': extraPayload?['commitmentPeriodValue'] ?? 1,
-      'salesType': extraPayload?['salesType'] ?? 0,
-      'paymentDetails': {
-        'paymentMethod': paymentMethod ?? 'Tabadul',
-        'statusPageBaseUrl': '$_baseUrl/page/tabadul-payment-status',
+  /// السعر الذي سيخصمه FTTH، بعد العروض، كما تحسبه صفحة التجديد.
+  Future<double> calculatePrice(FtthSubscriptionDetail detail) async {
+    final data = await _getJson(
+      '/api/subscriptions/calculate-price',
+      query: {
+        'bundleId': detail.bundleId,
+        'commitmentPeriodValue': '${detail.commitmentPeriodValue}',
+        'planOperationType': detail.expired ? 'Renew' : 'Change',
+        'subscriptionId': detail.subscriptionId,
+        'services': [for (final service in detail.services) jsonEncode(service)],
+        'salesType': '0',
       },
-      'changeType': extraPayload?['changeType'] ?? 1,
-    };
+    );
+    final model = data is Map ? data['model'] : null;
+    final total = model is Map ? model['totalPrice'] : null;
+    final price = total is Map ? _asDouble(total['value']) : null;
+    if (price == null || price <= 0) {
+      throw const SasProjectNationalException(
+        'لم يرجع موقع FTTH سعر التجديد',
+      );
+    }
+    return price;
+  }
 
-    if (extraPayload != null) {
-      for (final entry in extraPayload.entries) {
-        if (!body.containsKey(entry.key)) {
-          body[entry.key] = entry.value;
-        }
+  Future<double?> fetchPartnerBalance(String partnerId) =>
+      _fetchBalance('/api/partners/${partnerId.trim()}/wallets/balance');
+
+  Future<double?> fetchCustomerBalance(String customerId) =>
+      _fetchBalance('/api/customers/${customerId.trim()}/wallets/balance');
+
+  Future<double?> _fetchBalance(String path) async {
+    final data = await _getJson(path);
+    final model = data is Map ? data['model'] : null;
+    return model is Map ? _asDouble(model['balance']) : null;
+  }
+
+  /// يجمع ما تحتاجه نافذة التفعيل. تعذر قراءة رصيد يعطّل خياره فقط.
+  Future<FtthActivationQuote> fetchActivationQuote({
+    required String subscriptionId,
+    required String customerId,
+  }) async {
+    final detail = await fetchSubscription(
+      subscriptionId: subscriptionId,
+      customerId: customerId,
+    );
+    final price = await calculatePrice(detail);
+    Future<double?> safely(Future<double?> Function() read) async {
+      try {
+        return await read();
+      } catch (error) {
+        _log('balance read failed: $error');
+        return null;
       }
     }
 
-    final response = await _client
-        .post(
-          _uri('/api/subscriptions/$id/change'),
-          headers: {
-            'Accept': 'application/json, text/plain, */*',
-            'Content-Type': 'application/json',
-            'Origin': _baseUrl,
-            'Referer': '$_baseUrl/subscriptions/item/$id/customer/${customerId ?? ''}/renew-subscription',
-            'X-Client-App': settings.clientApp,
-            'X-User-Role': settings.userRole,
-          },
-          body: jsonEncode(body),
-        )
-        .timeout(const Duration(seconds: 45));
+    final partnerBalance = detail.partnerId.isEmpty
+        ? null
+        : await safely(() => fetchPartnerBalance(detail.partnerId));
+    final customerBalance = detail.customerId.isEmpty
+        ? null
+        : await safely(() => fetchCustomerBalance(detail.customerId));
+    return FtthActivationQuote(
+      detail: detail,
+      price: price,
+      partnerBalance: partnerBalance,
+      customerBalance: customerBalance,
+    );
+  }
 
-    _log('FTTH activate subscription response: HTTP ${response.statusCode}');
-    final data = _decodeObject(response, 'FTTH activate subscription');
-    final paymentUrl = ((data['paymentUrl'] ?? data['payment_url']) ?? '').toString();
-    if (paymentUrl.isEmpty && data['orderNumber'] == null) {
-      throw SasProjectNationalException(
-        'استجابة التفعيل FTTH لا تحتوي على paymentUrl أو orderNumber',
-        statusCode: response.statusCode,
-        response: data,
+  /// يرسل طلب التجديد مرة واحدة فقط، ولا يعيده تلقائياً عند الفشل أو انتهاء المهلة.
+  Future<FtthActivationResult> activateSubscription({
+    required FtthSubscriptionDetail detail,
+    required double price,
+    required FtthPaymentMethod method,
+  }) async {
+    if (!method.available) {
+      throw SasProjectNationalException('${method.label} غير متاح بعد');
+    }
+    final id = detail.subscriptionId;
+    final body = <String, dynamic>{
+      'simulatedPrice': price,
+      'bundleId': detail.bundleId,
+      'services': detail.services,
+      'commitmentPeriodValue': detail.commitmentPeriodValue,
+      'salesType': 0,
+      'paymentDetails': switch (method) {
+        FtthPaymentMethod.card => {
+          'paymentMethod': 'Tabadul',
+          'statusPageBaseUrl': '$_baseUrl/page/tabadul-payment-status',
+        },
+        FtthPaymentMethod.customerWallet => {
+          'paymentMethod': 'Wallet',
+          'walletSource': 'Customer',
+        },
+        FtthPaymentMethod.partnerWallet => {
+          'paymentMethod': 'Wallet',
+          'walletSource': 'Partner',
+        },
+      },
+      'changeType': 1,
+    };
+
+    final data = await _postJson(
+      '/api/subscriptions/$id/change',
+      body,
+      referer:
+          '$_baseUrl/subscriptions/item/$id/customer/${detail.customerId}/renew-subscription',
+    );
+    final map = data is Map ? data : const {};
+    final paymentUrl = (map['paymentUrl'] ?? '').toString().trim();
+    final orderNumber = (map['orderNumber'] ?? '').toString().trim();
+    if (method.waitsForPayment && paymentUrl.isEmpty) {
+      throw const SasProjectNationalException(
+        'لم يرجع موقع FTTH رابط الدفع',
       );
     }
-
-    return data;
+    return FtthActivationResult(
+      method: method,
+      paymentUrl: paymentUrl,
+      orderNumber: orderNumber,
+    );
   }
+
+  /// يلغي طلب دفع بالبطاقة لم يُكمل.
+  Future<void> cancelOrder(String orderNumber) async {
+    await _postJson('/api/orders/cancel', {'orderNumber': orderNumber});
+  }
+
+  static double? _asDouble(dynamic value) =>
+      value is num ? value.toDouble() : double.tryParse('${value ?? ''}');
+
+  static const _maxPages = 200;
 
   Future<List<Map<String, dynamic>>> _fetchPage(
     String path, {
@@ -418,49 +698,92 @@ class SasProjectNationalService {
     if (pageSize <= 0) {
       throw ArgumentError.value(pageSize, 'pageSize', 'Must be positive');
     }
-    final data = await _getJson(
-      path,
-      query: {
-        'pageSize': '$pageSize',
-        'pageNumber': '1',
-        if (path == '/api/customers') ...{
-          'sortCriteria.property': 'self.displayValue',
-          'sortCriteria.direction': 'asc',
+    final all = <Map<String, dynamic>>[];
+    for (var page = 1; page <= _maxPages; page++) {
+      final data = await _getJson(
+        path,
+        query: {
+          'pageSize': '$pageSize',
+          'pageNumber': '$page',
+          if (path == '/api/customers') ...{
+            'sortCriteria.property': 'self.displayValue',
+            'sortCriteria.direction': 'asc',
+          },
+          if (path == '/api/subscriptions') ...{
+            'sortCriteria.property': 'expires',
+            'sortCriteria.direction': 'asc',
+            ...?status == null ? null : {'status': status},
+            'hierarchyLevel': '0',
+          },
+          if (path == '/api/sessions') ...{
+            'sortCriteria.property': 'username',
+            'sortCriteria.direction': 'asc',
+            'status': '1',
+            'hierarchyLevel': '0',
+          },
         },
-        if (path == '/api/subscriptions') ...{
-          'sortCriteria.property': 'expires',
-          'sortCriteria.direction': 'asc',
-          ...?status == null ? null : {'status': status},
-          'hierarchyLevel': '0',
-        },
-        if (path == '/api/sessions') ...{
-          'sortCriteria.property': 'username',
-          'sortCriteria.direction': 'asc',
-          'status': '1',
-          'hierarchyLevel': '0',
-        },
-      },
-    );
-    return _extractRows(data);
+      );
+      final rows = _extractRows(data);
+      all.addAll(rows);
+      final total = data is Map ? int.tryParse('${data['totalCount']}') : null;
+      if (rows.length < pageSize || (total != null && all.length >= total)) {
+        break;
+      }
+    }
+    return all;
   }
 
   Future<dynamic> _getJson(
     String path, {
-    Map<String, String>? query,
-    bool retryAfterLogin = true,
-  }) async {
-    if (!isAuthenticated) await login();
+    Map<String, dynamic>? query,
+  }) {
+    return _send(
+      'GET $path',
+      () => _client.get(_uri(path, query), headers: _headers()),
+    );
+  }
 
-    final response = await _client
-        .get(_uri(path, query), headers: _headers())
-        .timeout(const Duration(seconds: 45));
-    _log('$path response: HTTP ${response.statusCode}');
-    if (response.statusCode == 401 && retryAfterLogin) {
+  Future<dynamic> _postJson(
+    String path,
+    Map<String, dynamic> body, {
+    String? referer,
+  }) {
+    return _send(
+      'POST $path',
+      () => _client.post(
+        _uri(path),
+        headers: {
+          ..._headers(),
+          'Content-Type': 'application/json',
+          'Origin': _baseUrl,
+          'Referer': ?referer,
+        },
+        body: jsonEncode(body),
+      ),
+    );
+  }
+
+  /// يسجل الدخول عند الحاجة. عند 401 يعيد الطلب مرة واحدة لأن الخادم رفضه
+  /// قبل تنفيذه، فلا خطر من تكرار الخصم.
+  Future<dynamic> _send(
+    String operation,
+    Future<http.Response> Function() request,
+  ) async {
+    if (!isAuthenticated) await login();
+    var response = await request().timeout(const Duration(seconds: 45));
+    _log('$operation response: HTTP ${response.statusCode}');
+    if (response.statusCode == 401) {
       _accessToken = null;
       await login();
-      return _getJson(path, query: query, retryAfterLogin: false);
+      response = await request().timeout(const Duration(seconds: 45));
+      _log('$operation retry response: HTTP ${response.statusCode}');
     }
-    return _decode(response, 'GET $path');
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        response.body.trim().isEmpty) {
+      return null;
+    }
+    return _decode(response, operation);
   }
 
   static dynamic _decode(http.Response response, String operation) {
