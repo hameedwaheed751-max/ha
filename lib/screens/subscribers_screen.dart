@@ -1117,6 +1117,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     Subscriber s, {
     BuildContext? modalContext,
   }) async {
+    // مشترك FTTH يُفعَّل من FTTH، فمعرّفه لا يخص SAS وقد يطابق مشتركاً آخر فيه.
+    if (s.source == 'ftth') {
+      return _activateFtthSubscriber(s, modalContext: modalContext);
+    }
     if (operationBusy) return;
     operationBusy = true;
     try {
