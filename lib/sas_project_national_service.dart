@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -28,8 +30,61 @@ class SasProjectNationalSettings {
   static const _passwordKey = 'ftth_sas_password';
   static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
+  /// تُحفظ في حساب الوكيل كما تُحفظ إعدادات SAS، فتبقى بعد إعادة التثبيت
+  /// أو على جهاز آخر. المسار agents/{uid}/ftth_sas تسمح به قواعد Firebase.
+  static DatabaseReference? _remoteRef() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return uid == null
+        ? null
+        : FirebaseDatabase.instance.ref('agents/$uid/ftth_sas');
+  }
+
+  /// يرجع false إن لم تكن في Firebase إعدادات كاملة.
+  static Future<bool> _pullFromFirebase(SharedPreferences prefs) async {
+    final ref = _remoteRef();
+    if (ref == null) return true;
+    final value = (await ref.get().timeout(const Duration(seconds: 5))).value;
+    if (value is! Map) return false;
+    final username = (value['username'] ?? '').toString().trim();
+    final password = (value['password'] ?? '').toString();
+    if (username.isEmpty || password.isEmpty) return false;
+    final baseUrl = (value['baseUrl'] ?? '').toString().trim();
+    if (baseUrl.isNotEmpty) await prefs.setString(_baseUrlKey, baseUrl);
+    await prefs.setString(_usernameKey, username);
+    await _storePassword(prefs, password);
+    return true;
+  }
+
+  static Future<void> _storePassword(
+    SharedPreferences prefs,
+    String password,
+  ) async {
+    try {
+      await _secureStorage.write(key: _passwordKey, value: password);
+      await prefs.remove(_passwordKey);
+    } catch (_) {
+      await prefs.setString(_passwordKey, password);
+    }
+  }
+
   static Future<SasProjectNationalSettings> load() async {
     final prefs = await SharedPreferences.getInstance();
+    var foundRemote = true;
+    try {
+      foundRemote = await _pullFromFirebase(prefs);
+    } catch (error) {
+      // بلا إنترنت تُستخدم النسخة المحفوظة على الجهاز.
+      debugPrint('[FTTH SAS] settings pull failed: $error');
+    }
+    final settings = await _loadLocal(prefs);
+    // إعدادات حُفظت على الجهاز قبل الحفظ في الحساب تُرفع مرة واحدة.
+    if (!foundRemote && settings.isComplete) await settings.save();
+    return settings;
+  }
+
+  static Future<SasProjectNationalSettings> _loadLocal(
+    SharedPreferences prefs,
+  ) async {
     String password = '';
     try {
       password = await _secureStorage.read(key: _passwordKey) ?? '';
@@ -47,13 +102,22 @@ class SasProjectNationalSettings {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_baseUrlKey, baseUrl.trim());
     await prefs.setString(_usernameKey, username.trim());
+    await _storePassword(prefs, password);
     try {
-      await _secureStorage.write(key: _passwordKey, value: password);
-      await prefs.remove(_passwordKey);
-    } catch (_) {
-      await prefs.setString(_passwordKey, password);
+      await _remoteRef()
+          ?.set({
+            'baseUrl': baseUrl.trim(),
+            'username': username.trim(),
+            'password': password,
+            'updatedAt': ServerValue.timestamp,
+          })
+          .timeout(const Duration(seconds: 8));
+    } catch (error) {
+      debugPrint('[FTTH SAS] settings save to Firebase failed: $error');
     }
   }
+
+  bool get isComplete => username.trim().isNotEmpty && password.isNotEmpty;
 }
 
 class SasProjectNationalData {
@@ -517,6 +581,22 @@ class SasProjectNationalService {
     _accessToken = accessToken;
     _refreshToken = data['refresh_token']?.toString();
     _log('login success: access token received');
+  }
+
+  /// مزامنة بالإعدادات المحفوظة، تُستدعى عند فتح التطبيق. لا تفعل شيئاً على
+  /// الويب أو إن لم تُضبط الإعدادات بعد.
+  static Future<SasProjectNationalSyncResult?> syncSaved() async {
+    if (kIsWeb) return null;
+    final settings = await SasProjectNationalSettings.load();
+    if (!settings.isComplete) return null;
+    final service = SasProjectNationalService(settings);
+    try {
+      return await service.syncSubscribers(
+        data: await service.fetchSubscriberData(),
+      );
+    } finally {
+      service.dispose();
+    }
   }
 
   Future<SasProjectNationalData> fetchSubscriberData({
