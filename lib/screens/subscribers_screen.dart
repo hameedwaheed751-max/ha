@@ -13,6 +13,7 @@ import '../services/whatsapp_notification_dispatcher.dart';
 import 'activation_payment_dialog.dart';
 import 'add_subscriber_screen.dart';
 import 'ftth_activation_dialog.dart';
+import 'ftth_payment_screen.dart';
 import 'dashboard_widgets.dart';
 import 'partial_payment_flow.dart';
 import 'quick_reports_screen.dart';
@@ -880,7 +881,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
 
     if (choice.method.waitsForPayment) {
-      await _openFtthPayment(pending);
+      if (await _payFtthInApp(s, service, pending)) return;
       if (mounted) await _resolveFtthPending(s, service, pending);
       return;
     }
@@ -940,7 +941,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               'الطريقة: ${pending.method.label}\n'
               'المبلغ: ${formatIqd(pending.price)}\n'
               'أُرسل: ${fmt(pending.createdAt)}\n\n'
-              '${pending.method.waitsForPayment ? 'أكمل الدفع في الصفحة ثم اضغط تحقق.' : 'تحقق من ظهور التجديد في FTTH.'}',
+              '${pending.method.waitsForPayment ? 'لم يكتمل الدفع بعد. اضغط "صفحة الدفع" لإكماله، أو "تحقق" إن كنت دفعت.' : 'تحقق من ظهور التجديد في FTTH.'}',
             ),
             actions: [
               TextButton(
@@ -968,7 +969,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       );
       if (!mounted || action == null || action == 'close') return;
       if (action == 'open') {
-        await _openFtthPayment(pending);
+        if (await _payFtthInApp(s, service, pending)) return;
         continue;
       }
 
@@ -1083,12 +1084,27 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     await AppStore.save();
   }
 
-  Future<void> _openFtthPayment(FtthPendingActivation pending) async {
+  /// يفتح الدفع داخل التطبيق، وإن انتهت صفحة البوابة يتحقق من التجديد مباشرة.
+  /// يرجع true إن تأكد التجديد وسُجّل.
+  Future<bool> _payFtthInApp(
+    Subscriber s,
+    SasProjectNationalService service,
+    FtthPendingActivation pending,
+  ) async {
     final uri = Uri.tryParse(pending.paymentUrl);
-    if (uri == null) return;
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      _showFtthMessage('تعذر فتح صفحة الدفع', color: Colors.red.shade600);
-    }
+    if (uri == null || !mounted) return false;
+    final finished = await FtthPaymentScreen.open(
+      context,
+      paymentUrl: uri,
+      statusPageUrl: service.paymentStatusPageUrl,
+    );
+    if (!finished || !mounted) return false;
+    final renewed = await _withFtthLoading(
+      () => _waitForFtthRenewal(service, s, pending),
+    );
+    if (renewed == null) return false;
+    await _finishFtthActivation(s, pending, renewed);
+    return true;
   }
 
   Future<T> _withFtthLoading<T>(Future<T> Function() task) async {

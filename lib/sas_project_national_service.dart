@@ -885,7 +885,7 @@ class SasProjectNationalService {
       'paymentDetails': switch (method) {
         FtthPaymentMethod.card => {
           'paymentMethod': 'Tabadul',
-          'statusPageBaseUrl': '$_baseUrl/page/tabadul-payment-status',
+          'statusPageBaseUrl': paymentStatusPageUrl,
         },
         FtthPaymentMethod.customerWallet => {
           'paymentMethod': 'Wallet',
@@ -917,6 +917,9 @@ class SasProjectNationalService {
       orderNumber: orderNumber,
     );
   }
+
+  /// صفحة FTTH التي تعيد إليها بوابة Tabadul بعد الدفع أو إلغائه.
+  String get paymentStatusPageUrl => '$_baseUrl/page/tabadul-payment-status';
 
   /// يلغي طلب دفع بالبطاقة لم يُكمل.
   Future<void> cancelOrder(String orderNumber) async {
