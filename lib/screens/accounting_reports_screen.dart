@@ -920,9 +920,6 @@ class _ActivationTile extends StatelessWidget {
         ? record.subscriberName
         : record.subscriberUser;
     final details = [
-      if (record.subscriberUser.trim().isNotEmpty &&
-          record.subscriberUser != name)
-        record.subscriberUser,
       if (record.packageName.trim().isNotEmpty) record.packageName,
       date,
     ].join(' · ');
@@ -1151,7 +1148,6 @@ class _SasFinancialReports extends StatelessWidget {
         return _SasRow(
           title: fullName.isNotEmpty ? fullName : username,
           details: [
-            if (fullName.isNotEmpty && username.isNotEmpty) username,
             _text(
               _nested(row, 'profile_details', 'name') ??
                   _first(row, const [
