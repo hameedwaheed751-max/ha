@@ -803,6 +803,16 @@ class _TrialClaimsDialogState extends State<_TrialClaimsDialog> {
   late Future<List<TrialClaimEntry>> _claims = _load();
   final Set<String> _deleting = {};
 
+  /// رفض القواعد أو غياب الفهرس يعني أن قواعد البصمات لم تُنشر بعد.
+  String _claimsError(Object error) {
+    final text = error.toString().toLowerCase();
+    if (text.contains('permission') || text.contains('index')) {
+      return 'قواعد البصمات غير منشورة في Firebase بعد، فلا يمكن قراءتها. '
+          'تعمل بعد نشر القواعد مع الإصدار القادم.';
+    }
+    return 'تعذر قراءة البصمات: ${errorText(error)}';
+  }
+
   Future<List<TrialClaimEntry>> _load() =>
       TrialGuardService.claimsForAgent(uid: widget.uid, phone: widget.phone);
 
@@ -883,7 +893,7 @@ class _TrialClaimsDialogState extends State<_TrialClaimsDialog> {
               }
               if (snapshot.hasError) {
                 return Text(
-                  'تعذر قراءة البصمات: ${errorText(snapshot.error!)}',
+                  _claimsError(snapshot.error!),
                   style: TextStyle(color: colors.error),
                 );
               }
