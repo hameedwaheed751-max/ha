@@ -141,7 +141,9 @@
       }
     },
     "trialClaims": {
+      ".read": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'",
       "$kind": {
+        ".indexOn": ["uid"],
         ".validate": "$kind === 'phones' || $kind === 'sas' || $kind === 'ftth'",
         "$hash": {
           ".read": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || data.child('uid').val() === auth.uid)",

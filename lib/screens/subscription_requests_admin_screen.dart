@@ -3,9 +3,16 @@ import 'package:flutter/services.dart';
 import '../models.dart';
 import '../services/payment_request_service.dart';
 import '../services/subscription_request_service.dart';
+import '../services/trial_guard_service.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
 
-enum _AdminAction { changePlan, extend, endSubscription, resetPassword }
+enum _AdminAction {
+  changePlan,
+  extend,
+  endSubscription,
+  resetPassword,
+  trialClaims,
+}
 
 class SubscriptionRequestsAdminScreen extends StatefulWidget {
   const SubscriptionRequestsAdminScreen({super.key});
@@ -363,8 +370,20 @@ class _SubscriptionRequestsAdminScreenState
         _endSubscription(request);
       case _AdminAction.resetPassword:
         _resetPassword(request);
+      case _AdminAction.trialClaims:
+        _showTrialClaims(request);
     }
   }
+
+  Future<void> _showTrialClaims(SubscriptionRequestModel request) =>
+      showDialog<void>(
+        context: context,
+        builder: (_) => _TrialClaimsDialog(
+          agentName: _agentName(request),
+          uid: request.uid,
+          phone: request.phone,
+        ),
+      );
 
   List<PopupMenuEntry<_AdminAction>> _adminActions(
     SubscriptionRequestModel request,
@@ -393,6 +412,11 @@ class _SubscriptionRequestsAdminScreenState
         const PopupMenuItem(
           value: _AdminAction.resetPassword,
           child: Text('إعادة تعيين كلمة المرور'),
+        ),
+      if (hasAgent)
+        const PopupMenuItem(
+          value: _AdminAction.trialClaims,
+          child: Text('بصمات الباقة المجانية'),
         ),
     ];
   }
@@ -756,5 +780,176 @@ class _SubscriptionRequestsAdminScreenState
       default:
         return const Color(0xFF1565C0);
     }
+  }
+}
+
+/// بصمات الوكيل مع من يملك رقمه وساسه، وحذف أي منها لتحريرها.
+class _TrialClaimsDialog extends StatefulWidget {
+  const _TrialClaimsDialog({
+    required this.agentName,
+    required this.uid,
+    required this.phone,
+  });
+
+  final String agentName;
+  final String uid;
+  final String phone;
+
+  @override
+  State<_TrialClaimsDialog> createState() => _TrialClaimsDialogState();
+}
+
+class _TrialClaimsDialogState extends State<_TrialClaimsDialog> {
+  late Future<List<TrialClaimEntry>> _claims = _load();
+  final Set<String> _deleting = {};
+
+  Future<List<TrialClaimEntry>> _load() =>
+      TrialGuardService.claimsForAgent(uid: widget.uid, phone: widget.phone);
+
+  String _date(DateTime? at) {
+    if (at == null) return '—';
+    final d = at.toLocal();
+    return '${d.day.toString().padLeft(2, '0')}/'
+        '${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
+
+  Future<void> _delete(TrialClaimEntry entry) async {
+    final mine = entry.ownerUid == widget.uid;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('حذف البصمة'),
+          content: Text(
+            mine
+                ? 'تُحرَّر بصمة ${entry.kindLabel} من هذا الحساب، ويسجلها أول '
+                      'حساب يستخدمها بعد ذلك.'
+                : 'البصمة مسجلة لحساب آخر'
+                      '${entry.ownerEmail.isEmpty ? '' : ' (${entry.ownerEmail})'}. '
+                      'بعد حذفها يستطيع ${widget.agentName} استخدامها.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('حذف'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+    final key = '${entry.kind}/${entry.hash}';
+    setState(() => _deleting.add(key));
+    try {
+      await TrialGuardService.deleteClaim(entry);
+      if (!mounted) return;
+      setState(() => _claims = _load());
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم حذف البصمة')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر حذف البصمة: ${errorText(e)}')),
+      );
+    } finally {
+      if (mounted) setState(() => _deleting.remove(key));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: Text('بصمات ${widget.agentName}'),
+        content: SizedBox(
+          width: 440,
+          child: FutureBuilder<List<TrialClaimEntry>>(
+            future: _claims,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const SizedBox(
+                  height: 120,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snapshot.hasError) {
+                return Text(
+                  'تعذر قراءة البصمات: ${errorText(snapshot.error!)}',
+                  style: TextStyle(color: colors.error),
+                );
+              }
+              final claims = snapshot.data ?? const [];
+              if (claims.isEmpty) {
+                return const Text(
+                  'لا توجد بصمات لهذا الوكيل، ولا لرقمه أو ساسه.',
+                );
+              }
+              return ListView.separated(
+                shrinkWrap: true,
+                itemCount: claims.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final entry = claims[index];
+                  final mine = entry.ownerUid == widget.uid;
+                  final key = '${entry.kind}/${entry.hash}';
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      entry.kind == TrialGuardService.phonesKind
+                          ? Icons.phone_android
+                          : Icons.dns_outlined,
+                    ),
+                    title: Text(
+                      entry.label.isEmpty
+                          ? entry.kindLabel
+                          : '${entry.kindLabel}: ${entry.label}',
+                    ),
+                    subtitle: Text(
+                      mine
+                          ? 'مسجلة لهذا الحساب — ${_date(entry.at)}'
+                          : 'مسجلة لحساب آخر: '
+                                '${entry.ownerEmail.isEmpty ? entry.ownerUid : entry.ownerEmail}'
+                                ' — ${_date(entry.at)}',
+                      style: TextStyle(
+                        color: mine ? colors.onSurfaceVariant : colors.error,
+                      ),
+                    ),
+                    trailing: _deleting.contains(key)
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : IconButton(
+                            tooltip: 'حذف البصمة',
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: Colors.red,
+                            ),
+                            onPressed: () => _delete(entry),
+                          ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إغلاق'),
+          ),
+        ],
+      ),
+    );
   }
 }

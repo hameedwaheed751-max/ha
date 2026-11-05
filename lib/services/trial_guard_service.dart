@@ -20,6 +20,33 @@ class TrialClaimedException implements Exception {
 
 enum TrialClaimResult { owned, otherAccount, unknown }
 
+/// بصمة كما يراها المدير: نوعها، ومن يملكها، وما تمثله إن عُرف.
+class TrialClaimEntry {
+  const TrialClaimEntry({
+    required this.kind,
+    required this.hash,
+    required this.ownerUid,
+    required this.ownerEmail,
+    required this.at,
+    required this.label,
+  });
+
+  final String kind;
+  final String hash;
+  final String ownerUid;
+  final String ownerEmail;
+  final DateTime? at;
+
+  /// الرقم أو الساس الذي تطابقه البصمة من بيانات الوكيل، وإلا فارغ.
+  final String label;
+
+  String get kindLabel => switch (kind) {
+    TrialGuardService.phonesKind => 'رقم هاتف',
+    TrialGuardService.sasKind => 'ساس RADIUS',
+    _ => 'ساس FTTH',
+  };
+}
+
 /// يمنع تكرار الباقة المجانية بحسابات جديدة: كل رقم هاتف وكل حساب ساس يُسجَّل
 /// لأول حساب يستخدمه. البصمة hash فلا يُخزَّن الرقم ولا بيانات الساس نصاً،
 /// وقواعد Firebase تمنع الكتابة فوق بصمة حساب آخر أو حذفها.
@@ -121,6 +148,103 @@ class TrialGuardService {
 
   static Future<void> ensureFtthAllowed(String username) =>
       _ensure(ftthKind, ftthHash(username), username);
+
+  static DatabaseReference get _claimsRef =>
+      FirebaseDatabase.instance.ref('trialClaims');
+
+  /// للمدير: بصمات الوكيل، وبصمات رقمه وساسه إن كانت مسجلة لحساب آخر.
+  static Future<List<TrialClaimEntry>> claimsForAgent({
+    required String uid,
+    String phone = '',
+  }) async {
+    final db = FirebaseDatabase.instance;
+    final candidates = <String, String>{}; // '$kind/$hash' → label
+    if (normalizePhone(phone).length >= 10) {
+      candidates['$phonesKind/${phoneHash(phone)}'] = phone.trim();
+    }
+    Future<Map?> read(String path) async {
+      try {
+        final value = (await db.ref(path).get()).value;
+        return value is Map ? value : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final sas = await read('agents/$uid/sas');
+    final sasUser = (sas?['username'] ?? '').toString().trim();
+    final sasServer = (sas?['serverUrl'] ?? '').toString().trim();
+    if (sasUser.isNotEmpty) {
+      final host = normalizeSas(sasServer, sasUser).split('|').first;
+      candidates['$sasKind/${sasHash(sasServer, sasUser)}'] =
+          '$sasUser @ $host';
+    }
+    final ftth = await read('agents/$uid/ftth_sas');
+    final ftthUser = (ftth?['username'] ?? '').toString().trim();
+    if (ftthUser.isNotEmpty) {
+      candidates['$ftthKind/${ftthHash(ftthUser)}'] = ftthUser;
+    }
+
+    final found = <String, Map>{};
+    for (final kind in const [phonesKind, sasKind, ftthKind]) {
+      final owned = await _claimsRef
+          .child(kind)
+          .orderByChild('uid')
+          .equalTo(uid)
+          .get();
+      final value = owned.value;
+      if (value is Map) {
+        for (final entry in value.entries) {
+          if (entry.value is Map) {
+            found['$kind/${entry.key}'] = entry.value as Map;
+          }
+        }
+      }
+    }
+    for (final key in candidates.keys) {
+      if (found.containsKey(key)) continue;
+      final claim = await read('trialClaims/$key');
+      if (claim != null) found[key] = claim;
+    }
+
+    final emails = <String, String>{};
+    Future<String> emailOf(String owner) async {
+      if (owner.isEmpty) return '';
+      return emails[owner] ??= await () async {
+        try {
+          final v = await db.ref('agents/$owner/profile/email').get();
+          return (v.value ?? '').toString();
+        } catch (_) {
+          return '';
+        }
+      }();
+    }
+
+    final entries = <TrialClaimEntry>[];
+    for (final entry in found.entries) {
+      final parts = entry.key.split('/');
+      final owner = (entry.value['uid'] ?? '').toString();
+      final at = entry.value['at'];
+      entries.add(
+        TrialClaimEntry(
+          kind: parts.first,
+          hash: parts.last,
+          ownerUid: owner,
+          ownerEmail: await emailOf(owner),
+          at: at is num
+              ? DateTime.fromMillisecondsSinceEpoch(at.toInt())
+              : null,
+          label: candidates[entry.key] ?? '',
+        ),
+      );
+    }
+    entries.sort((a, b) => a.kind.compareTo(b.kind));
+    return entries;
+  }
+
+  /// للمدير: يحرر البصمة فيسجلها أول حساب يستخدمها بعد ذلك.
+  static Future<void> deleteClaim(TrialClaimEntry entry) =>
+      _claimsRef.child('${entry.kind}/${entry.hash}').remove();
 
   static Future<void> _ensure(String kind, String hash, String username) async {
     if (username.trim().isEmpty || _isAdmin) return;
