@@ -237,6 +237,16 @@ class SubscriptionRequestService {
         .map((event) => _parseDateTime(event.snapshot.value));
   }
 
+  /// عدد مشتركي الوكيل المحفوظين في حسابه، ومنهم من جاء من مزامنة ساسه.
+  /// يُقرأ مرة لكل بطاقة، للمدير فقط.
+  static Future<AgentSubscriberCounts> fetchAgentSubscriberCounts(
+    String uid,
+  ) async {
+    _requireTrustedAdmin();
+    final snapshot = await _root.child('agents/$uid/subscribers').get();
+    return AgentSubscriberCounts.fromValue(snapshot.value);
+  }
+
   /// يُضاف الاشتراك بعد المدة المتبقية حتى لا تضيع بقبول طلب جديد.
   static DateTime subscriptionStartDate({
     required Object? existing,
@@ -830,5 +840,38 @@ class SubscriptionRequestService {
         'reviewedAt': null,
       });
     } catch (_) {}
+  }
+}
+
+/// كم مشتركاً لدى الوكيل في التطبيق، وكم منهم جاء من مزامنة الساس.
+class AgentSubscriberCounts {
+  const AgentSubscriberCounts({
+    required this.total,
+    required this.sas,
+    required this.ftth,
+  });
+
+  final int total;
+  final int sas;
+  final int ftth;
+
+  /// القائمة تُحفظ في Firebase كقائمة أو كخريطة حسب ترتيب الأرقام.
+  factory AgentSubscriberCounts.fromValue(Object? value) {
+    final items = value is List
+        ? value
+        : value is Map
+        ? value.values
+        : const [];
+    var total = 0;
+    var sas = 0;
+    var ftth = 0;
+    for (final item in items) {
+      if (item is! Map) continue;
+      total++;
+      final source = '${item['source'] ?? ''}';
+      if (source == 'sas') sas++;
+      if (source == 'ftth') ftth++;
+    }
+    return AgentSubscriberCounts(total: total, sas: sas, ftth: ftth);
   }
 }

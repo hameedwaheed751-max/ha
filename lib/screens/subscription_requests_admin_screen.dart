@@ -28,6 +28,7 @@ class _SubscriptionRequestsAdminScreenState
   late final Stream<List<SubscriptionRequestModel>> _requests =
       SubscriptionRequestService.watchRequests();
   final Map<String, Stream<DateTime?>> _subscriptionEnds = {};
+  final Map<String, Future<AgentSubscriberCounts>> _subscriberCounts = {};
   String _searchQuery = '';
   bool _busy = false;
 
@@ -477,6 +478,37 @@ class _SubscriptionRequestsAdminScreenState
     },
   );
 
+  /// مشتركو الساس المزامنون في حساب الوكيل: صفر يعني أنه لم يربط ساسه
+  /// أو لا يستخدم التطبيق فعلياً.
+  Widget _subscriberCount(String uid) => FutureBuilder<AgentSubscriberCounts>(
+    future: _subscriberCounts.putIfAbsent(
+      uid,
+      () => SubscriptionRequestService.fetchAgentSubscriberCounts(uid),
+    ),
+    builder: (context, snapshot) {
+      if (snapshot.connectionState != ConnectionState.done) {
+        return const Text('مشتركو الساس: …');
+      }
+      if (snapshot.hasError) {
+        return InkWell(
+          onTap: () => setState(() => _subscriberCounts.remove(uid)),
+          child: const Text('مشتركو الساس: تعذرت القراءة (اضغط للإعادة)'),
+        );
+      }
+      final counts = snapshot.data!;
+      final using = counts.sas > 0;
+      return Text(
+        'مشتركو الساس: ${counts.sas}'
+        '${counts.total > counts.sas ? ' (من ${counts.total} في التطبيق)' : ''}'
+        '${using ? '' : ' — لم يزامن ساسه'}',
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          color: using ? const Color(0xFF2468A2) : const Color(0xFFE65100),
+        ),
+      );
+    },
+  );
+
   Widget _olderRequests(List<SubscriptionRequestModel> older) => ExpansionTile(
     tilePadding: EdgeInsets.zero,
     title: Text('الطلبات السابقة (${older.length})'),
@@ -595,6 +627,7 @@ class _SubscriptionRequestsAdminScreenState
             ),
             const SizedBox(height: 8),
             if (request.uid.isNotEmpty) _subscriptionEnd(request.uid),
+            if (request.uid.isNotEmpty) _subscriberCount(request.uid),
             Text(
               'الباقة: ${SubscriptionRequestService.planLabelFor(request.selectedPlan)}',
             ),
