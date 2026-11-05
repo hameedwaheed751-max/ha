@@ -257,8 +257,56 @@ class SasSyncService {
       }
     }
 
+    // profile_name يُملأ أعلاه من تفاصيل الباقة إذا خلا منه صف المشترك.
+    final rowPackages = [
+      for (final row in rows)
+        if (row['profile_name'] is String) row['profile_name'] as String,
+    ];
+    await syncPackages(api, extraNames: rowPackages, save: false);
+
     await AppStore.save();
     return SasSyncResult(read: rows.length, added: added, updated: updated);
+  }
+
+  /// يقرأ باقات (Profiles) الساس ويضيف الجديدة منها لقائمة الباقات بسعر يدوي.
+  /// فشل القراءة لا يوقف المزامنة؛ تُستخدم عندها باقات المشتركين فقط.
+  static Future<int> syncPackages(
+    SasApiService api, {
+    Iterable<String> extraNames = const [],
+    bool save = true,
+  }) async {
+    final names = <String>[...extraNames];
+    try {
+      var managerId = 5;
+      try {
+        final parents = await api.fetchParents().timeout(
+          const Duration(seconds: 10),
+        );
+        for (final parent in parents) {
+          final id = int.tryParse('${parent['id'] ?? ''}');
+          if (id != null) {
+            managerId = id;
+            break;
+          }
+        }
+      } catch (e) {
+        debugPrint('fetchParents for packages failed (non-fatal): $e');
+      }
+      final profiles = await api
+          .fetchProfiles(managerId: managerId)
+          .timeout(const Duration(seconds: 15));
+      for (final profile in profiles) {
+        final name = (profile['name'] ?? profile['profile_name'] ?? '')
+            .toString()
+            .trim();
+        if (name.isNotEmpty) names.add(name);
+      }
+    } catch (e) {
+      debugPrint('fetchProfiles for packages failed (non-fatal): $e');
+    }
+    final added = AppStore.mergeSasPackages(names);
+    if (save) await AppStore.save();
+    return added;
   }
 
   /// يحدّث المشترك من رد SAS لمشترك واحد، مغلفاً بـ data أو مباشراً، دون مزامنة

@@ -1248,12 +1248,23 @@ class Subscriber {
 }
 
 class PackagePlan {
-  PackagePlan({required this.name, required this.price});
+  PackagePlan({required this.name, required this.price, this.fromSas = false});
   String name;
   double price;
-  Map<String, dynamic> toJson() => {'name': name, 'price': price};
-  factory PackagePlan.fromJson(Map<String, dynamic> j) =>
-      PackagePlan(name: j['name'] ?? '', price: (j['price'] ?? 0).toDouble());
+
+  /// الباقة موجودة في الساس حسب آخر مزامنة: اسمها من الساس وسعرها يدوي.
+  bool fromSas;
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'price': price,
+    if (fromSas) 'sas': true,
+  };
+  factory PackagePlan.fromJson(Map<String, dynamic> j) => PackagePlan(
+    name: (j['name'] ?? '').toString(),
+    price: (j['price'] is num ? j['price'] as num : 0).toDouble(),
+    fromSas: j['sas'] == true,
+  );
 }
 
 extension PackagePlanListX on List<PackagePlan> {
@@ -1263,9 +1274,7 @@ extension PackagePlanListX on List<PackagePlan> {
     void addFromMap(Map<String, dynamic> map) {
       final name = (map['name'] ?? '').toString().trim();
       if (name.isEmpty) return;
-      parsed.add(
-        PackagePlan(name: name, price: (map['price'] ?? 0).toDouble()),
-      );
+      parsed.add(PackagePlan.fromJson({...map, 'name': name}));
     }
 
     if (payload is List) {
@@ -1477,6 +1486,29 @@ class AppStore {
       return;
     }
     packages.add(PackagePlan(name: normalizedName, price: package.price));
+  }
+
+  /// يضيف باقات الساس الجديدة بسعر صفر ويُبقي الأسعار التي أدخلها الوكيل.
+  /// قائمة فارغة تعني فشل القراءة فلا يتغير شيء. يرجع عدد الباقات المضافة.
+  static int mergeSasPackages(Iterable<String> names) {
+    final seen = <String, String>{};
+    for (final raw in names) {
+      final name = raw.trim();
+      if (name.isEmpty || name == '—') continue;
+      seen.putIfAbsent(name.toLowerCase(), () => name);
+    }
+    if (seen.isEmpty) return 0;
+    for (final package in packages) {
+      package.fromSas = seen.containsKey(package.name.trim().toLowerCase());
+    }
+    final existing = {for (final p in packages) p.name.trim().toLowerCase()};
+    var added = 0;
+    for (final entry in seen.entries) {
+      if (existing.contains(entry.key)) continue;
+      packages.add(PackagePlan(name: entry.value, price: 0, fromSas: true));
+      added++;
+    }
+    return added;
   }
 
   static void removePackage(PackagePlan package) {
@@ -2407,9 +2439,7 @@ class AppStore {
     void addFromMap(Map<String, dynamic> map) {
       final name = (map['name'] ?? '').toString().trim();
       if (name.isEmpty) return;
-      parsed.add(
-        PackagePlan(name: name, price: (map['price'] ?? 0).toDouble()),
-      );
+      parsed.add(PackagePlan.fromJson({...map, 'name': name}));
     }
 
     if (payload is List) {
