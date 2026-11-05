@@ -890,12 +890,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final auth = FirebaseAuth.instance;
     final currentUser = auth.currentUser;
     if (currentUser != null) {
-      if (currentUser.email?.trim().toLowerCase() != email) {
-        throw StateError(
-          'الحساب المسجل لا يطابق البريد المكتوب، سجّل الخروج ثم أعد المحاولة',
-        );
-      }
-      return currentUser;
+      if (currentUser.email?.trim().toLowerCase() == email) return currentUser;
+      // جلسة قديمة لحساب آخر بقيت على الجهاز (دخول سابق أو محاولة لم تكتمل).
+      // شاشة الاشتراك لا تتيح تسجيل الخروج، فتُنهى هنا قبل إنشاء الحساب الجديد.
+      await AppStore.clearForAccountSwitch(clearStorage: false);
+      await auth.signOut();
     }
 
     try {
