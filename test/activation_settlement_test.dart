@@ -31,7 +31,7 @@ void main() {
       record('debt'),
       record('none'),
     ];
-    final result = ActivationSettlement.of(records, [
+    final result = ActivationOutcome.of(records, [
       ...settle('paid', 35000, 0),
       ...settle('part', 10000, 25000),
       ...settle('debt', 0, 35000),
@@ -57,7 +57,7 @@ void main() {
 
   test('events from a different moment are not matched', () {
     final late = record('paid', when: at.add(const Duration(seconds: 1)));
-    final result = ActivationSettlement.of([late], settle('paid', 35000, 0));
+    final result = ActivationOutcome.of([late], settle('paid', 35000, 0));
     expect(result[late]!.status, ActivationPaymentStatus.unknown);
   });
 }

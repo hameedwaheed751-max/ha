@@ -416,8 +416,8 @@ enum ActivationPaymentStatus {
   final String label;
 }
 
-class ActivationSettlement {
-  const ActivationSettlement(this.status, {this.collected = 0, this.debt = 0});
+class ActivationOutcome {
+  const ActivationOutcome(this.status, {this.collected = 0, this.debt = 0});
 
   final ActivationPaymentStatus status;
   final double collected;
@@ -425,7 +425,7 @@ class ActivationSettlement {
 
   /// يطابق كل تفعيل بحركتي المهام اليومية المسجلتين معه في اللحظة نفسها:
   /// الواصل عند التفعيل والدين المضاف منه.
-  static Map<AccountingActivationRecord, ActivationSettlement> of(
+  static Map<AccountingActivationRecord, ActivationOutcome> of(
     Iterable<AccountingActivationRecord> records,
     Iterable<DailyTaskEvent> events,
   ) {
@@ -462,7 +462,7 @@ class ActivationSettlement {
               : paid <= 0.0001
               ? ActivationPaymentStatus.debt
               : ActivationPaymentStatus.partial;
-          return ActivationSettlement(status, collected: paid, debt: owed);
+          return ActivationOutcome(status, collected: paid, debt: owed);
         }(),
     };
   }

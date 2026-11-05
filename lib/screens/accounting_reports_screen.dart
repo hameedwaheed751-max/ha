@@ -242,7 +242,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
         activations: activations,
       );
       final cash = _cashSummary(activations);
-      final settlements = ActivationSettlement.of(activations, _monthEvents);
+      final settlements = ActivationOutcome.of(activations, _monthEvents);
       final excel = xls.Excel.createExcel();
       const sheetName = 'التقرير الحسابي';
       final sheet = excel[sheetName];
@@ -356,7 +356,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
       activations: activations,
     );
     final cash = _cashSummary(activations);
-    final settlements = ActivationSettlement.of(activations, _monthEvents);
+    final settlements = ActivationOutcome.of(activations, _monthEvents);
     final refreshing =
         _loadingSasBalance || _loadingJournalMonth || _loadingFtthBalance;
     return Directionality(
@@ -903,7 +903,7 @@ class _ActivationTile extends StatelessWidget {
   });
 
   final AccountingActivationRecord record;
-  final ActivationSettlement? settlement;
+  final ActivationOutcome? settlement;
   final String Function(double) money;
   final String date;
 
