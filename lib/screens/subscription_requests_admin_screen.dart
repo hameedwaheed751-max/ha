@@ -431,7 +431,11 @@ class _SubscriptionRequestsAdminScreenState
         content: SizedBox(
           width: 360,
           child: InteractiveViewer(
-            child: Image.network(url, fit: BoxFit.contain),
+            child: Image.network(
+              url,
+              fit: BoxFit.contain,
+              errorBuilder: (_, _, _) => const _ReceiptUnavailable(),
+            ),
           ),
         ),
         actions: [
@@ -495,7 +499,8 @@ class _SubscriptionRequestsAdminScreenState
           child: const Text('مشتركو الساس: تعذرت القراءة (اضغط للإعادة)'),
         );
       }
-      final counts = snapshot.data!;
+      final counts = snapshot.data;
+      if (counts == null) return const Text('مشتركو الساس: —');
       final using = counts.sas > 0;
       return Text(
         'مشتركو الساس: ${counts.sas}'
@@ -667,6 +672,7 @@ class _SubscriptionRequestsAdminScreenState
                     height: 180,
                     width: double.infinity,
                     fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const _ReceiptUnavailable(),
                   ),
                 ),
               ),
@@ -995,4 +1001,27 @@ class _TrialClaimsDialogState extends State<_TrialClaimsDialog> {
       ),
     );
   }
+}
+
+/// بدل الخطأ الأحمر حين تُحذف صورة الإيصال أو يتعذر تحميلها.
+class _ReceiptUnavailable extends StatelessWidget {
+  const _ReceiptUnavailable();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 120,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: const Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.broken_image_outlined, size: 32),
+        SizedBox(height: 6),
+        Text('تعذر تحميل صورة الإيصال'),
+      ],
+    ),
+  );
 }
