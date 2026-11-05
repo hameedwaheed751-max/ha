@@ -26,9 +26,14 @@ class FtthActivationDialog extends StatefulWidget {
     required this.loadQuote,
     required this.priceFor,
     this.renewal = false,
+    this.topUp,
   });
 
   final String subscriberName;
+
+  /// يعبّئ محفظة المشترك برمز كارت ويعيد رصيدها الجديد.
+  final Future<double?> Function(FtthActivationQuote quote, String cardPin)?
+  topUp;
 
   /// المشترك فعّال، فالعملية تجديد (تمديد) لا تفعيل.
   final bool renewal;
@@ -52,6 +57,9 @@ class _FtthActivationDialogState extends State<FtthActivationDialog> {
   int _months = 1;
   bool _pricing = false;
   int _priceRequest = 0;
+  bool _toppingUp = false;
+  String? _topUpMessage;
+  bool _topUpFailed = false;
 
   @override
   void initState() {
@@ -116,6 +124,43 @@ class _FtthActivationDialogState extends State<FtthActivationDialog> {
       if (mounted && request == _priceRequest) {
         setState(() => _pricing = false);
       }
+    }
+  }
+
+  Future<void> _topUp() async {
+    final quote = _quote;
+    final topUp = widget.topUp;
+    if (quote == null || topUp == null || _toppingUp) return;
+    final pin = await showDialog<String>(
+      context: context,
+      builder: (_) => const _CardPinDialog(),
+    );
+    if (pin == null || !mounted) return;
+    setState(() {
+      _toppingUp = true;
+      _topUpMessage = null;
+    });
+    try {
+      final balance = await topUp(quote, pin);
+      if (!mounted) return;
+      setState(() {
+        final updated = _quote!.withCustomerBalance(balance);
+        _quote = updated;
+        _method = null;
+        _pickMethod(updated);
+        _topUpMessage = balance == null
+            ? 'تمت التعبئة، لكن تعذرت قراءة الرصيد الجديد'
+            : 'تمت التعبئة. الرصيد: ${formatIqd(balance)}';
+        _topUpFailed = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _topUpMessage = 'فشلت التعبئة: $error';
+        _topUpFailed = true;
+      });
+    } finally {
+      if (mounted) setState(() => _toppingUp = false);
     }
   }
 
@@ -282,6 +327,34 @@ class _FtthActivationDialogState extends State<FtthActivationDialog> {
                             onTap: () => setState(() => _method = method),
                           ),
                         ),
+                      if (widget.topUp != null &&
+                          quote.detail.customerId.isNotEmpty) ...[
+                        OutlinedButton.icon(
+                          onPressed: _toppingUp || _pricing ? null : _topUp,
+                          icon: _toppingUp
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.credit_card),
+                          label: const Text('تعبئة رصيد المشترك بكارت'),
+                        ),
+                        if (_topUpMessage != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              _topUpMessage!,
+                              style: TextStyle(
+                                color: _topUpFailed
+                                    ? colors.error
+                                    : Colors.green.shade700,
+                              ),
+                            ),
+                          ),
+                      ],
                     ],
                   ),
                 ),
@@ -306,6 +379,70 @@ class _FtthActivationDialogState extends State<FtthActivationDialog> {
                     FtthActivationChoice(quote: quote, method: _method!),
                   ),
             child: const Text('متابعة'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// يطلب رمز الكارت ويؤكد قبل الإرسال، لأن الكارت يُستهلك عند نجاح التعبئة.
+class _CardPinDialog extends StatefulWidget {
+  const _CardPinDialog();
+
+  @override
+  State<_CardPinDialog> createState() => _CardPinDialogState();
+}
+
+class _CardPinDialogState extends State<_CardPinDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String get _pin =>
+      SasProjectNationalService.normalizeCardPin(_controller.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final ok = _pin.length >= 10;
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: const Text('تعبئة رصيد المشترك'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              textDirection: TextDirection.ltr,
+              decoration: const InputDecoration(
+                labelText: 'رمز الكارت',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'يُضاف مبلغ الكارت إلى محفظة المشترك في FTTH ويُستهلك الكارت، '
+              'ثم اختر "رصيد المشترك" للتفعيل.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: ok ? () => Navigator.pop(context, _pin) : null,
+            child: const Text('تعبئة'),
           ),
         ],
       ),

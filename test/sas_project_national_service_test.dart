@@ -138,6 +138,12 @@ class _Fake {
     if (path == '/api/subscriptions/8010490/change') {
       return json(changeResponse!);
     }
+    if (path == '/api/customers/2276234/wallets/top-up') {
+      return json({'paymentUrl': null, 'orderNumber': null});
+    }
+    if (path == '/api/customers/1/wallets/top-up') {
+      return json({'message': 'Card is already used'}, 400);
+    }
     if (path == '/api/orders/cancel') return http.Response('', 200);
     if (path == '/api/subscriptions') {
       final page = int.parse(request.url.queryParameters['pageNumber']!);

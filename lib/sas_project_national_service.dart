@@ -399,6 +399,18 @@ class FtthActivationQuote {
         renewAllowed: renewAllowed,
       );
 
+  FtthActivationQuote withCustomerBalance(double? balance) =>
+      FtthActivationQuote(
+        detail: detail,
+        price: price,
+        partnerBalance: partnerBalance,
+        customerBalance: balance,
+        selectedOrder: selectedOrder,
+        plans: plans,
+        commitmentPeriods: commitmentPeriods,
+        renewAllowed: renewAllowed,
+      );
+
   double? balanceFor(FtthPaymentMethod method) => switch (method) {
     FtthPaymentMethod.card => null,
     FtthPaymentMethod.customerWallet => customerBalance,
@@ -888,6 +900,47 @@ class SasProjectNationalService {
     final data = await _getJson(path);
     final model = data is Map ? data['model'] : null;
     return model is Map ? _asDouble(model['balance']) : null;
+  }
+
+  /// رمز كارت التعبئة بعد إزالة المسافات والشرطات وتحويل الأرقام العربية.
+  static String normalizeCardPin(String pin) {
+    const arabic = '٠١٢٣٤٥٦٧٨٩';
+    const persian = '۰۱۲۳۴۵۶۷۸۹';
+    final buffer = StringBuffer();
+    for (final ch in pin.split('')) {
+      final a = arabic.indexOf(ch);
+      final p = persian.indexOf(ch);
+      if (a >= 0) {
+        buffer.write(a);
+      } else if (p >= 0) {
+        buffer.write(p);
+      } else if (RegExp(r'[0-9A-Za-z]').hasMatch(ch)) {
+        buffer.write(ch);
+      }
+    }
+    return buffer.toString();
+  }
+
+  /// يعبّئ محفظة المشترك برمز كارت، كما تفعل صفحة المشترك في FTTH، ثم يعيد
+  /// الرصيد الجديد. يُرسل مرة واحدة فقط: الكارت يُستهلك عند نجاحه.
+  Future<double?> topUpCustomerWallet({
+    required String customerId,
+    required String cardPin,
+  }) async {
+    final id = customerId.trim();
+    final pin = normalizeCardPin(cardPin);
+    if (id.isEmpty) {
+      throw const SasProjectNationalException('رقم المشترك في FTTH غير معروف');
+    }
+    if (pin.length < 10) {
+      throw const SasProjectNationalException('رمز الكارت غير مكتمل');
+    }
+    await _postJson(
+      '/api/customers/$id/wallets/top-up',
+      {'cardPin': pin, 'customerId': id},
+      referer: '$_baseUrl/customer-details/$id/details/view',
+    );
+    return fetchCustomerBalance(id);
   }
 
   /// يجمع ما تحتاجه نافذة التفعيل. تعذر قراءة رصيد يعطّل خياره فقط.

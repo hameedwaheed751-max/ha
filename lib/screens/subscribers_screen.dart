@@ -823,6 +823,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         ),
         priceFor: (quote, order) =>
             service.calculatePrice(quote.detail, order: order),
+        topUp: (quote, pin) => service.topUpCustomerWallet(
+          customerId: quote.detail.customerId,
+          cardPin: pin,
+        ),
       ),
     );
     if (choice == null || !mounted) return;
