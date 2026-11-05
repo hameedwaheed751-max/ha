@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'models.dart';
 import 'sas_api_service.dart';
+import 'services/trial_guard_service.dart';
 
 class SasSyncResult {
   final int read;
@@ -142,6 +143,10 @@ class SasSyncService {
   }
 
   static Future<SasSyncResult> sync(SasApiService api) async {
+    await TrialGuardService.ensureSasAllowed(
+      api.settings.serverUrl,
+      api.settings.username,
+    );
     final response = await api.fetchUsers();
     final rows = api.extractUsers(response);
     final profileNameCache = <int, String?>{};

@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
+import 'services/trial_guard_service.dart';
 
 class SasProjectNationalSettings {
   const SasProjectNationalSettings({
@@ -620,6 +621,7 @@ class SasProjectNationalService {
   Future<SasProjectNationalSyncResult> syncSubscribers({
     SasProjectNationalData? data,
   }) async {
+    await TrialGuardService.ensureFtthAllowed(settings.username);
     final snapshot = data ?? await fetchSubscriberData();
     final customersById = <String, Map<String, dynamic>>{};
     for (final customer in snapshot.customers) {

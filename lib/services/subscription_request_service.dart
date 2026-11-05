@@ -5,6 +5,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'trial_guard_service.dart';
+
 DateTime? _parseDateTime(dynamic value) {
   if (value is DateTime) return value;
   if (value is int) {
@@ -469,6 +471,8 @@ class SubscriptionRequestService {
     if (role.exists) {
       throw StateError('هذا الحساب مسجل مسبقاً ولا تتوفر له الباقة المجانية');
     }
+    // القواعد لا تقبل الباقة المجانية إلا ببصمة هاتف مسجلة لهذا الحساب.
+    final phoneHash = await TrialGuardService.claimTrialPhone(phone);
     final requestId = _root.child(_adminCollectionPath).push().key;
     if (requestId == null) {
       throw StateError('تعذر إنشاء الطلب، حاول مرة أخرى');
@@ -519,6 +523,7 @@ class SubscriptionRequestService {
           'startDate': startDate,
           'endDate': startDate + const Duration(days: 15).inMilliseconds,
           'autoExpire': true,
+          'trialPhoneHash': phoneHash,
           'lastPaymentId': requestId,
           'updatedAt': now.toUtc().toIso8601String(),
         },
