@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_project_national_service.dart';
+import 'subscriber_details_screen.dart';
 
 /// رقم من رد الساس مهما كان شكله: 250000 أو "250,000.00" أو "250,000 IQD"
 /// أو {value: ...}.
@@ -15,8 +16,32 @@ double? parseSasAmount(dynamic raw) {
   if (raw is Map) {
     return parseSasAmount(raw['value'] ?? raw['amount'] ?? raw['balance']);
   }
-  final match = RegExp(r'-?d[d,]*(?:.d+)?').firstMatch('${raw ?? ''}');
+  final match = RegExp(r'-?\d[\d,]*(?:\.\d+)?').firstMatch('${raw ?? ''}');
   return match == null ? null : double.tryParse(match[0]!.replaceAll(',', ''));
+}
+
+/// تفعيل لمشترك FTTH. السجلات القديمة بلا مصدر تُعرف من المشترك نفسه.
+bool isFtthActivation(AccountingActivationRecord record) {
+  if (record.source.isNotEmpty) return record.source == 'ftth';
+  final user = record.subscriberUser.trim().toLowerCase();
+  if (user.isEmpty) return false;
+  return AppStore.subscribers.any(
+    (s) => s.source == 'ftth' && s.user.trim().toLowerCase() == user,
+  );
+}
+
+/// هل سُجل في التطبيق تفعيل لهذا اليوزر خلال يوم من وقت تفعيل الساس.
+/// null حين لا يمكن الحكم (لا يوزر أو لا تاريخ).
+bool? isRecordedInApp(
+  Map<String, List<DateTime>> recordedDays,
+  String username,
+  DateTime? at,
+) {
+  final user = username.trim().toLowerCase();
+  if (user.isEmpty || at == null) return null;
+  final days = recordedDays[user];
+  if (days == null) return false;
+  return days.any((day) => day.difference(at).abs() <= const Duration(days: 1));
 }
 
 /// التقرير الحسابي الشهري: أربعة أسئلة فقط (المبيعات، النقد، الديون، الأرصدة)
@@ -87,11 +112,55 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
   bool _inSelectedMonth(DateTime date) =>
       date.year == _month.year && date.month == _month.month;
 
+  /// كل تفعيلات الشهر، ومنها FTTH: للنقد والديون كما في المهام اليومية.
+  List<AccountingActivationRecord> get _allMonthActivations => AppStore
+      .accountingActivations
+      .where((record) => _inSelectedMonth(record.at))
+      .toList();
+
+  /// تفعيلات الساس فقط، الأحدث أولاً: للمبيعات والربح والقائمة.
   List<AccountingActivationRecord> get _activations =>
-      AppStore.accountingActivations
-          .where((record) => _inSelectedMonth(record.at))
-          .toList()
+      _allMonthActivations.where((record) => !isFtthActivation(record)).toList()
         ..sort((a, b) => b.at.compareTo(a.at));
+
+  Subscriber? _subscriberOf(AccountingActivationRecord record) {
+    final user = record.subscriberUser.trim().toLowerCase();
+    if (user.isEmpty) return null;
+    for (final subscriber in AppStore.subscribers) {
+      if (subscriber.user.trim().toLowerCase() == user) return subscriber;
+    }
+    return null;
+  }
+
+  void _openSubscriber(AccountingActivationRecord record) {
+    final subscriber = _subscriberOf(record);
+    if (subscriber == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('المشترك لم يعد موجوداً في التطبيق')),
+      );
+      return;
+    }
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => SubscriberDetailsScreen(subscriber: subscriber),
+          ),
+        )
+        .then((_) {
+          if (mounted) setState(() {});
+        });
+  }
+
+  /// يوزرات الساس المسجل تفعيلها في التطبيق، مع أيامها، لمطابقة سجل الساس.
+  Map<String, List<DateTime>> get _recordedActivationDays {
+    final days = <String, List<DateTime>>{};
+    for (final record in AppStore.accountingActivations) {
+      final user = record.subscriberUser.trim().toLowerCase();
+      if (user.isEmpty) continue;
+      days.putIfAbsent(user, () => []).add(record.at.toLocal());
+    }
+    return days;
+  }
 
   Iterable<DailyTaskEvent> get _monthEvents =>
       AppStore.dailyTaskEvents.where((event) => _inSelectedMonth(event.at));
@@ -261,7 +330,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
       final sales = AccountingMonthlySummary.fromRecords(
         activations: activations,
       );
-      final cash = _cashSummary(activations);
+      final cash = _cashSummary(_allMonthActivations);
       final settlements = ActivationOutcome.of(activations, _monthEvents);
       final excel = xls.Excel.createExcel();
       const sheetName = 'التقرير الحسابي';
@@ -282,10 +351,10 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
 
       row('الشهر', _monthLabel);
       row('');
-      row('المبيعات والربح');
+      row('مبيعات الساس والربح');
       row('عدد التفعيلات', sales.activationCount);
       row('المبيعات', sales.subscriberSales);
-      row('الكلفة (استقطاع الساس / FTTH)', sales.sasDeductions);
+      row('كلفة الساس', sales.sasDeductions);
       row('الربح', sales.profit);
       row('');
       row('النقد المستلم');
@@ -375,7 +444,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     final sales = AccountingMonthlySummary.fromRecords(
       activations: activations,
     );
-    final cash = _cashSummary(activations);
+    final cash = _cashSummary(_allMonthActivations);
     final settlements = ActivationOutcome.of(activations, _monthEvents);
     final activationPages = activations.isEmpty
         ? 1
@@ -436,7 +505,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                 ),
                 const SizedBox(height: 12),
                 _Section(
-                  title: 'المبيعات والربح',
+                  title: 'مبيعات الساس والربح',
                   icon: Icons.point_of_sale_outlined,
                   children: [
                     _Figure(
@@ -454,7 +523,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                       _money(sales.profit),
                       const Color(0xFF2E7D32),
                       hint:
-                          'المبيعات − كلفة الساس/FTTH '
+                          'المبيعات − كلفة الساس '
                           '(${_money(sales.sasDeductions)})',
                       emphasized: true,
                     ),
@@ -592,6 +661,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                           settlement: settlements[record],
                           money: _money,
                           date: _dateTime(record.at),
+                          onTap: () => _openSubscriber(record),
                         ),
                     ],
                   ),
@@ -610,6 +680,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                   loading: _loadingFinancialReport,
                   error: _financialReportError,
                   money: _money,
+                  recordedDays: _recordedActivationDays,
                   onTypeSelected: (type) => _loadFinancialReport(type: type),
                   onPageSelected: (page) => _loadFinancialReport(page: page),
                   onRefresh: () => _loadFinancialReport(
@@ -751,12 +822,14 @@ class _Figure extends StatelessWidget {
     constraints: const BoxConstraints(minHeight: 92),
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: emphasized ? color.withValues(alpha: 0.08) : Colors.white,
+      color: emphasized
+          ? color.withValues(alpha: 0.08)
+          : Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(10),
       border: Border.all(
         color: emphasized
             ? color.withValues(alpha: 0.45)
-            : const Color(0xFFE2E8F0),
+            : Theme.of(context).colorScheme.outlineVariant,
       ),
     ),
     child: Column(
@@ -768,7 +841,7 @@ class _Figure extends StatelessWidget {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
-            color: Color(0xFF475569),
+            color: Color(0xFF64748B),
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -904,9 +977,9 @@ class _ListCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: const Color(0xFFE2E8F0)),
+      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
     ),
     child: Column(
       children: [
@@ -946,12 +1019,14 @@ class _ActivationTile extends StatelessWidget {
     required this.settlement,
     required this.money,
     required this.date,
+    this.onTap,
   });
 
   final AccountingActivationRecord record;
   final ActivationOutcome? settlement;
   final String Function(double) money;
   final String date;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -974,75 +1049,78 @@ class _ActivationTile extends StatelessWidget {
         'واصل ${money(settlement!.collected)} · دين ${money(settlement!.debt)}',
       _ => null,
     };
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                      if (status != ActivationPaymentStatus.unknown)
+                        _StatusChip(status.label, statusColor),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    details,
+                    style: const TextStyle(
+                      color: Color(0xFF64748B),
+                      fontSize: 12.5,
+                    ),
+                  ),
+                  if (paymentNote != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        paymentNote,
+                        style: TextStyle(color: statusColor, fontSize: 12.5),
                       ),
                     ),
-                    if (status != ActivationPaymentStatus.unknown)
-                      _StatusChip(status.label, statusColor),
-                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  money(record.saleAmount),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                  ),
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  details,
-                  style: const TextStyle(
-                    color: Color(0xFF64748B),
+                  'ربح ${money(record.profit)}',
+                  style: TextStyle(
+                    color: record.profit < 0
+                        ? const Color(0xFFC62828)
+                        : const Color(0xFF2E7D32),
                     fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (paymentNote != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      paymentNote,
-                      style: TextStyle(color: statusColor, fontSize: 12.5),
-                    ),
-                  ),
               ],
             ),
-          ),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                money(record.saleAmount),
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                'ربح ${money(record.profit)}',
-                style: TextStyle(
-                  color: record.profit < 0
-                      ? const Color(0xFFC62828)
-                      : const Color(0xFF2E7D32),
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1104,6 +1182,7 @@ class _SasFinancialReports extends StatelessWidget {
     required this.loading,
     required this.error,
     required this.money,
+    required this.recordedDays,
     required this.onTypeSelected,
     required this.onPageSelected,
     required this.onRefresh,
@@ -1114,6 +1193,9 @@ class _SasFinancialReports extends StatelessWidget {
   final bool loading;
   final String? error;
   final String Function(double value) money;
+
+  /// يوزرات التفعيلات المسجلة في التطبيق مع أيامها.
+  final Map<String, List<DateTime>> recordedDays;
   final ValueChanged<SasFinancialReportType> onTypeSelected;
   final ValueChanged<int> onPageSelected;
   final VoidCallback onRefresh;
@@ -1189,8 +1271,19 @@ class _SasFinancialReports extends StatelessWidget {
                 _first(row, const ['lastname', 'last_name']),
           ),
         ].where((part) => part.isNotEmpty).join(' ');
+        final createdAt = _first(row, const [
+          'created_at',
+          'activation_date',
+          'date',
+        ]);
+        final recorded = isRecordedInApp(
+          recordedDays,
+          username,
+          DateTime.tryParse(_text(createdAt)),
+        );
         return _SasRow(
           title: fullName.isNotEmpty ? fullName : username,
+          warning: recorded == false ? 'غير مسجل في التطبيق' : null,
           details: [
             _text(
               _nested(row, 'profile_details', 'name') ??
@@ -1317,6 +1410,7 @@ class _SasRow extends StatelessWidget {
     this.amountColor,
     this.tag = '',
     this.note,
+    this.warning,
   });
 
   final String title;
@@ -1325,6 +1419,9 @@ class _SasRow extends StatelessWidget {
   final Color? amountColor;
   final String tag;
   final String? note;
+
+  /// تنبيه أحمر بجانب العنوان، مثل تفعيل في الساس لم يُسجل في التطبيق.
+  final String? warning;
 
   @override
   Widget build(BuildContext context) {
@@ -1352,6 +1449,8 @@ class _SasRow extends StatelessWidget {
                     ),
                     if (tag.isNotEmpty)
                       _StatusChip(tag, const Color(0xFF546E7A)),
+                    if (warning != null)
+                      _StatusChip(warning!, const Color(0xFFC62828)),
                   ],
                 ),
                 if (line.isNotEmpty) ...[
@@ -1444,7 +1543,7 @@ class _MonthSelector extends StatelessWidget {
 
 /// أرقام الصفحات مربعات في سطر واحد تحت القائمة؛ الضغط على رقم يفتح صفحته.
 /// إذا كثرت الصفحات يُسحب السطر جانبياً.
-class _Pager extends StatelessWidget {
+class _Pager extends StatefulWidget {
   const _Pager({
     required this.total,
     required this.page,
@@ -1458,6 +1557,53 @@ class _Pager extends StatelessWidget {
   final ValueChanged<int> onPage;
 
   @override
+  State<_Pager> createState() => _PagerState();
+}
+
+class _PagerState extends State<_Pager> {
+  final _scroll = ScrollController();
+  static const _squareExtent = 44.0;
+
+  int get total => widget.total;
+  int get page => widget.page;
+  int get lastPage => widget.lastPage;
+  ValueChanged<int> get onPage => widget.onPage;
+
+  @override
+  void initState() {
+    super.initState();
+    _revealSelected();
+  }
+
+  @override
+  void didUpdateWidget(_Pager oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.page != widget.page) _revealSelected();
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// يحرك سطر الأرقام أفقياً فقط حتى يكون مربع الصفحة المفتوحة في الوسط.
+  void _revealSelected() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final position = _scroll.position;
+      final target =
+          (page - 1) * _squareExtent -
+          (position.viewportDimension - _squareExtent) / 2;
+      _scroll.animateTo(
+        target.clamp(0.0, position.maxScrollExtent),
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
@@ -1468,6 +1614,7 @@ class _Pager extends StatelessWidget {
       if (lastPage > 1) ...[
         const SizedBox(height: 8),
         SingleChildScrollView(
+          controller: _scroll,
           scrollDirection: Axis.horizontal,
           child: Row(
             children: [
@@ -1503,27 +1650,36 @@ class _PageSquare extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-    color: selected ? const Color(0xFF2E7D32) : Colors.white,
+    color: selected
+        ? const Color(0xFF2E7D32)
+        : Theme.of(context).colorScheme.surface,
     borderRadius: BorderRadius.circular(8),
     child: InkWell(
       onTap: selected ? null : onTap,
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        constraints: const BoxConstraints(minWidth: 38),
+        width: 38,
         height: 38,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 3),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: selected ? const Color(0xFF2E7D32) : const Color(0xFFCBD5E1),
+            color: selected
+                ? const Color(0xFF2E7D32)
+                : Theme.of(context).colorScheme.outlineVariant,
           ),
         ),
-        child: Text(
-          '$number',
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            color: selected ? Colors.white : const Color(0xFF334155),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            '$number',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: selected
+                  ? Colors.white
+                  : Theme.of(context).colorScheme.onSurface,
+            ),
           ),
         ),
       ),

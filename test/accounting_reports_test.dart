@@ -4,6 +4,62 @@ import 'package:untitled/sas_api_service.dart';
 import 'package:untitled/screens/accounting_reports_screen.dart';
 
 void main() {
+  test('FTTH activations are recognised by source or by subscriber', () {
+    AccountingActivationRecord record(String user, {String source = ''}) =>
+        AccountingActivationRecord(
+          subscriberUser: user,
+          subscriberName: user,
+          packageName: 'p',
+          saleAmount: 35000,
+          sasDeduction: 0,
+          at: DateTime(2026, 11, 5),
+          source: source,
+        );
+    AppStore.subscribers.add(
+      Subscriber.fromJson({
+        'user': 'Fiber.Old',
+        'name': 'old ftth',
+        'source': 'ftth',
+      }),
+    );
+    addTearDown(AppStore.subscribers.clear);
+
+    expect(isFtthActivation(record('a', source: 'ftth')), isTrue);
+    expect(isFtthActivation(record('a', source: 'sas')), isFalse);
+    // سجل قديم بلا مصدر: يُعرف من المشترك.
+    expect(isFtthActivation(record('fiber.old')), isTrue);
+    expect(isFtthActivation(record('someone')), isFalse);
+    // المصدر الصريح يغلب.
+    expect(isFtthActivation(record('fiber.old', source: 'sas')), isFalse);
+    expect(
+      AccountingActivationRecord.fromJson(
+        record('x', source: 'ftth').toJson(),
+      ).source,
+      'ftth',
+    );
+  });
+
+  test('SAS activations not recorded in the app are detected', () {
+    final days = {
+      'ali': [DateTime(2026, 11, 5, 10)],
+    };
+    expect(isRecordedInApp(days, 'Ali', DateTime(2026, 11, 5, 23)), isTrue);
+    expect(isRecordedInApp(days, 'ali', DateTime(2026, 11, 8)), isFalse);
+    expect(isRecordedInApp(days, 'omar', DateTime(2026, 11, 5)), isFalse);
+    expect(isRecordedInApp(days, '', DateTime(2026, 11, 5)), isNull);
+    expect(isRecordedInApp(days, 'ali', null), isNull);
+  });
+
+  test('SAS balance is read whatever shape SAS returns', () {
+    expect(parseSasAmount(250000), 250000);
+    expect(parseSasAmount('250,000.50'), 250000.5);
+    expect(parseSasAmount('250,000 IQD'), 250000);
+    expect(parseSasAmount({'value': '1,500'}), 1500);
+    expect(parseSasAmount('-3,000'), -3000);
+    expect(parseSasAmount(null), isNull);
+    expect(parseSasAmount('غير متاح'), isNull);
+  });
+
   test('monthly accounting keeps sales and SAS deductions independent', () {
     final summary = AccountingMonthlySummary.fromRecords(
       activations: [

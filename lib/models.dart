@@ -295,6 +295,7 @@ class AccountingActivationRecord {
     this.sasBalanceBefore,
     this.sasBalanceAfter,
     this.needsSaleAmountMigration = false,
+    this.source = '',
   });
 
   final String subscriberUser;
@@ -306,6 +307,9 @@ class AccountingActivationRecord {
   final double? sasBalanceBefore;
   final double? sasBalanceAfter;
   final bool needsSaleAmountMigration;
+
+  /// مصدر المشترك عند التفعيل: sas أو ftth أو local. فارغ في السجلات القديمة.
+  final String source;
 
   double get profit => saleAmount - sasDeduction;
 
@@ -319,6 +323,7 @@ class AccountingActivationRecord {
     'at': at.toIso8601String(),
     if (sasBalanceBefore != null) 'sasBalanceBefore': sasBalanceBefore,
     if (sasBalanceAfter != null) 'sasBalanceAfter': sasBalanceAfter,
+    if (source.isNotEmpty) 'source': source,
   };
 
   factory AccountingActivationRecord.fromJson(Map<String, dynamic> json) {
@@ -337,6 +342,7 @@ class AccountingActivationRecord {
       sasBalanceBefore: _nullableNumber(json['sasBalanceBefore']),
       sasBalanceAfter: _nullableNumber(json['sasBalanceAfter']),
       needsSaleAmountMigration: !hasExplicitSaleAmount,
+      source: (json['source'] ?? '').toString(),
     );
   }
 
@@ -2718,6 +2724,7 @@ class AppStore {
         at: record.at,
         sasBalanceBefore: record.sasBalanceBefore,
         sasBalanceAfter: record.sasBalanceAfter,
+        source: record.source,
       );
     }
   }

@@ -387,6 +387,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           saleAmount: merged,
           sasDeduction: sasDeduction,
           at: at,
+          source: s.source,
         ),
         persist: false,
       );
@@ -431,6 +432,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         saleAmount: payment.saleAmount,
         sasDeduction: sasDeduction,
         at: at,
+        source: s.source,
       ),
       persist: false,
     );
