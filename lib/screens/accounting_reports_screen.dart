@@ -42,6 +42,8 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
   bool _loadingFinancialReport = false;
   String? _financialReportError;
   SasManagerJournalMonth? _journalMonth;
+  int _activationPage = 1;
+  static const _activationsPerPage = 10;
   bool _loadingJournalMonth = false;
   String? _journalMonthError;
 
@@ -124,6 +126,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
   void _changeMonth(int offset) {
     setState(() {
       _month = DateTime(_month.year, _month.month + offset);
+      _activationPage = 1;
     });
     _loadJournalMonth();
   }
@@ -374,6 +377,10 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     );
     final cash = _cashSummary(activations);
     final settlements = ActivationOutcome.of(activations, _monthEvents);
+    final activationPages = activations.isEmpty
+        ? 1
+        : (activations.length / _activationsPerPage).ceil();
+    final activationPage = _activationPage.clamp(1, activationPages);
     final refreshing =
         _loadingSasBalance || _loadingJournalMonth || _loadingFtthBalance;
     return Directionality(
@@ -573,10 +580,13 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                 const SizedBox(height: 10),
                 if (activations.isEmpty)
                   const _EmptyBox('لا توجد عمليات تفعيل مسجلة لهذا الشهر')
-                else
+                else ...[
                   _ListCard(
                     children: [
-                      for (final record in activations)
+                      for (final record
+                          in activations
+                              .skip((activationPage - 1) * _activationsPerPage)
+                              .take(_activationsPerPage))
                         _ActivationTile(
                           record: record,
                           settlement: settlements[record],
@@ -585,6 +595,14 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                         ),
                     ],
                   ),
+                  const SizedBox(height: 6),
+                  _Pager(
+                    total: activations.length,
+                    page: activationPage,
+                    lastPage: activationPages,
+                    onPage: (page) => setState(() => _activationPage = page),
+                  ),
+                ],
                 const SizedBox(height: 28),
                 _SasFinancialReports(
                   selectedType: _reportType,
@@ -1279,29 +1297,11 @@ class _SasFinancialReports extends StatelessWidget {
         else ...[
           _ListCard(children: [for (final row in page!.rows) _row(row)]),
           const SizedBox(height: 6),
-          Row(
-            children: [
-              Text(
-                'الإجمالي: ${page!.total}',
-                style: const TextStyle(color: Color(0xFF64748B)),
-              ),
-              const Spacer(),
-              IconButton(
-                onPressed: currentPage > 1
-                    ? () => onPageSelected(currentPage - 1)
-                    : null,
-                tooltip: 'الصفحة السابقة',
-                icon: const Icon(Icons.chevron_right_rounded),
-              ),
-              Text('$currentPage / $lastPage'),
-              IconButton(
-                onPressed: currentPage < lastPage
-                    ? () => onPageSelected(currentPage + 1)
-                    : null,
-                tooltip: 'الصفحة التالية',
-                icon: const Icon(Icons.chevron_left_rounded),
-              ),
-            ],
+          _Pager(
+            total: page!.total,
+            page: currentPage,
+            lastPage: lastPage,
+            onPage: onPageSelected,
           ),
         ],
       ],
@@ -1439,5 +1439,42 @@ class _MonthSelector extends StatelessWidget {
         ),
       ],
     ),
+  );
+}
+
+/// تنقل بين صفحات قائمة: العدد الكلي ورقم الصفحة وسهمان.
+class _Pager extends StatelessWidget {
+  const _Pager({
+    required this.total,
+    required this.page,
+    required this.lastPage,
+    required this.onPage,
+  });
+
+  final int total;
+  final int page;
+  final int lastPage;
+  final ValueChanged<int> onPage;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Text(
+        'الإجمالي: $total',
+        style: const TextStyle(color: Color(0xFF64748B)),
+      ),
+      const Spacer(),
+      IconButton(
+        onPressed: page > 1 ? () => onPage(page - 1) : null,
+        tooltip: 'الصفحة السابقة',
+        icon: const Icon(Icons.chevron_right_rounded),
+      ),
+      Text('$page / $lastPage'),
+      IconButton(
+        onPressed: page < lastPage ? () => onPage(page + 1) : null,
+        tooltip: 'الصفحة التالية',
+        icon: const Icon(Icons.chevron_left_rounded),
+      ),
+    ],
   );
 }

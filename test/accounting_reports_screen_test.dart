@@ -47,9 +47,7 @@ void main() {
       ),
     );
 
-    await tester.pumpWidget(
-      const MaterialApp(home: AccountingReportsScreen()),
-    );
+    await tester.pumpWidget(const MaterialApp(home: AccountingReportsScreen()));
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('المبيعات والربح'), findsOneWidget);
@@ -76,5 +74,43 @@ void main() {
           ? exception.toStringDeep()
           : '$exception',
     );
+  });
+
+  testWidgets('activations are shown ten per page', (tester) async {
+    tester.view.physicalSize = const Size(390, 6000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final now = DateTime.now();
+    for (var i = 1; i <= 12; i++) {
+      AppStore.accountingActivations.add(
+        AccountingActivationRecord(
+          subscriberUser: 'user$i',
+          subscriberName: 'مشترك $i',
+          packageName: 'Fiber 35',
+          saleAmount: 35000,
+          sasDeduction: 29000,
+          at: DateTime(now.year, now.month, 1, 8, i),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(const MaterialApp(home: AccountingReportsScreen()));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // الأحدث أولاً: الصفحة الأولى من 12 إلى 3.
+    expect(find.text('مشترك 12', skipOffstage: false), findsOneWidget);
+    expect(find.text('مشترك 3', skipOffstage: false), findsOneWidget);
+    expect(find.text('مشترك 2', skipOffstage: false), findsNothing);
+
+    expect(find.text('1 / 2'), findsOneWidget);
+    await tester.tap(find.byTooltip('الصفحة التالية').first);
+    await tester.pump();
+
+    expect(find.text('مشترك 2', skipOffstage: false), findsOneWidget);
+    expect(find.text('مشترك 1', skipOffstage: false), findsOneWidget);
+    expect(find.text('مشترك 12', skipOffstage: false), findsNothing);
+    expect(find.text('2 / 2', skipOffstage: false), findsOneWidget);
   });
 }
