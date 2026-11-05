@@ -29,6 +29,7 @@ import 'today_tasks_screen.dart';
 import 'activity_log_screen.dart';
 import 'plan_prices_admin_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../services/user_role_service.dart';
 import 'login_screen.dart';
 import 'subscription_requests_admin_screen.dart';
 import 'chat_screen.dart';
@@ -3741,7 +3742,11 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
     ).showSnackBar(const SnackBar(content: Text('تم الإرسال بنجاح')));
   }
 
+  bool get _isAdmin =>
+      FirebaseAuth.instance.currentUser?.uid == UserRoleService.trustedAdminUid;
+
   Future<void> _exportDebtExcel(List<Subscriber> debts) async {
+    if (!_isAdmin) return;
     try {
       final excel = xls.Excel.createExcel();
       final sheet = excel['الديون'];
@@ -3817,6 +3822,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
   }
 
   Future<void> _importDebtExcel(List<Subscriber> currentDebts) async {
+    if (!_isAdmin) return;
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -4125,17 +4131,21 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
               ),
             ],
           ),
+          // نقل الديون بين الحسابات عبر Excel للمدير فقط، حتى لا تُنقل بيانات
+          // وكيل إلى حساب جديد يستفيد من الباقة المجانية.
           actions: [
-            IconButton(
-              tooltip: 'استيراد Excel',
-              icon: const Icon(Icons.upload_file),
-              onPressed: () => _importDebtExcel(sortedDebts),
-            ),
-            IconButton(
-              tooltip: 'تصدير Excel',
-              icon: const Icon(Icons.download),
-              onPressed: () => _exportDebtExcel(sortedDebts),
-            ),
+            if (_isAdmin) ...[
+              IconButton(
+                tooltip: 'استيراد Excel',
+                icon: const Icon(Icons.upload_file),
+                onPressed: () => _importDebtExcel(sortedDebts),
+              ),
+              IconButton(
+                tooltip: 'تصدير Excel',
+                icon: const Icon(Icons.download),
+                onPressed: () => _exportDebtExcel(sortedDebts),
+              ),
+            ],
           ],
         ),
         body: Scrollbar(
