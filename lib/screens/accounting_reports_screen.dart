@@ -8,6 +8,17 @@ import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_project_national_service.dart';
 
+/// رقم من رد الساس مهما كان شكله: 250000 أو "250,000.00" أو "250,000 IQD"
+/// أو {value: ...}.
+double? parseSasAmount(dynamic raw) {
+  if (raw is num) return raw.toDouble();
+  if (raw is Map) {
+    return parseSasAmount(raw['value'] ?? raw['amount'] ?? raw['balance']);
+  }
+  final match = RegExp(r'-?d[d,]*(?:.d+)?').firstMatch('${raw ?? ''}');
+  return match == null ? null : double.tryParse(match[0]!.replaceAll(',', ''));
+}
+
 /// التقرير الحسابي الشهري: أربعة أسئلة فقط (المبيعات، النقد، الديون، الأرصدة)
 /// ثم التفاصيل. الأرقام نفسها التي تجمعها المهام اليومية لأيام الشهر.
 class AccountingReportsScreen extends StatefulWidget {
@@ -59,6 +70,14 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
       _loadFinancialReport();
       _loadJournalMonth();
     });
+  }
+
+  /// الرصيد المباشر من الساس، وإلا الرصيد بعد آخر حركة في سجل الشهر الحالي.
+  double? get _currentSasBalance {
+    if (_sasBalance != null) return _sasBalance;
+    final now = DateTime.now();
+    final current = _month.year == now.year && _month.month == now.month;
+    return current ? _journalMonth?.latestBalance : null;
   }
 
   String get _monthLabel => '${_monthNames[_month.month - 1]} ${_month.year}';
@@ -131,9 +150,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
       final settings = await SasSettings.load();
       final wallet = await SasApiService(settings).fetchDashboardWallet(userId);
       final raw = wallet['balance'];
-      final value = raw is num
-          ? raw.toDouble()
-          : double.tryParse('${raw ?? ''}'.replaceAll(',', '').trim());
+      final value = parseSasAmount(raw);
       if (mounted) setState(() => _sasBalance = value);
     } catch (_) {
       if (mounted) setState(() => _sasBalance = null);
@@ -285,7 +302,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
       row('الأرصدة');
       row('إيداعات الساس هذا الشهر', _journalMonth?.deposits ?? 'غير متاح');
       row('استقطاعات الساس هذا الشهر', _journalMonth?.deductions ?? 'غير متاح');
-      row('رصيد الساس الحالي', _sasBalance ?? 'غير متاح');
+      row('رصيد الساس الحالي', _currentSasBalance ?? 'غير متاح');
       if (_ftthConfigured) row('رصيد محفظة FTTH', _ftthBalance ?? 'غير متاح');
       row('');
       row('تفاصيل التفعيلات');
@@ -502,11 +519,11 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                       title: 'رصيد الساس',
                       icon: Icons.cloud_outlined,
                       colors: const [Color(0xFF1B5E20), Color(0xFF43A047)],
-                      value: _loadingSasBalance
+                      value: _loadingSasBalance && _currentSasBalance == null
                           ? '...'
-                          : _sasBalance == null
+                          : _currentSasBalance == null
                           ? 'غير متاح'
-                          : _money(_sasBalance!),
+                          : _money(_currentSasBalance!),
                       lines: [
                         (
                           'إيداعات $_monthLabel',
@@ -606,37 +623,48 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      Icon(icon, size: 20, color: const Color(0xFF2E7D32)),
-      const SizedBox(width: 8),
-      Flexible(
-        child: Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+      // العنوان يأخذ كل العرض المتبقي ويلتف لسطر ثانٍ بدل أن يُقص.
+      Expanded(
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: const Color(0xFF2E7D32)),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            ..._badge(),
+          ],
         ),
       ),
-      if (trailing != null) ...[
-        const SizedBox(width: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          decoration: BoxDecoration(
-            color: const Color(0xFFE8F5E9),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text(
-            trailing!,
-            style: const TextStyle(
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF2E7D32),
-            ),
-          ),
-        ),
-      ],
-      const Spacer(),
       ?action,
     ],
   );
+
+  List<Widget> _badge() => [
+    if (trailing != null) ...[
+      const SizedBox(width: 8),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE8F5E9),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          trailing!,
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF2E7D32),
+          ),
+        ),
+      ),
+    ],
+  ];
 }
 
 /// قسم من الأرقام: بطاقات متساوية تلتف حسب عرض الشاشة.
@@ -1073,10 +1101,8 @@ class _SasFinancialReports extends StatelessWidget {
   final VoidCallback onRefresh;
 
   static const _tabs = <(SasFinancialReportType, String)>[
-    (SasFinancialReportType.activations, 'من فعّلت'),
+    (SasFinancialReportType.activations, 'التفعيلات'),
     (SasFinancialReportType.managerJournal, 'حركة الرصيد'),
-    (SasFinancialReportType.userInvoices, 'فواتير المشتركين'),
-    (SasFinancialReportType.managerInvoices, 'فواتيري'),
   ];
 
   dynamic _nested(Map<String, dynamic> row, String parent, String key) {
