@@ -12,6 +12,7 @@ enum _AdminAction {
   endSubscription,
   resetPassword,
   trialClaims,
+  deleteAgent,
 }
 
 class SubscriptionRequestsAdminScreen extends StatefulWidget {
@@ -373,7 +374,28 @@ class _SubscriptionRequestsAdminScreenState
         _resetPassword(request);
       case _AdminAction.trialClaims:
         _showTrialClaims(request);
+      case _AdminAction.deleteAgent:
+        _deleteAgent(request);
     }
+  }
+
+  Future<void> _deleteAgent(SubscriptionRequestModel request) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _DeleteAgentDialog(agentName: _agentName(request)),
+    );
+    if (confirmed != true || !mounted) return;
+    await _runAction(() async {
+      final result = await SubscriptionRequestService.deleteAgentCompletely(
+        request.uid,
+      );
+      _subscriberCounts.remove(request.uid);
+      _subscriptionEnds.remove(request.uid);
+      final receipts = result.receipts == 0
+          ? ''
+          : '، وصور الإيصالات ${result.receiptsDeleted} من ${result.receipts}';
+      return 'تم حذف بيانات ${_agentName(request)} وطلباته (${result.requests})$receipts';
+    }, 'فشل حذف الوكيل');
   }
 
   Future<void> _showTrialClaims(SubscriptionRequestModel request) =>
@@ -419,6 +441,16 @@ class _SubscriptionRequestsAdminScreenState
           value: _AdminAction.trialClaims,
           child: Text('بصمات الباقة المجانية'),
         ),
+      if (hasAgent) ...[
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: _AdminAction.deleteAgent,
+          child: Text(
+            'حذف الوكيل وبياناته نهائياً',
+            style: TextStyle(color: Color(0xFFC62828)),
+          ),
+        ),
+      ],
     ];
   }
 
@@ -1024,4 +1056,88 @@ class _ReceiptUnavailable extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// تأكيد الحذف النهائي: يجب كتابة كلمة "حذف" قبل تفعيل الزر.
+class _DeleteAgentDialog extends StatefulWidget {
+  const _DeleteAgentDialog({required this.agentName});
+
+  final String agentName;
+
+  @override
+  State<_DeleteAgentDialog> createState() => _DeleteAgentDialogState();
+}
+
+class _DeleteAgentDialogState extends State<_DeleteAgentDialog> {
+  static const _word = 'حذف';
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ready = _controller.text.trim() == _word;
+    const red = Color(0xFFC62828);
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: const Text('حذف الوكيل نهائياً'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'سيُحذف من Firebase كل ما يخص '
+                '${widget.agentName.isEmpty ? 'هذا الوكيل' : widget.agentName}:',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                '• الملف الشخصي والاشتراك\n'
+                '• المشتركون والديون والتقارير والمهام\n'
+                '• إعدادات الساس وFTTH\n'
+                '• كل طلبات اشتراكه وصور إيصالاتها',
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'يبقى: بصمات الباقة المجانية (حتى لا يعود بتجربة جديدة)، '
+                'وحساب الدخول.',
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'لا يمكن التراجع عن هذا الحذف.',
+                style: TextStyle(color: red, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _controller,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'اكتب "$_word" للتأكيد',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: red),
+            onPressed: ready ? () => Navigator.pop(context, true) : null,
+            child: const Text('حذف نهائي'),
+          ),
+        ],
+      ),
+    );
+  }
 }

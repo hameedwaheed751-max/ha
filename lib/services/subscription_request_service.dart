@@ -237,6 +237,68 @@ class SubscriptionRequestService {
         .map((event) => _parseDateTime(event.snapshot.value));
   }
 
+  /// يحذف كل بيانات الوكيل من Firebase دفعة واحدة: حسابه في agents
+  /// ومساره القديم، وكل طلبات اشتراكه، ثم صور إيصالاته.
+  /// تبقى بصمات التجربة المجانية حتى لا يعود بتجربة جديدة، ويبقى حساب
+  /// الدخول لأن حذفه يحتاج صلاحيات الخادم.
+  static Future<AgentDeletionResult> deleteAgentCompletely(String uid) async {
+    _requireTrustedAdmin();
+    final id = uid.trim();
+    if (id.isEmpty || id.contains('/')) {
+      throw ArgumentError.value(uid, 'uid', 'معرف الوكيل غير صالح');
+    }
+    if (id == trustedAdminUid) {
+      throw StateError('لا يمكن حذف حساب المدير');
+    }
+
+    final profile = (await _root.child('agents/$id/profile').get()).value;
+    final sasUsername = profile is Map
+        ? '${profile['sasUsername'] ?? ''}'.trim()
+        : '';
+
+    final updates = <String, Object?>{'agents/$id': null};
+    if (sasUsername.isNotEmpty && !sasUsername.contains('/')) {
+      updates['agents/${id}_$sasUsername'] = null;
+    }
+    final receipts = <String>[];
+    var requests = 0;
+    for (final path in [collectionName, legacyCollectionName]) {
+      final snapshot = await _root
+          .child('$adminRootNode/$path')
+          .orderByChild('uid')
+          .equalTo(id)
+          .get();
+      final value = snapshot.value;
+      if (value is! Map) continue;
+      for (final entry in value.entries) {
+        final request = entry.value;
+        if (request is! Map || '${request['uid']}' != id) continue;
+        updates['$adminRootNode/$path/${entry.key}'] = null;
+        requests++;
+        final receipt = '${request['receiptImageUrl'] ?? ''}'.trim();
+        if (receipt.isNotEmpty) receipts.add(receipt);
+      }
+    }
+
+    // تحديث واحد: إما يُحذف كل شيء أو لا يُحذف شيء.
+    await _root.update(updates);
+
+    var receiptsDeleted = 0;
+    for (final url in receipts) {
+      try {
+        await FirebaseStorage.instance.refFromURL(url).delete();
+        receiptsDeleted++;
+      } catch (_) {
+        // صورة محذوفة سابقاً أو قواعد التخزين تمنع: البيانات حُذفت على أي حال.
+      }
+    }
+    return AgentDeletionResult(
+      requests: requests,
+      receipts: receipts.length,
+      receiptsDeleted: receiptsDeleted,
+    );
+  }
+
   /// عدد مشتركي الوكيل المحفوظين في حسابه، ومنهم من جاء من مزامنة ساسه.
   /// يُقرأ مرة لكل بطاقة، للمدير فقط.
   static Future<AgentSubscriberCounts> fetchAgentSubscriberCounts(
@@ -874,4 +936,16 @@ class AgentSubscriberCounts {
     }
     return AgentSubscriberCounts(total: total, sas: sas, ftth: ftth);
   }
+}
+
+class AgentDeletionResult {
+  const AgentDeletionResult({
+    required this.requests,
+    required this.receipts,
+    required this.receiptsDeleted,
+  });
+
+  final int requests;
+  final int receipts;
+  final int receiptsDeleted;
 }
