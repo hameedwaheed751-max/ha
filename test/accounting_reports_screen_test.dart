@@ -104,13 +104,13 @@ void main() {
     expect(find.text('مشترك 3', skipOffstage: false), findsOneWidget);
     expect(find.text('مشترك 2', skipOffstage: false), findsNothing);
 
-    expect(find.text('1 / 2'), findsOneWidget);
-    await tester.tap(find.byTooltip('الصفحة التالية').first);
+    expect(find.byKey(const ValueKey('page-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('page-3')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('page-2')));
     await tester.pump();
 
     expect(find.text('مشترك 2', skipOffstage: false), findsOneWidget);
     expect(find.text('مشترك 1', skipOffstage: false), findsOneWidget);
     expect(find.text('مشترك 12', skipOffstage: false), findsNothing);
-    expect(find.text('2 / 2', skipOffstage: false), findsOneWidget);
   });
 }

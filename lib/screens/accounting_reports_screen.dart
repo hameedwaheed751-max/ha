@@ -1442,7 +1442,8 @@ class _MonthSelector extends StatelessWidget {
   );
 }
 
-/// تنقل بين صفحات قائمة: العدد الكلي ورقم الصفحة وسهمان.
+/// أرقام الصفحات مربعات في سطر واحد تحت القائمة؛ الضغط على رقم يفتح صفحته.
+/// إذا كثرت الصفحات يُسحب السطر جانبياً.
 class _Pager extends StatelessWidget {
   const _Pager({
     required this.total,
@@ -1457,24 +1458,75 @@ class _Pager extends StatelessWidget {
   final ValueChanged<int> onPage;
 
   @override
-  Widget build(BuildContext context) => Row(
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       Text(
         'الإجمالي: $total',
         style: const TextStyle(color: Color(0xFF64748B)),
       ),
-      const Spacer(),
-      IconButton(
-        onPressed: page > 1 ? () => onPage(page - 1) : null,
-        tooltip: 'الصفحة السابقة',
-        icon: const Icon(Icons.chevron_right_rounded),
-      ),
-      Text('$page / $lastPage'),
-      IconButton(
-        onPressed: page < lastPage ? () => onPage(page + 1) : null,
-        tooltip: 'الصفحة التالية',
-        icon: const Icon(Icons.chevron_left_rounded),
-      ),
+      if (lastPage > 1) ...[
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (var number = 1; number <= lastPage; number++)
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(end: 6),
+                  child: _PageSquare(
+                    key: ValueKey('page-$number'),
+                    number: number,
+                    selected: number == page,
+                    onTap: () => onPage(number),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     ],
+  );
+}
+
+class _PageSquare extends StatelessWidget {
+  const _PageSquare({
+    super.key,
+    required this.number,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final int number;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: selected ? const Color(0xFF2E7D32) : Colors.white,
+    borderRadius: BorderRadius.circular(8),
+    child: InkWell(
+      onTap: selected ? null : onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 38),
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? const Color(0xFF2E7D32) : const Color(0xFFCBD5E1),
+          ),
+        ),
+        child: Text(
+          '$number',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: selected ? Colors.white : const Color(0xFF334155),
+          ),
+        ),
+      ),
+    ),
   );
 }
