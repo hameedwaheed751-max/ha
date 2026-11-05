@@ -281,6 +281,7 @@ class SasSyncService {
     bool save = true,
   }) async {
     final names = <String>[...extraNames];
+    var profilesRead = false;
     try {
       var managerId = 5;
       try {
@@ -306,10 +307,11 @@ class SasSyncService {
             .trim();
         if (name.isNotEmpty) names.add(name);
       }
+      profilesRead = profiles.isNotEmpty;
     } catch (e) {
       debugPrint('fetchProfiles for packages failed (non-fatal): $e');
     }
-    final added = AppStore.mergeSasPackages(names);
+    final added = AppStore.mergeSasPackages(names, complete: profilesRead);
     if (save) await AppStore.save();
     return added;
   }

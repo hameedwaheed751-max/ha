@@ -5,7 +5,8 @@ import 'package:firebase_database/firebase_database.dart';
 
 import '../models.dart';
 import 'subscriber_financial_ledger.dart'
-  show FinancialTransaction, SubscriberFinancialLedger;
+    show FinancialTransaction, SubscriberFinancialLedger;
+import 'trial_guard_service.dart';
 
 class BackupRestoreResult {
   const BackupRestoreResult({this.syncWarning});
@@ -30,9 +31,11 @@ class BackupRestoreService {
       'createdAt': DateTime.now().toUtc().toIso8601String(),
       'data': {
         'subscribers': AppStore.subscribers
-          .map((subscriber) => _sanitizeMap(subscriber.toJson()))
+            .map((subscriber) => _sanitizeMap(subscriber.toJson()))
             .toList(),
-        'packages': AppStore.packages.map((package) => package.toJson()).toList(),
+        'packages': AppStore.packages
+            .map((package) => package.toJson())
+            .toList(),
         'dailyTaskEvents': AppStore.dailyTaskEvents
             .map((event) => event.toJson())
             .toList(),
@@ -59,6 +62,14 @@ class BackupRestoreService {
   }
 
   Future<BackupRestoreResult> restoreBackup(String contents) async {
+    // معرّف الحساب في الملف نص يمكن تعديله، فالباقة المجانية لا تستعيد نسخاً
+    // حتى لا تُنقل بيانات وكيل إلى حساب تجريبي جديد. الحساب الجديد لا نسخ له.
+    if (TrialGuardService.onFreeTrial && !TrialGuardService.isAdmin) {
+      throw StateError(
+        'استعادة النسخة الاحتياطية غير متاحة في الباقة المجانية. '
+        'اشترك بباقة مدفوعة أو تواصل مع الإدارة.',
+      );
+    }
     final decoded = jsonDecode(contents);
     if (decoded is! Map) {
       throw const FormatException('ملف النسخة الاحتياطية غير صالح.');
@@ -86,7 +97,11 @@ class BackupRestoreService {
       (json) => Subscriber.fromJson(_sanitizeMap(json)),
     );
     final packages = _decodeList(data, 'packages', PackagePlan.fromJson);
-    final events = _decodeList(data, 'dailyTaskEvents', DailyTaskEvent.fromJson);
+    final events = _decodeList(
+      data,
+      'dailyTaskEvents',
+      DailyTaskEvent.fromJson,
+    );
     final accountingActivations = _decodeList(
       data,
       'accountingActivations',
@@ -99,8 +114,11 @@ class BackupRestoreService {
 
     final highestReceipt = subscribers
         .expand((subscriber) => subscriber.invoices)
-        .fold<int>(0, (highest, invoice) =>
-            invoice.receiptNumber > highest ? invoice.receiptNumber : highest);
+        .fold<int>(
+          0,
+          (highest, invoice) =>
+              invoice.receiptNumber > highest ? invoice.receiptNumber : highest,
+        );
     final requestedReceiptNumber = _readInt(
       settings['nextReceiptNumber'],
       fallback: 1,
@@ -125,8 +143,7 @@ class BackupRestoreService {
     AppStore.officeLogoBase64 = _readString(settings['officeLogoBase64']);
     AppStore.receiptFooter = _readString(settings['receiptFooter']);
     AppStore.balance = _readDouble(settings['balance']);
-    AppStore.nextReceiptNumber =
-        requestedReceiptNumber > highestReceipt
+    AppStore.nextReceiptNumber = requestedReceiptNumber > highestReceipt
         ? requestedReceiptNumber
         : highestReceipt + 1;
     AppStore.isDarkMode = settings['isDarkMode'] == true;
@@ -220,8 +237,9 @@ class BackupRestoreService {
       if (subscriberEntry.value is! Map) {
         throw const FormatException('بيانات سجل مالي غير صالحة.');
       }
-      final subscriberLedger =
-          Map<String, dynamic>.from(subscriberEntry.value as Map);
+      final subscriberLedger = Map<String, dynamic>.from(
+        subscriberEntry.value as Map,
+      );
       final rawTransactions = subscriberLedger['transactions'];
       if (rawTransactions == null) continue;
       if (rawTransactions is! Map) {

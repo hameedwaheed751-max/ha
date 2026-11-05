@@ -42,4 +42,13 @@ void main() {
     expect(plan.fromSas, isTrue);
     expect(PackagePlan.fromJson({'name': 'Y', 'price': 7}).fromSas, isFalse);
   });
+
+  test('a partial list adds packages without unmarking others', () {
+    AppStore.packages.add(
+      PackagePlan(name: 'Unused', price: 9000, fromSas: true),
+    );
+    final added = AppStore.mergeSasPackages(['Fiber 50'], complete: false);
+    expect(added, 1);
+    expect(AppStore.packages.every((p) => p.fromSas), isTrue);
+  });
 }

@@ -110,7 +110,7 @@ class TrialGuardService {
     }
   }
 
-  static bool get _isAdmin =>
+  static bool get isAdmin =>
       _firebaseReady &&
       FirebaseAuth.instance.currentUser?.uid == UserRoleService.trustedAdminUid;
 
@@ -153,7 +153,7 @@ class TrialGuardService {
   /// للوكلاء الذين سبقوا البصمات: يسجل رقم هاتفهم مرة عند فتح التطبيق حتى
   /// لا يُستخدم لتجربة مجانية بحساب جديد. لا يمنع الوكيل نفسه من أي شيء.
   static Future<void> claimExistingPhone() async {
-    if (!_firebaseReady || _isAdmin) return;
+    if (!_firebaseReady || isAdmin) return;
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     try {
@@ -275,8 +275,22 @@ class TrialGuardService {
       _claimsRef.child('${entry.kind}/${entry.hash}').remove();
 
   static Future<void> _ensure(String kind, String hash, String username) async {
-    if (username.trim().isEmpty || _isAdmin) return;
+    if (username.trim().isEmpty || !_firebaseReady || isAdmin) return;
+    // بصمة سُجلت لهذا الحساب لا تُكتب مع كل مزامنة، فيبقى تاريخها تاريخ أول
+    // ربط. المرفوضة تُفحص كل مرة، فتعمل المزامنة فور حذف المدير لها.
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final doneKey = 'trialClaimed_${kind}_$uid';
+    SharedPreferences? prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+      if (prefs.getString(doneKey) == hash) return;
+    } catch (_) {}
     final result = await claim(kind, hash);
+    if (result == TrialClaimResult.owned) {
+      try {
+        await prefs?.setString(doneKey, hash);
+      } catch (_) {}
+    }
     if (result == TrialClaimResult.otherAccount && onFreeTrial) {
       throw const TrialClaimedException(_sasMessage);
     }

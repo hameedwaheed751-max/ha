@@ -1490,7 +1490,9 @@ class AppStore {
 
   /// يضيف باقات الساس الجديدة بسعر صفر ويُبقي الأسعار التي أدخلها الوكيل.
   /// قائمة فارغة تعني فشل القراءة فلا يتغير شيء. يرجع عدد الباقات المضافة.
-  static int mergeSasPackages(Iterable<String> names) {
+  /// [complete] يعني أن القائمة هي باقات الساس كلها، فقط عندها تُزال علامة
+  /// الساس عن باقة غير موجودة فيها؛ وإلا تُضاف الجديدة فقط.
+  static int mergeSasPackages(Iterable<String> names, {bool complete = true}) {
     final seen = <String, String>{};
     for (final raw in names) {
       final name = raw.trim();
@@ -1499,7 +1501,8 @@ class AppStore {
     }
     if (seen.isEmpty) return 0;
     for (final package in packages) {
-      package.fromSas = seen.containsKey(package.name.trim().toLowerCase());
+      final listed = seen.containsKey(package.name.trim().toLowerCase());
+      if (complete || listed) package.fromSas = listed;
     }
     final existing = {for (final p in packages) p.name.trim().toLowerCase()};
     var added = 0;
