@@ -6,7 +6,10 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../sas_api_service.dart';
+import '../sas_project_national_service.dart';
 
+/// التقرير الحسابي الشهري: أربعة أسئلة فقط (المبيعات، النقد، الديون، الأرصدة)
+/// ثم التفاصيل. الأرقام نفسها التي تجمعها المهام اليومية لأيام الشهر.
 class AccountingReportsScreen extends StatefulWidget {
   const AccountingReportsScreen({super.key});
 
@@ -17,9 +20,13 @@ class AccountingReportsScreen extends StatefulWidget {
 
 class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
-  String? _sasBalance;
+  double? _sasBalance;
   bool _loadingSasBalance = false;
-  SasFinancialReportType _reportType = SasFinancialReportType.managerJournal;
+  bool _ftthConfigured = false;
+  double? _ftthBalance;
+  bool _loadingFtthBalance = false;
+  String? _ftthBalanceError;
+  SasFinancialReportType _reportType = SasFinancialReportType.activations;
   SasFinancialPage? _financialPage;
   bool _loadingFinancialReport = false;
   String? _financialReportError;
@@ -48,10 +55,13 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _loadSasBalance();
+      _loadFtthBalance();
       _loadFinancialReport();
       _loadJournalMonth();
     });
   }
+
+  String get _monthLabel => '${_monthNames[_month.month - 1]} ${_month.year}';
 
   bool _inSelectedMonth(DateTime date) =>
       date.year == _month.year && date.month == _month.month;
@@ -62,31 +72,12 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
           .toList()
         ..sort((a, b) => b.at.compareTo(a.at));
 
-  AccountingMonthlySummary get _summary => AccountingMonthlySummary.fromRecords(
-    activations: _activations,
-    payments: AppStore.subscribers
-        .expand((subscriber) => subscriber.payments)
-        .where((payment) => _inSelectedMonth(payment.at)),
-  );
+  Iterable<DailyTaskEvent> get _monthEvents =>
+      AppStore.dailyTaskEvents.where((event) => _inSelectedMonth(event.at));
 
-  DailyTaskSummary get _monthlyDebtSummary => DailyTaskSummary.fromEvents(
-    AppStore.dailyTaskEvents.where((event) => _inSelectedMonth(event.at)),
-  );
-
-  double get _monthlyInvoiceTotal => AppStore.subscribers
-      .expand((subscriber) => subscriber.invoices)
-      .where(
-        (invoice) =>
-            !invoice.cancelled &&
-            (invoice.monthKey.isNotEmpty
-                ? invoice.monthKey
-                : Subscriber.monthKeyOf(invoice.at)) ==
-            Subscriber.monthKeyOf(_month),
-      )
-      .fold<double>(0, (total, invoice) => total + invoice.amount);
-
-  double get _invoiceReconciliationDifference =>
-      _monthlyInvoiceTotal - _summary.netCollections;
+  /// مجموع المهام اليومية لأيام الشهر، بالطريقة نفسها.
+  DailyTaskSummary _cashSummary(List<AccountingActivationRecord> activations) =>
+      DailyTaskSummary.fromEvents(_monthEvents, activations: activations);
 
   double get _currentOutstandingDebt => AppStore.subscribers.fold<double>(
     0,
@@ -139,13 +130,43 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     try {
       final settings = await SasSettings.load();
       final wallet = await SasApiService(settings).fetchDashboardWallet(userId);
-      if (mounted) {
-        setState(() => _sasBalance = wallet['balance']?.toString());
-      }
+      final raw = wallet['balance'];
+      final value = raw is num
+          ? raw.toDouble()
+          : double.tryParse('${raw ?? ''}'.replaceAll(',', '').trim());
+      if (mounted) setState(() => _sasBalance = value);
     } catch (_) {
       if (mounted) setState(() => _sasBalance = null);
     } finally {
       if (mounted) setState(() => _loadingSasBalance = false);
+    }
+  }
+
+  Future<void> _loadFtthBalance() async {
+    if (_loadingFtthBalance) return;
+    setState(() {
+      _loadingFtthBalance = true;
+      _ftthBalanceError = null;
+    });
+    try {
+      final settings = await SasProjectNationalSettings.load();
+      if (!settings.isComplete) {
+        if (mounted) setState(() => _ftthConfigured = false);
+        return;
+      }
+      if (mounted) setState(() => _ftthConfigured = true);
+      final service = SasProjectNationalService(settings);
+      final balance = await service.fetchOwnPartnerBalance();
+      if (mounted) setState(() => _ftthBalance = balance);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _ftthBalance = null;
+          _ftthBalanceError = '$error';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _loadingFtthBalance = false);
     }
   }
 
@@ -207,96 +228,84 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     }
   }
 
+  void _refreshAll() {
+    _loadSasBalance();
+    _loadFtthBalance();
+    _loadJournalMonth();
+    _loadFinancialReport(page: _financialPage?.currentPage ?? 1);
+  }
+
   Future<void> _exportMonthlyReport() async {
     try {
-      final summary = _summary;
       final activations = _activations;
+      final sales = AccountingMonthlySummary.fromRecords(
+        activations: activations,
+      );
+      final cash = _cashSummary(activations);
+      final settlements = ActivationSettlement.of(activations, _monthEvents);
       final excel = xls.Excel.createExcel();
-      final sheet = excel['التقرير الحسابي'];
+      const sheetName = 'التقرير الحسابي';
+      final sheet = excel[sheetName];
       final defaultSheet = excel.getDefaultSheet();
-      if (defaultSheet != null && defaultSheet != 'التقرير الحسابي') {
+      if (defaultSheet != null && defaultSheet != sheetName) {
         excel.delete(defaultSheet);
       }
+      void row(String label, [Object? value]) => sheet.appendRow([
+        xls.TextCellValue(label),
+        switch (value) {
+          null => xls.TextCellValue(''),
+          int v => xls.IntCellValue(v),
+          double v => xls.DoubleCellValue(v),
+          _ => xls.TextCellValue('$value'),
+        },
+      ]);
 
+      row('الشهر', _monthLabel);
+      row('');
+      row('المبيعات والربح');
+      row('عدد التفعيلات', sales.activationCount);
+      row('المبيعات', sales.subscriberSales);
+      row('الكلفة (استقطاع الساس / FTTH)', sales.sasDeductions);
+      row('الربح', sales.profit);
+      row('');
+      row('النقد المستلم');
+      row('واصل عند التفعيل', cash.activationCollected);
+      row('تسديد ديون', cash.debtPaymentsCollected);
+      if (cash.otherCollected > 0) row('واصل آخر', cash.otherCollected);
+      row('المجموع المستلم', cash.totalCollected);
+      row('');
+      row('الديون');
+      row('ديون أُضيفت هذا الشهر', cash.debtAddedTotal);
+      row('ديون سُددت هذا الشهر', cash.debtPaymentsCollected);
+      if (cash.debtReducedTotal > 0) {
+        row('ديون أُسقطت هذا الشهر', cash.debtReducedTotal);
+      }
+      row('المتبقي الآن على المشتركين', _currentOutstandingDebt);
+      row('');
+      row('الأرصدة');
+      row('إيداعات الساس هذا الشهر', _journalMonth?.deposits ?? 'غير متاح');
+      row('استقطاعات الساس هذا الشهر', _journalMonth?.deductions ?? 'غير متاح');
+      row('رصيد الساس الحالي', _sasBalance ?? 'غير متاح');
+      if (_ftthConfigured) row('رصيد محفظة FTTH', _ftthBalance ?? 'غير متاح');
+      row('');
+      row('تفاصيل التفعيلات');
       sheet.appendRow([
-        xls.TextCellValue('الشهر'),
-        xls.TextCellValue('${_monthNames[_month.month - 1]} ${_month.year}'),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('إجمالي إيداعات SAS'),
-        _journalMonth == null
-            ? xls.TextCellValue('غير متاح')
-            : xls.DoubleCellValue(_journalMonth!.deposits),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('إجمالي استقطاعات SAS'),
-        _journalMonth == null
-            ? xls.TextCellValue('غير متاح')
-            : xls.DoubleCellValue(_journalMonth!.deductions),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('الدفعات الموجبة المسجلة'),
-        xls.DoubleCellValue(summary.grossCollections),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('تصحيحات تخفيض الواصل'),
-        xls.DoubleCellValue(summary.paymentCorrections),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('المطالبات المضافة خلال الشهر'),
-        xls.DoubleCellValue(_monthlyDebtSummary.debtAddedTotal),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('تخفيضات الدين خلال الشهر'),
-        xls.DoubleCellValue(_monthlyDebtSummary.debtReducedTotal),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('الواصل من التسديد'),
-        xls.DoubleCellValue(_monthlyDebtSummary.debtPaymentsCollected),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('صافي حركة الدين خلال الشهر'),
-        xls.DoubleCellValue(_monthlyDebtSummary.netDebtMovement),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('الرصيد الحالي المتبقي على المشتركين'),
-        xls.DoubleCellValue(_currentOutstandingDebt),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('صافي حركة الدفعات'),
-        xls.DoubleCellValue(summary.netCollections),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('إجمالي الفواتير'),
-        xls.DoubleCellValue(_monthlyInvoiceTotal),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('فرق الفواتير عن صافي حركة الدفعات'),
-        xls.DoubleCellValue(_invoiceReconciliationDifference),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('إجمالي المبيعات'),
-        xls.DoubleCellValue(summary.subscriberSales),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('إجمالي الربح'),
-        xls.DoubleCellValue(summary.profit),
-      ]);
-      sheet.appendRow([
-        xls.TextCellValue('عدد عمليات التفعيل'),
-        xls.IntCellValue(summary.activationCount),
-      ]);
-      sheet.appendRow([xls.TextCellValue('تفاصيل التفعيلات')]);
-      sheet.appendRow([
-        xls.TextCellValue('التاريخ'),
-        xls.TextCellValue('المشترك'),
-        xls.TextCellValue('اليوزر'),
-        xls.TextCellValue('الباقة'),
-        xls.TextCellValue('سعر البيع'),
-        xls.TextCellValue('استقطاع SAS'),
-        xls.TextCellValue('الربح'),
+        for (final title in const [
+          'التاريخ',
+          'المشترك',
+          'اليوزر',
+          'الباقة',
+          'السعر',
+          'الكلفة',
+          'الربح',
+          'الدفع',
+          'الواصل',
+          'الدين',
+        ])
+          xls.TextCellValue(title),
       ]);
       for (final record in activations) {
+        final s = settlements[record];
         sheet.appendRow([
           xls.TextCellValue(_dateTime(record.at)),
           xls.TextCellValue(record.subscriberName),
@@ -305,6 +314,9 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
           xls.DoubleCellValue(record.saleAmount),
           xls.DoubleCellValue(record.sasDeduction),
           xls.DoubleCellValue(record.profit),
+          xls.TextCellValue(s?.status.label ?? ''),
+          xls.DoubleCellValue(s?.collected ?? 0),
+          xls.DoubleCellValue(s?.debt ?? 0),
         ]);
       }
 
@@ -337,52 +349,16 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     }
   }
 
-  Widget _metricSection(
-    String title,
-    IconData icon,
-    List<(IconData, String, String, Color)> metrics,
-    double tileWidth,
-  ) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Row(
-        children: [
-          Icon(icon, size: 19, color: const Color(0xFF2E7D32)),
-          const SizedBox(width: 8),
-          Text(
-            title,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-          ),
-        ],
-      ),
-      const SizedBox(height: 10),
-      Wrap(
-        spacing: 12,
-        runSpacing: 12,
-        children: [
-          for (final metric in metrics)
-            _MetricTile(
-              width: tileWidth,
-              icon: metric.$1,
-              label: metric.$2,
-              value: metric.$3,
-              color: metric.$4,
-            ),
-        ],
-      ),
-    ],
-  );
-
   @override
   Widget build(BuildContext context) {
-    final summary = _summary;
     final activations = _activations;
-    final balanceAdded = _journalMonth?.deposits ?? 0;
-    final sasDeductions = _journalMonth?.deductions ?? 0;
-    final debtSummary = _monthlyDebtSummary;
-    final currentOutstandingDebt = _currentOutstandingDebt;
-    final profit = summary.profit;
-    final latestSasBalance = _journalMonth?.latestBalance;
+    final sales = AccountingMonthlySummary.fromRecords(
+      activations: activations,
+    );
+    final cash = _cashSummary(activations);
+    final settlements = ActivationSettlement.of(activations, _monthEvents);
+    final refreshing =
+        _loadingSasBalance || _loadingJournalMonth || _loadingFtthBalance;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
@@ -409,247 +385,635 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
               icon: const Icon(Icons.download_rounded),
             ),
             IconButton(
-              onPressed: _loadingSasBalance || _loadingJournalMonth
-                  ? null
-                  : () {
-                      _loadSasBalance();
-                      _loadJournalMonth();
-                    },
-              tooltip: 'تحديث بيانات SAS',
-              icon: _loadingSasBalance || _loadingJournalMonth
+              onPressed: refreshing ? null : _refreshAll,
+              tooltip: 'تحديث الأرصدة والسجلات',
+              icon: refreshing
                   ? const SizedBox.square(
                       dimension: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.refresh_rounded),
             ),
           ],
         ),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _MonthSelector(
-              label: '${_monthNames[_month.month - 1]} ${_month.year}',
-              onPrevious: () => _changeMonth(-1),
-              onNext: () => _changeMonth(1),
-            ),
-            const SizedBox(height: 16),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final columns = constraints.maxWidth >= 1000
-                    ? 3
-                    : constraints.maxWidth >= 620
-                    ? 2
-                    : 1;
-                final spacing = 12.0;
-                final width =
-                    (constraints.maxWidth - spacing * (columns - 1)) / columns;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1100),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+              children: [
+                _MonthSelector(
+                  label: _monthLabel,
+                  onPrevious: () => _changeMonth(-1),
+                  onNext: () => _changeMonth(1),
+                ),
+                const SizedBox(height: 12),
+                _Section(
+                  title: 'المبيعات والربح',
+                  icon: Icons.point_of_sale_outlined,
                   children: [
-                    _metricSection('حركة رصيد SAS', Icons.cloud_outlined, [
-                      (
-                        Icons.add_card_rounded,
-                        'إيداعات الشهر',
-                        _loadingJournalMonth ? '...' : _money(balanceAdded),
-                        const Color(0xFF1B7F5C),
-                      ),
-                      (
-                        Icons.account_balance_wallet_outlined,
-                        'الاستقطاعات الفعلية',
-                        _loadingJournalMonth ? '...' : _money(sasDeductions),
-                        const Color(0xFFC04A35),
-                      ),
-                      (
-                        Icons.calculate_outlined,
-                        'الرصيد بعد آخر حركة',
-                        _loadingJournalMonth
-                            ? '...'
-                            : latestSasBalance == null
-                            ? 'غير متاح'
-                            : _money(latestSasBalance),
-                        const Color(0xFF4E5D78),
-                      ),
-                    ], width),
-                    const SizedBox(height: 20),
-                    _metricSection(
-                      'المبيعات والتحصيل من المشتركين',
-                      Icons.point_of_sale_outlined,
-                      [
-                        (
-                          Icons.receipt_long_rounded,
-                          'المبيعات المسجلة',
-                          _money(summary.subscriberSales),
-                          const Color(0xFF2468A2),
-                        ),
-                        (
-                          Icons.trending_up_rounded,
-                          'الربح المسجل',
-                          _loadingJournalMonth ? '...' : _money(profit),
-                          const Color(0xFF8B6914),
-                        ),
-                        (
-                          Icons.task_alt_rounded,
-                          'عمليات التفعيل',
-                          '${summary.activationCount}',
-                          const Color(0xFF75538F),
-                        ),
-                        (
-                          Icons.payments_outlined,
-                          'الدفعات الموجبة المسجلة',
-                          _money(summary.grossCollections),
-                          const Color(0xFF2E7D32),
-                        ),
-                        (
-                          Icons.undo_rounded,
-                          'تصحيحات تخفيض الواصل',
-                          _money(summary.paymentCorrections),
-                          const Color(0xFFC04A35),
-                        ),
-                        (
-                          Icons.account_balance_outlined,
-                          'صافي حركة الدفعات',
-                          _money(summary.netCollections),
-                          const Color(0xFF2468A2),
-                        ),
-                        (
-                          Icons.receipt_long_outlined,
-                          'الفواتير المسجلة',
-                          _money(_monthlyInvoiceTotal),
-                          const Color(0xFF75538F),
-                        ),
-                        (
-                          Icons.compare_arrows_rounded,
-                          'فرق الفواتير عن صافي الدفعات',
-                          _money(_invoiceReconciliationDifference),
-                          const Color(0xFFC04A35),
-                        ),
-                      ],
-                      width,
+                    _Figure(
+                      'عدد التفعيلات',
+                      '${sales.activationCount}',
+                      const Color(0xFF75538F),
                     ),
-                    const SizedBox(height: 20),
-                    _metricSection(
-                      'حركة الديون',
-                      Icons.account_balance_outlined,
-                      [
-                        (
-                          Icons.add_card_outlined,
-                          'المطالبات المضافة خلال الشهر',
-                          _money(debtSummary.debtAddedTotal),
-                          const Color(0xFF8B6914),
-                        ),
-                        (
-                          Icons.remove_circle_outline,
-                          'تخفيضات الدين خلال الشهر',
-                          _money(debtSummary.debtReducedTotal),
-                          const Color(0xFF546E7A),
-                        ),
-                        (
-                          Icons.account_balance_wallet_outlined,
-                          'الواصل من التسديد',
-                          _money(debtSummary.debtPaymentsCollected),
-                          const Color(0xFFF57C00),
-                        ),
-                      ],
-                      width,
+                    _Figure(
+                      'المبيعات',
+                      _money(sales.subscriberSales),
+                      const Color(0xFF2468A2),
                     ),
-                    const SizedBox(height: 20),
-                    _metricSection(
-                      'الرصيد الحالي (يشمل الديون السابقة)',
-                      Icons.account_balance_outlined,
-                      [
-                        (
-                          Icons.pending_actions_outlined,
-                          'المتبقي الحالي على المشتركين',
-                          _money(currentOutstandingDebt),
-                          const Color(0xFFC04A35),
-                        ),
-                      ],
-                      width,
+                    _Figure(
+                      'الربح',
+                      _money(sales.profit),
+                      const Color(0xFF2E7D32),
+                      hint:
+                          'المبيعات − كلفة الساس/FTTH '
+                          '(${_money(sales.sasDeductions)})',
+                      emphasized: true,
                     ),
                   ],
-                );
-              },
-            ),
-            if (_journalMonthError != null) ...[
-              const SizedBox(height: 12),
-              _JournalLoadError(message: _journalMonthError!),
-            ],
-            const SizedBox(height: 12),
-            _SasBalanceBand(balance: _sasBalance, loading: _loadingSasBalance),
-            const SizedBox(height: 24),
-            _SasFinancialReports(
-              selectedType: _reportType,
-              page: _financialPage,
-              loading: _loadingFinancialReport,
-              error: _financialReportError,
-              money: _money,
-              onTypeSelected: (type) => _loadFinancialReport(type: type),
-              onPageSelected: (page) => _loadFinancialReport(page: page),
-              onRefresh: () =>
-                  _loadFinancialReport(page: _financialPage?.currentPage ?? 1),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'تفاصيل عمليات التفعيل',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 10),
-            if (activations.isEmpty)
-              const _EmptyActivations()
-            else
-              Card(
-                margin: EdgeInsets.zero,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columns: const [
-                      DataColumn(label: Text('المشترك')),
-                      DataColumn(label: Text('الباقة')),
-                      DataColumn(
-                        label: Text('مبلغ الاشتراك (سعر البيع)'),
-                        numeric: true,
+                _Section(
+                  title: 'النقد المستلم',
+                  icon: Icons.payments_outlined,
+                  children: [
+                    _Figure(
+                      'واصل عند التفعيل',
+                      _money(cash.activationCollected),
+                      const Color(0xFF1B7F5C),
+                    ),
+                    _Figure(
+                      'تسديد ديون',
+                      _money(cash.debtPaymentsCollected),
+                      const Color(0xFF1B7F5C),
+                    ),
+                    if (cash.otherCollected > 0.0001)
+                      _Figure(
+                        'واصل آخر',
+                        _money(cash.otherCollected),
+                        const Color(0xFF1B7F5C),
+                        hint: 'مشتريات ومبالغ سُجلت مع واصلها',
                       ),
-                      DataColumn(label: Text('استقطاع SAS'), numeric: true),
-                      DataColumn(label: Text('الربح'), numeric: true),
-                      DataColumn(label: Text('التاريخ')),
-                    ],
-                    rows: [
+                    _Figure(
+                      'المجموع المستلم',
+                      _money(cash.totalCollected),
+                      const Color(0xFF2E7D32),
+                      emphasized: true,
+                    ),
+                  ],
+                ),
+                _Section(
+                  title: 'الديون',
+                  icon: Icons.account_balance_outlined,
+                  children: [
+                    _Figure(
+                      'أُضيفت هذا الشهر',
+                      _money(cash.debtAddedTotal),
+                      const Color(0xFFC04A35),
+                    ),
+                    _Figure(
+                      'سُددت هذا الشهر',
+                      _money(cash.debtPaymentsCollected),
+                      const Color(0xFF1B7F5C),
+                    ),
+                    if (cash.debtReducedTotal > 0.0001)
+                      _Figure(
+                        'أُسقطت هذا الشهر',
+                        _money(cash.debtReducedTotal),
+                        const Color(0xFF546E7A),
+                      ),
+                    _Figure(
+                      'المتبقي الآن على المشتركين',
+                      _money(_currentOutstandingDebt),
+                      const Color(0xFFC04A35),
+                      hint: 'يشمل ديون الأشهر السابقة',
+                      emphasized: true,
+                    ),
+                  ],
+                ),
+                _Section(
+                  title: 'الأرصدة',
+                  icon: Icons.account_balance_wallet_outlined,
+                  children: [
+                    _WalletCard(
+                      title: 'رصيد الساس',
+                      icon: Icons.cloud_outlined,
+                      colors: const [Color(0xFF1B5E20), Color(0xFF43A047)],
+                      value: _loadingSasBalance
+                          ? '...'
+                          : _sasBalance == null
+                          ? 'غير متاح'
+                          : _money(_sasBalance!),
+                      lines: [
+                        (
+                          'إيداعات $_monthLabel',
+                          _loadingJournalMonth
+                              ? '...'
+                              : _journalMonth == null
+                              ? 'غير متاح'
+                              : _money(_journalMonth!.deposits),
+                        ),
+                        (
+                          'استقطاعات $_monthLabel',
+                          _loadingJournalMonth
+                              ? '...'
+                              : _journalMonth == null
+                              ? 'غير متاح'
+                              : _money(_journalMonth!.deductions),
+                        ),
+                      ],
+                    ),
+                    if (_ftthConfigured)
+                      _WalletCard(
+                        title: 'محفظة FTTH (رصيد الوكيل)',
+                        icon: Icons.router_outlined,
+                        colors: const [Color(0xFF0D47A1), Color(0xFF1E88E5)],
+                        value: _loadingFtthBalance
+                            ? '...'
+                            : _ftthBalance == null
+                            ? 'غير متاح'
+                            : _money(_ftthBalance!),
+                        lines: [
+                          if (_ftthBalanceError != null)
+                            ('تعذرت القراءة', 'اضغط تحديث'),
+                        ],
+                      ),
+                  ],
+                ),
+                if (_journalMonthError != null)
+                  _ErrorBand(
+                    'تعذر احتساب حركة الشهر من سجل الساس: $_journalMonthError',
+                  ),
+                const SizedBox(height: 8),
+                _SectionTitle(
+                  icon: Icons.task_alt_rounded,
+                  title: 'تفاصيل عمليات التفعيل',
+                  trailing: '${activations.length}',
+                ),
+                const SizedBox(height: 10),
+                if (activations.isEmpty)
+                  const _EmptyBox('لا توجد عمليات تفعيل مسجلة لهذا الشهر')
+                else
+                  _ListCard(
+                    children: [
                       for (final record in activations)
-                        DataRow(
-                          cells: [
-                            DataCell(Text(record.subscriberName)),
-                            DataCell(Text(record.packageName)),
-                            DataCell(Text(_money(record.saleAmount))),
-                            DataCell(Text(_money(record.sasDeduction))),
-                            DataCell(Text(_money(record.profit))),
-                            DataCell(Text(_dateTime(record.at))),
-                          ],
+                        _ActivationTile(
+                          record: record,
+                          settlement: settlements[record],
+                          money: _money,
+                          date: _dateTime(record.at),
                         ),
                     ],
                   ),
+                const SizedBox(height: 28),
+                _SasFinancialReports(
+                  selectedType: _reportType,
+                  page: _financialPage,
+                  loading: _loadingFinancialReport,
+                  error: _financialReportError,
+                  money: _money,
+                  onTypeSelected: (type) => _loadFinancialReport(type: type),
+                  onPageSelected: (page) => _loadFinancialReport(page: page),
+                  onRefresh: () => _loadFinancialReport(
+                    page: _financialPage?.currentPage ?? 1,
+                  ),
                 ),
-              ),
-          ],
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-class _JournalLoadError extends StatelessWidget {
-  const _JournalLoadError({required this.message});
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({
+    required this.icon,
+    required this.title,
+    this.trailing,
+    this.action,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? trailing;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 20, color: const Color(0xFF2E7D32)),
+      const SizedBox(width: 8),
+      Flexible(
+        child: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+        ),
+      ),
+      if (trailing != null) ...[
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE8F5E9),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            trailing!,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF2E7D32),
+            ),
+          ),
+        ),
+      ],
+      const Spacer(),
+      ?action,
+    ],
+  );
+}
+
+/// قسم من الأرقام: بطاقات متساوية تلتف حسب عرض الشاشة.
+class _Section extends StatelessWidget {
+  const _Section({
+    required this.title,
+    required this.icon,
+    required this.children,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 20),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionTitle(icon: icon, title: title),
+        const SizedBox(height: 10),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = children.any((c) => c is _WalletCard);
+            final columns = wide
+                ? (constraints.maxWidth >= 620 ? 2 : 1)
+                : constraints.maxWidth >= 900
+                ? 4
+                : 2;
+            const spacing = 10.0;
+            final width =
+                (constraints.maxWidth - spacing * (columns - 1)) / columns;
+            return Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: [
+                for (final child in children)
+                  SizedBox(width: width, child: child),
+              ],
+            );
+          },
+        ),
+      ],
+    ),
+  );
+}
+
+class _Figure extends StatelessWidget {
+  const _Figure(
+    this.label,
+    this.value,
+    this.color, {
+    this.hint,
+    this.emphasized = false,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+  final String? hint;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minHeight: 92),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: emphasized ? color.withValues(alpha: 0.08) : Colors.white,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(
+        color: emphasized
+            ? color.withValues(alpha: 0.45)
+            : const Color(0xFFE2E8F0),
+      ),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          label,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Color(0xFF475569),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: AlignmentDirectional.centerStart,
+          child: Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: emphasized ? 21 : 19,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        if (hint != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            hint!,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+/// بطاقة رصيد بخلفية متدرجة: الرصيد الحالي كبيراً وتحته حركة الشهر.
+class _WalletCard extends StatelessWidget {
+  const _WalletCard({
+    required this.title,
+    required this.icon,
+    required this.colors,
+    required this.value,
+    this.lines = const [],
+  });
+
+  final String title;
+  final IconData icon;
+  final List<Color> colors;
+  final String value;
+  final List<(String, String)> lines;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minHeight: 150),
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        colors: colors,
+        begin: AlignmentDirectional.topStart,
+        end: AlignmentDirectional.bottomEnd,
+      ),
+      borderRadius: BorderRadius.circular(14),
+      boxShadow: [
+        BoxShadow(
+          color: colors.first.withValues(alpha: 0.25),
+          blurRadius: 12,
+          offset: const Offset(0, 4),
+        ),
+      ],
+    ),
+    child: DefaultTextStyle(
+      style: const TextStyle(color: Colors.white),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: Colors.white70, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: AlignmentDirectional.centerStart,
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          if (lines.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            const Divider(color: Colors.white24, height: 1),
+            const SizedBox(height: 8),
+            for (final (label, amount) in lines)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                    Text(
+                      amount,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ],
+      ),
+    ),
+  );
+}
+
+class _ListCard extends StatelessWidget {
+  const _ListCard({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: const Color(0xFFE2E8F0)),
+    ),
+    child: Column(
+      children: [
+        for (var i = 0; i < children.length; i++) ...[
+          children[i],
+          if (i < children.length - 1) const Divider(height: 1, indent: 16),
+        ],
+      ],
+    ),
+  );
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip(this.text, this.color);
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800),
+    ),
+  );
+}
+
+/// سطر تفعيل: من وبأي باقة، السعر والربح، وكيف دُفع.
+class _ActivationTile extends StatelessWidget {
+  const _ActivationTile({
+    required this.record,
+    required this.settlement,
+    required this.money,
+    required this.date,
+  });
+
+  final AccountingActivationRecord record;
+  final ActivationSettlement? settlement;
+  final String Function(double) money;
+  final String date;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = settlement?.status ?? ActivationPaymentStatus.unknown;
+    final statusColor = switch (status) {
+      ActivationPaymentStatus.paid => const Color(0xFF2E7D32),
+      ActivationPaymentStatus.partial => const Color(0xFFE65100),
+      ActivationPaymentStatus.debt => const Color(0xFFC62828),
+      ActivationPaymentStatus.unknown => const Color(0xFF64748B),
+    };
+    final name = record.subscriberName.trim().isNotEmpty
+        ? record.subscriberName
+        : record.subscriberUser;
+    final details = [
+      if (record.subscriberUser.trim().isNotEmpty &&
+          record.subscriberUser != name)
+        record.subscriberUser,
+      if (record.packageName.trim().isNotEmpty) record.packageName,
+      date,
+    ].join(' · ');
+    final paymentNote = switch (status) {
+      ActivationPaymentStatus.partial =>
+        'واصل ${money(settlement!.collected)} · دين ${money(settlement!.debt)}',
+      _ => null,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
+                    ),
+                    if (status != ActivationPaymentStatus.unknown)
+                      _StatusChip(status.label, statusColor),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  details,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 12.5,
+                  ),
+                ),
+                if (paymentNote != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      paymentNote,
+                      style: TextStyle(color: statusColor, fontSize: 12.5),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                money(record.saleAmount),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'ربح ${money(record.profit)}',
+                style: TextStyle(
+                  color: record.profit < 0
+                      ? const Color(0xFFC62828)
+                      : const Color(0xFF2E7D32),
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorBand extends StatelessWidget {
+  const _ErrorBand(this.message);
 
   final String message;
 
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
+    margin: const EdgeInsets.only(bottom: 12),
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
       color: Theme.of(context).colorScheme.errorContainer,
@@ -659,12 +1023,37 @@ class _JournalLoadError extends StatelessWidget {
       children: [
         const Icon(Icons.error_outline_rounded),
         const SizedBox(width: 8),
-        Expanded(child: Text('تعذر احتساب الشهر من سجل SAS: $message')),
+        Expanded(child: Text(message)),
       ],
     ),
   );
 }
 
+class _EmptyBox extends StatelessWidget {
+  const _EmptyBox(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 120,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      border: Border.all(color: Theme.of(context).dividerColor),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.receipt_long_outlined, size: 32),
+        const SizedBox(height: 8),
+        Text(message),
+      ],
+    ),
+  );
+}
+
+/// سجلات الساس كما هي، بأسطر مقروءة بدل جدول عريض.
 class _SasFinancialReports extends StatelessWidget {
   const _SasFinancialReports({
     required this.selectedType,
@@ -686,12 +1075,12 @@ class _SasFinancialReports extends StatelessWidget {
   final ValueChanged<int> onPageSelected;
   final VoidCallback onRefresh;
 
-  static const _labels = <SasFinancialReportType, String>{
-    SasFinancialReportType.managerJournal: 'السجل المالي',
-    SasFinancialReportType.managerInvoices: 'فواتير المدراء',
-    SasFinancialReportType.activations: 'التفعيلات',
-    SasFinancialReportType.userInvoices: 'فواتير المشتركين',
-  };
+  static const _tabs = <(SasFinancialReportType, String)>[
+    (SasFinancialReportType.activations, 'من فعّلت'),
+    (SasFinancialReportType.managerJournal, 'حركة الرصيد'),
+    (SasFinancialReportType.userInvoices, 'فواتير المشتركين'),
+    (SasFinancialReportType.managerInvoices, 'فواتيري'),
+  ];
 
   dynamic _nested(Map<String, dynamic> row, String parent, String key) {
     final value = row[parent];
@@ -706,22 +1095,31 @@ class _SasFinancialReports extends StatelessWidget {
     return null;
   }
 
-  String _text(dynamic value) {
-    final result = value?.toString().trim() ?? '';
-    return result.isEmpty ? '—' : result;
-  }
+  String _text(dynamic value) => value?.toString().trim() ?? '';
+
+  double? _number(dynamic value) => value is num
+      ? value.toDouble()
+      : double.tryParse(value?.toString().replaceAll(',', '') ?? '');
 
   String _amount(dynamic value) {
-    final number = value is num
-        ? value.toDouble()
-        : double.tryParse(value?.toString() ?? '');
+    final number = _number(value);
     return number == null ? _text(value) : money(number);
+  }
+
+  /// "2026-11-05 14:20:11" ← "2026/11/05 14:20".
+  String _date(dynamic value) {
+    final raw = _text(value);
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return raw;
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${parsed.year}/${two(parsed.month)}/${two(parsed.day)} '
+        '${two(parsed.hour)}:${two(parsed.minute)}';
   }
 
   String _operation(dynamic value) {
     switch (value?.toString().toLowerCase()) {
       case 'purchase':
-        return 'استقطاع / شراء';
+        return 'استقطاع';
       case 'deposit':
       case 'recharge':
       case 'topup':
@@ -733,105 +1131,85 @@ class _SasFinancialReports extends StatelessWidget {
     }
   }
 
-  List<String> get _columns {
+  _SasRow _row(Map<String, dynamic> row) {
     switch (selectedType) {
-      case SasFinancialReportType.managerJournal:
-        return const [
-          'التاريخ',
-          'من',
-          'إلى',
-          'المبلغ',
-          'العملية',
-          'الرصيد بعد الحركة',
-        ];
-      case SasFinancialReportType.managerInvoices:
-        return const [
-          'التاريخ',
-          'رقم الفاتورة',
-          'النوع',
-          'المبلغ',
-          'طريقة الدفع',
-          'الوصف',
-        ];
       case SasFinancialReportType.activations:
-        return const [
-          'التاريخ',
-          'المشترك',
-          'الاسم',
-          'الباقة',
-          'استقطاع SAS',
-          'طريقة التفعيل',
-        ];
-      case SasFinancialReportType.userInvoices:
-        return const [
-          'رقم الفاتورة',
-          'تاريخ الاستحقاق',
-          'النوع',
-          'المبلغ',
-          'طريقة الدفع',
-          'الوصف',
-        ];
-    }
-  }
-
-  List<String> _cells(Map<String, dynamic> row) {
-    switch (selectedType) {
-      case SasFinancialReportType.managerJournal:
-        return [
-          _text(row['created_at']),
-          _text(row['cr']),
-          _text(row['dr']),
-          _amount(row['amount']),
-          _operation(row['operation']),
-          _amount(row['balance']),
-        ];
-      case SasFinancialReportType.managerInvoices:
-        return [
-          _text(row['created_at']),
-          _text(row['invoice_number']),
-          _text(row['type']),
-          _amount(row['amount']),
-          _text(row['payment_method']),
-          _text(row['description']),
-        ];
-      case SasFinancialReportType.activations:
-        final firstName = _text(
-          _nested(row, 'user_details', 'firstname') ??
-              _first(row, const ['firstname', 'first_name']),
+        final username = _text(
+          _nested(row, 'user_details', 'username') ??
+              _first(row, const ['username', 'user_name', 'user']),
         );
-        final lastName = _text(
-          _nested(row, 'user_details', 'lastname') ??
-              _first(row, const ['lastname', 'last_name']),
-        );
-        return [
-          _text(_first(row, const ['created_at', 'activation_date', 'date'])),
+        final fullName = [
           _text(
-            _nested(row, 'user_details', 'username') ??
-                _first(row, const ['username', 'user_name', 'user']),
+            _nested(row, 'user_details', 'firstname') ??
+                _first(row, const ['firstname', 'first_name']),
           ),
-          [firstName, if (lastName != '—') lastName].join(' '),
           _text(
-            _nested(row, 'profile_details', 'name') ??
-                _first(row, const ['profile_name', 'package_name', 'profile']),
+            _nested(row, 'user_details', 'lastname') ??
+                _first(row, const ['lastname', 'last_name']),
           ),
-          _amount(_first(row, const ['price', 'user_price', 'amount'])),
-          _text(
+        ].where((part) => part.isNotEmpty).join(' ');
+        return _SasRow(
+          title: fullName.isNotEmpty ? fullName : username,
+          details: [
+            if (fullName.isNotEmpty && username.isNotEmpty) username,
+            _text(
+              _nested(row, 'profile_details', 'name') ??
+                  _first(row, const [
+                    'profile_name',
+                    'package_name',
+                    'profile',
+                  ]),
+            ),
+            _date(_first(row, const ['created_at', 'activation_date', 'date'])),
+          ],
+          amount: _amount(_first(row, const ['price', 'user_price', 'amount'])),
+          tag: _text(
             _first(row, const [
               'activation_method',
               'method',
               'payment_method',
             ]),
           ),
-        ];
+        );
+      case SasFinancialReportType.managerJournal:
+        final operation = _operation(row['operation']);
+        final isDeposit = operation == 'إيداع' || operation == 'استرجاع';
+        final from = _text(row['cr']);
+        final to = _text(row['dr']);
+        return _SasRow(
+          title: operation.isEmpty ? 'حركة' : operation,
+          details: [
+            if (from.isNotEmpty || to.isNotEmpty)
+              '${from.isEmpty ? '—' : from} ← ${to.isEmpty ? '—' : to}',
+            _date(row['created_at']),
+          ],
+          amount: _amount(row['amount']),
+          amountColor: isDeposit
+              ? const Color(0xFF2E7D32)
+              : const Color(0xFFC62828),
+          note: row['balance'] == null
+              ? null
+              : 'الرصيد بعدها ${_amount(row['balance'])}',
+        );
+      case SasFinancialReportType.managerInvoices:
       case SasFinancialReportType.userInvoices:
-        return [
-          _text(row['invoice_number']),
-          _text(row['due_date']),
-          _text(row['type']),
-          _amount(row['amount']),
-          _text(row['payment_method']),
-          _text(row['description']),
-        ];
+        final description = _text(row['description']);
+        final type = _text(row['type']);
+        return _SasRow(
+          title: description.isNotEmpty
+              ? description
+              : type.isNotEmpty
+              ? type
+              : 'فاتورة',
+          details: [
+            if (_text(row['invoice_number']).isNotEmpty)
+              'رقم ${_text(row['invoice_number'])}',
+            if (description.isNotEmpty && type.isNotEmpty) type,
+            _date(row['created_at'] ?? row['due_date']),
+          ],
+          amount: _amount(row['amount']),
+          tag: _text(row['payment_method']),
+        );
     }
   }
 
@@ -840,33 +1218,25 @@ class _SasFinancialReports extends StatelessWidget {
     final currentPage = page?.currentPage ?? 1;
     final lastPage = page?.lastPage ?? 1;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'سجلات SAS المباشرة',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-              ),
-            ),
-            IconButton(
-              onPressed: loading ? null : onRefresh,
-              tooltip: 'تحديث السجل',
-              icon: const Icon(Icons.refresh_rounded),
-            ),
-          ],
+        _SectionTitle(
+          icon: Icons.cloud_sync_outlined,
+          title: 'سجلات الساس المباشرة',
+          action: IconButton(
+            onPressed: loading ? null : onRefresh,
+            tooltip: 'تحديث السجل',
+            icon: const Icon(Icons.refresh_rounded),
+          ),
         ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
-            for (final type in SasFinancialReportType.values)
+            for (final (type, label) in _tabs)
               ChoiceChip(
-                label: Text(_labels[type]!),
+                label: Text(label),
                 selected: selectedType == type,
                 onSelected: loading || selectedType == type
                     ? null
@@ -877,70 +1247,22 @@ class _SasFinancialReports extends StatelessWidget {
         const SizedBox(height: 12),
         if (loading)
           const SizedBox(
-            height: 180,
+            height: 160,
             child: Center(child: CircularProgressIndicator()),
           )
         else if (error != null)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.errorContainer,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text('تعذر جلب السجل من SAS: $error'),
-          )
-        else if (page == null)
-          const SizedBox(
-            height: 120,
-            child: Center(child: Text('لا توجد سجلات في هذه القائمة')),
-          )
+          _ErrorBand('تعذر جلب السجل من الساس: $error')
+        else if (page == null || page!.rows.isEmpty)
+          const _EmptyBox('لا توجد سجلات في هذه القائمة')
         else ...[
-          if (page!.rows.isEmpty)
-            const SizedBox(
-              height: 120,
-              child: Center(child: Text('لا توجد سجلات في هذه الصفحة')),
-            )
-          else
-            Card(
-              margin: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: [
-                    for (final column in _columns)
-                      DataColumn(label: Text(column)),
-                  ],
-                  rows: [
-                    for (final row in page!.rows)
-                      DataRow(
-                        cells: [
-                          for (final value in _cells(row))
-                            DataCell(
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 240,
-                                ),
-                                child: Text(
-                                  value,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          const SizedBox(height: 8),
+          _ListCard(children: [for (final row in page!.rows) _row(row)]),
+          const SizedBox(height: 6),
           Row(
             children: [
-              Text('الإجمالي: ${page!.total}'),
+              Text(
+                'الإجمالي: ${page!.total}',
+                style: const TextStyle(color: Color(0xFF64748B)),
+              ),
               const Spacer(),
               IconButton(
                 onPressed: currentPage > 1
@@ -965,6 +1287,94 @@ class _SasFinancialReports extends StatelessWidget {
   }
 }
 
+class _SasRow extends StatelessWidget {
+  const _SasRow({
+    required this.title,
+    required this.details,
+    required this.amount,
+    this.amountColor,
+    this.tag = '',
+    this.note,
+  });
+
+  final String title;
+  final List<String> details;
+  final String amount;
+  final Color? amountColor;
+  final String tag;
+  final String? note;
+
+  @override
+  Widget build(BuildContext context) {
+    final line = details.where((d) => d.trim().isNotEmpty).join(' · ');
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                      ),
+                    ),
+                    if (tag.isNotEmpty)
+                      _StatusChip(tag, const Color(0xFF546E7A)),
+                  ],
+                ),
+                if (line.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    line,
+                    style: const TextStyle(
+                      color: Color(0xFF64748B),
+                      fontSize: 12.5,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                amount,
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                  color: amountColor,
+                ),
+              ),
+              if (note != null) ...[
+                const SizedBox(height: 3),
+                Text(
+                  note!,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MonthSelector extends StatelessWidget {
   const _MonthSelector({
     required this.label,
@@ -977,137 +1387,34 @@ class _MonthSelector extends StatelessWidget {
   final VoidCallback onNext;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      IconButton(
-        onPressed: onNext,
-        tooltip: 'الشهر التالي',
-        icon: const Icon(Icons.chevron_right_rounded),
-      ),
-      Expanded(
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: Theme.of(
-            context,
-          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-        ),
-      ),
-      IconButton(
-        onPressed: onPrevious,
-        tooltip: 'الشهر السابق',
-        icon: const Icon(Icons.chevron_left_rounded),
-      ),
-    ],
-  );
-}
-
-class _MetricTile extends StatelessWidget {
-  const _MetricTile({
-    required this.width,
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-
-  final double width;
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    width: width,
-    height: 112,
-    child: Card(
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Icon(icon, color: color, size: 30),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, maxLines: 2, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 6),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      value,
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 21,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-class _SasBalanceBand extends StatelessWidget {
-  const _SasBalanceBand({required this.balance, required this.loading});
-
-  final String? balance;
-  final bool loading;
-
-  @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     decoration: BoxDecoration(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(8),
+      color: const Color(0xFFE8F5E9),
+      borderRadius: BorderRadius.circular(12),
     ),
     child: Row(
       children: [
-        const Icon(Icons.cloud_done_outlined),
-        const SizedBox(width: 12),
-        const Expanded(
+        IconButton(
+          onPressed: onPrevious,
+          tooltip: 'الشهر السابق',
+          icon: const Icon(Icons.chevron_right_rounded),
+        ),
+        Expanded(
           child: Text(
-            'الرصيد الحقيقي في SAS',
-            style: TextStyle(fontWeight: FontWeight.w700),
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF1B5E20),
+            ),
           ),
         ),
-        Text(
-          loading ? '...' : (balance ?? 'غير متاح'),
-          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+        IconButton(
+          onPressed: onNext,
+          tooltip: 'الشهر التالي',
+          icon: const Icon(Icons.chevron_left_rounded),
         ),
-      ],
-    ),
-  );
-}
-
-class _EmptyActivations extends StatelessWidget {
-  const _EmptyActivations();
-
-  @override
-  Widget build(BuildContext context) => Container(
-    height: 150,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(
-      border: Border.all(color: Theme.of(context).dividerColor),
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: const Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.receipt_long_outlined, size: 36),
-        SizedBox(height: 8),
-        Text('لا توجد عمليات تفعيل مسجلة لهذا الشهر'),
       ],
     ),
   );

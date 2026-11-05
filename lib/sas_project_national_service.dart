@@ -893,6 +893,21 @@ class SasProjectNationalService {
   Future<double?> fetchPartnerBalance(String partnerId) =>
       _fetchBalance('/api/partners/${partnerId.trim()}/wallets/balance');
 
+  /// رصيد محفظة الوكيل نفسه. رقم الوكيل يُقرأ من أول اشتراك في القائمة،
+  /// كما يظهر في صفحة الاشتراكات بالموقع.
+  Future<double?> fetchOwnPartnerBalance() async {
+    final data = await _getJson(
+      '/api/subscriptions',
+      query: {'pageSize': '1', 'pageNumber': '1', 'hierarchyLevel': '0'},
+    );
+    for (final row in _extractRows(data)) {
+      final partner = row['partner'];
+      final id = partner is Map ? '${partner['id'] ?? ''}'.trim() : '';
+      if (id.isNotEmpty) return fetchPartnerBalance(id);
+    }
+    return null;
+  }
+
   Future<double?> fetchCustomerBalance(String customerId) =>
       _fetchBalance('/api/customers/${customerId.trim()}/wallets/balance');
 

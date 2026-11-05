@@ -405,6 +405,69 @@ class AccountingMonthlySummary {
   }
 }
 
+/// حالة الدفع عند التفعيل بمصطلحات الوكيل.
+enum ActivationPaymentStatus {
+  paid('واصل'),
+  partial('تسديد جزء'),
+  debt('دين كامل'),
+  unknown('');
+
+  const ActivationPaymentStatus(this.label);
+  final String label;
+}
+
+class ActivationSettlement {
+  const ActivationSettlement(this.status, {this.collected = 0, this.debt = 0});
+
+  final ActivationPaymentStatus status;
+  final double collected;
+  final double debt;
+
+  /// يطابق كل تفعيل بحركتي المهام اليومية المسجلتين معه في اللحظة نفسها:
+  /// الواصل عند التفعيل والدين المضاف منه.
+  static Map<AccountingActivationRecord, ActivationSettlement> of(
+    Iterable<AccountingActivationRecord> records,
+    Iterable<DailyTaskEvent> events,
+  ) {
+    String key(String user, String name, DateTime at) {
+      final who = user.trim().isNotEmpty ? user.trim() : name.trim();
+      return '${who.toLowerCase()}|${at.toUtc().microsecondsSinceEpoch}';
+    }
+
+    final collected = <String, double>{};
+    final debt = <String, double>{};
+    for (final event in events) {
+      if (event.isCancelled || event.amount <= 0) continue;
+      final k = key(event.subscriberUser, event.subscriberName, event.at);
+      if (event.type == 'activation') {
+        collected[k] = (collected[k] ?? 0) + event.amount;
+      } else if (event.type == 'debt_added') {
+        debt[k] = (debt[k] ?? 0) + event.amount;
+      }
+    }
+    return {
+      for (final record in records)
+        record: () {
+          final k = key(
+            record.subscriberUser,
+            record.subscriberName,
+            record.at,
+          );
+          final paid = collected[k] ?? 0;
+          final owed = debt[k] ?? 0;
+          final status = paid <= 0.0001 && owed <= 0.0001
+              ? ActivationPaymentStatus.unknown
+              : owed <= 0.0001
+              ? ActivationPaymentStatus.paid
+              : paid <= 0.0001
+              ? ActivationPaymentStatus.debt
+              : ActivationPaymentStatus.partial;
+          return ActivationSettlement(status, collected: paid, debt: owed);
+        }(),
+    };
+  }
+}
+
 class ChatMessage {
   ChatMessage({
     required this.id,
