@@ -81,36 +81,10 @@ class _PackagesScreenState extends State<PackagesScreen> {
   }
 
   Future<void> _addManual() async {
-    final nameController = TextEditingController();
     final name = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: AlertDialog(
-          title: const Text('إضافة باقة يدوية'),
-          content: TextField(
-            controller: nameController,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'اسم الباقة',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext, nameController.text.trim()),
-              child: const Text('إضافة'),
-            ),
-          ],
-        ),
-      ),
+      builder: (_) => const _AddPackageDialog(),
     );
-    nameController.dispose();
     if (name == null || name.isEmpty) return;
     AppStore.addPackage(PackagePlan(name: name, price: 0));
     await _save(quiet: true);
@@ -286,6 +260,52 @@ class _PackagesScreenState extends State<PackagesScreen> {
                   ],
                 ),
         ),
+      ),
+    );
+  }
+}
+
+/// الحقل يُتلف مع النافذة بعد انتهاء إغلاقها، لا قبله.
+class _AddPackageDialog extends StatefulWidget {
+  const _AddPackageDialog();
+
+  @override
+  State<_AddPackageDialog> createState() => _AddPackageDialogState();
+}
+
+class _AddPackageDialogState extends State<_AddPackageDialog> {
+  final _name = TextEditingController();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: const Text('إضافة باقة يدوية'),
+        content: TextField(
+          controller: _name,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'اسم الباقة',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, _name.text.trim()),
+            child: const Text('إضافة'),
+          ),
+        ],
       ),
     );
   }
