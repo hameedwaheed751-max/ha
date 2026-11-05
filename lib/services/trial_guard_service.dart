@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
 import 'payment_request_service.dart';
@@ -148,6 +149,33 @@ class TrialGuardService {
 
   static Future<void> ensureFtthAllowed(String username) =>
       _ensure(ftthKind, ftthHash(username), username);
+
+  /// للوكلاء الذين سبقوا البصمات: يسجل رقم هاتفهم مرة عند فتح التطبيق حتى
+  /// لا يُستخدم لتجربة مجانية بحساب جديد. لا يمنع الوكيل نفسه من أي شيء.
+  static Future<void> claimExistingPhone() async {
+    if (!_firebaseReady || _isAdmin) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final snapshot = await FirebaseDatabase.instance
+          .ref('agents/$uid/profile/phone')
+          .get()
+          .timeout(const Duration(seconds: 10));
+      final phone = (snapshot.value ?? '').toString();
+      if (normalizePhone(phone).length < 10) return;
+      final hash = phoneHash(phone);
+      final prefs = await SharedPreferences.getInstance();
+      final doneKey = 'trialPhoneClaimed_$uid';
+      if (prefs.getString(doneKey) == hash) return;
+      final result = await claim(phonesKind, hash);
+      // رقم مسجل لحساب آخر لا يُعاد فحصه كل مرة؛ المدير يراه في نافذة البصمات.
+      if (result != TrialClaimResult.unknown) {
+        await prefs.setString(doneKey, hash);
+      }
+    } catch (e) {
+      debugPrint('existing phone claim failed (non-fatal): $e');
+    }
+  }
 
   static DatabaseReference get _claimsRef =>
       FirebaseDatabase.instance.ref('trialClaims');

@@ -12,6 +12,7 @@ import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
 import '../services/app_startup.dart';
 import '../services/payment_request_service.dart';
+import '../services/trial_guard_service.dart';
 import '../services/user_role_service.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -180,6 +181,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // مزامنة SAS بالخلفية
       Future<void>(() async {
+        await TrialGuardService.claimExistingPhone();
         try {
           final settings = await SasSettings.load();
           if (settings.username.trim().isNotEmpty &&
