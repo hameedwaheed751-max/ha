@@ -1808,9 +1808,10 @@ class AppStore {
         applyPackagesPayload(
           packagesListPayload ?? packagesPayload,
           fromRemote: true,
-          remoteRevision: remoteRevision,
+          remoteRevision: remotePackagesRevision(agentData, remoteRevision),
           allowBootstrap: allowBootstrap,
         );
+        await p.setInt(packagesRevisionKey, packagesRevision);
         await p.setString('packages', jsonEncode(_packagesListPayload()));
       } else {
         final localP = p.getString('packages');
@@ -2496,6 +2497,13 @@ class AppStore {
   static List<Map<String, dynamic>> _packagesListPayload() =>
       packages.map((e) => e.toJson()).toList();
 
+  /// رقم نسخة الباقات في السحابة؛ النسخ القديمة لا تكتبه فيُستعمل رقم المشتركين.
+  static int remotePackagesRevision(dynamic agentData, int fallback) {
+    if (agentData is! Map || agentData['settings'] is! Map) return fallback;
+    final value = (agentData['settings'] as Map)[packagesRevisionKey];
+    return int.tryParse('${value ?? ''}') ?? fallback;
+  }
+
   static void applyPackagesPayload(
     dynamic payload, {
     bool fromRemote = false,
@@ -2504,6 +2512,10 @@ class AppStore {
   }) {
     if (fromRemote && !allowBootstrap && remoteRevision <= packagesRevision) {
       return;
+    }
+    // بعد تطبيق نسخة السحابة لا تُطبَّق عليها نسخة أقدم منها.
+    if (fromRemote && remoteRevision > packagesRevision) {
+      packagesRevision = remoteRevision;
     }
 
     final parsed = <PackagePlan>[];
@@ -3055,6 +3067,10 @@ class AppStore {
         'settings/balance': balance,
         'settings/nextReceiptNumber': nextReceiptNumber,
         'settings/$subscribersRevisionKey': subscribersRevision,
+        // الباقات في نفس الكتابة: جهاز آخر لا يرى رقماً جديداً مع أسعار قديمة.
+        'settings/$packagesRevisionKey': packagesRevision,
+        'packages': packagesMap.isEmpty ? null : packagesMap,
+        'packagesList': packagesList.isEmpty ? null : packagesList,
         'subscribers': subscribers.map((e) => e.toJson()).toList(),
         if (!shouldPatchSingleWindowsDebt)
           'debts': debtsPayload.isEmpty ? null : debtsPayload,
@@ -3072,8 +3088,6 @@ class AppStore {
         await _syncDebtSubscriberToFirebase(changedDebtSubscriber);
       }
 
-      await ref.child('packages').set(packagesMap);
-      await ref.child('packagesList').set(packagesList);
       await ref.child('messageTemplates').set(messageTemplates);
       debugPrint('Firebase save completed successfully');
     } catch (e) {
@@ -3177,13 +3191,15 @@ class AppStore {
               );
             }
           }
-          if (agentData['packages'] is Map) {
+          if (agentData['packagesList'] != null ||
+              agentData['packages'] is Map) {
             applyPackagesPayload(
-              agentData['packages'],
+              agentData['packagesList'] ?? agentData['packages'],
               fromRemote: true,
-              remoteRevision: remoteRevision,
+              remoteRevision: remotePackagesRevision(agentData, remoteRevision),
               allowBootstrap: subscribersRevision == 0 && subscribers.isEmpty,
             );
+            await p.setInt(packagesRevisionKey, packagesRevision);
             await p.setString(
               'packages',
               jsonEncode(packages.map((e) => e.toJson()).toList()),

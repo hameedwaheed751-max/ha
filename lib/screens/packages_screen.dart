@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -18,9 +20,12 @@ class _PackagesScreenState extends State<PackagesScreen> {
   bool _dirty = false;
   bool _saving = false;
   bool _syncing = false;
+  Timer? _autoSave;
 
   @override
   void dispose() {
+    _autoSave?.cancel();
+    if (_dirty) unawaited(AppStore.save());
     for (final controller in _priceControllers.values) {
       controller.dispose();
     }
@@ -42,18 +47,32 @@ class _PackagesScreenState extends State<PackagesScreen> {
   }
 
   Future<void> _save({bool quiet = false}) async {
+    _autoSave?.cancel();
     if (_saving) return;
     setState(() => _saving = true);
     try {
       await AppStore.save();
       if (!mounted) return;
       setState(() => _dirty = false);
-      if (!quiet) _snack('تم حفظ أسعار الباقات');
+      final cloudError = AppStore.lastSaveSyncError;
+      if (cloudError != null) {
+        _snack('حُفظت الأسعار على الجهاز فقط: $cloudError');
+      } else if (!quiet) {
+        _snack('تم حفظ أسعار الباقات');
+      }
     } catch (e) {
       _snack('تعذر الحفظ: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  void _scheduleSave() {
+    _autoSave?.cancel();
+    _autoSave = Timer(
+      const Duration(milliseconds: 1200),
+      () => _save(quiet: true),
+    );
   }
 
   Future<void> _syncFromSas() async {
@@ -62,6 +81,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
       _snack('أكمل إعدادات ربط SAS أولاً');
       return;
     }
+    if (_dirty) await _save(quiet: true);
     setState(() => _syncing = true);
     try {
       final before = AppStore.packages.where((p) => p.fromSas).length;
@@ -78,16 +98,6 @@ class _PackagesScreenState extends State<PackagesScreen> {
     } finally {
       if (mounted) setState(() => _syncing = false);
     }
-  }
-
-  Future<void> _addManual() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => const _AddPackageDialog(),
-    );
-    if (name == null || name.isEmpty) return;
-    AppStore.addPackage(PackagePlan(name: name, price: 0));
-    await _save(quiet: true);
   }
 
   Future<void> _delete(PackagePlan package) async {
@@ -115,7 +125,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
                   Text(
                     package.fromSas
                         ? (missingPrice ? 'من الساس — أدخل السعر' : 'من الساس')
-                        : 'يدوية — غير موجودة في الساس',
+                        : 'غير موجودة في الساس',
                     style: TextStyle(
                       fontSize: 12,
                       color: package.fromSas && missingPrice
@@ -131,7 +141,10 @@ class _PackagesScreenState extends State<PackagesScreen> {
               child: TextField(
                 controller: _priceController(package),
                 keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                inputFormatters: [
+                  const _WesternDigitsFormatter(),
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
                 textAlign: TextAlign.center,
                 decoration: InputDecoration(
                   isDense: true,
@@ -149,7 +162,9 @@ class _PackagesScreenState extends State<PackagesScreen> {
                     package.price = double.tryParse(value) ?? 0;
                     _dirty = true;
                   });
+                  _scheduleSave();
                 },
+                onSubmitted: (_) => _save(quiet: true),
               ),
             ),
             if (!package.fromSas)
@@ -171,7 +186,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
     final colors = Theme.of(context).colorScheme;
     final sas = AppStore.packages.where((p) => p.fromSas).toList()
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    final manual = AppStore.packages.where((p) => !p.fromSas).toList();
+    final others = AppStore.packages.where((p) => !p.fromSas).toList();
     final unpriced = sas.where((p) => p.price <= 0).length;
 
     return PopScope(
@@ -207,11 +222,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
                   icon: const Icon(Icons.save),
                   label: const Text('حفظ الأسعار'),
                 )
-              : FloatingActionButton(
-                  tooltip: 'إضافة باقة يدوية',
-                  onPressed: _addManual,
-                  child: const Icon(Icons.add),
-                ),
+              : null,
           body: AppStore.packages.isEmpty
               ? const Center(
                   child: Padding(
@@ -228,7 +239,8 @@ class _PackagesScreenState extends State<PackagesScreen> {
                   children: [
                     Text(
                       'تُضاف باقات الساس تلقائياً عند كل مزامنة. السعر الذي '
-                      'تُدخله هو سعر البيع للمشترك ويُقترح عند التفعيل.',
+                      'تُدخله هو سعر البيع للمشترك ويُقترح عند التفعيل، '
+                      'ويُحفظ تلقائياً.',
                       style: TextStyle(color: colors.onSurfaceVariant),
                     ),
                     if (unpriced > 0)
@@ -248,14 +260,14 @@ class _PackagesScreenState extends State<PackagesScreen> {
                       const SizedBox(height: 4),
                       for (final package in sas) _tile(package, colors),
                     ],
-                    if (manual.isNotEmpty) ...[
+                    if (others.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       Text(
-                        'باقات يدوية (${manual.length})',
+                        'باقات غير موجودة في الساس (${others.length})',
                         style: Theme.of(context).textTheme.titleSmall,
                       ),
                       const SizedBox(height: 4),
-                      for (final package in manual) _tile(package, colors),
+                      for (final package in others) _tile(package, colors),
                     ],
                   ],
                 ),
@@ -265,48 +277,28 @@ class _PackagesScreenState extends State<PackagesScreen> {
   }
 }
 
-/// الحقل يُتلف مع النافذة بعد انتهاء إغلاقها، لا قبله.
-class _AddPackageDialog extends StatefulWidget {
-  const _AddPackageDialog();
+/// يحوّل الأرقام العربية والفارسية إلى إنجليزية حتى لا يمسحها فلتر الأرقام.
+class _WesternDigitsFormatter extends TextInputFormatter {
+  const _WesternDigitsFormatter();
 
   @override
-  State<_AddPackageDialog> createState() => _AddPackageDialogState();
-}
-
-class _AddPackageDialogState extends State<_AddPackageDialog> {
-  final _name = TextEditingController();
-
-  @override
-  void dispose() {
-    _name.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: AlertDialog(
-        title: const Text('إضافة باقة يدوية'),
-        content: TextField(
-          controller: _name,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'اسم الباقة',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, _name.text.trim()),
-            child: const Text('إضافة'),
-          ),
-        ],
-      ),
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    const arabic = '٠١٢٣٤٥٦٧٨٩';
+    const persian = '۰۱۲۳۴۵۶۷۸۹';
+    final buffer = StringBuffer();
+    for (final char in newValue.text.split('')) {
+      final a = arabic.indexOf(char);
+      final f = persian.indexOf(char);
+      buffer.write(a >= 0 ? '$a' : (f >= 0 ? '$f' : char));
+    }
+    final text = buffer.toString();
+    if (text == newValue.text) return newValue;
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
     );
   }
 }
