@@ -487,6 +487,7 @@ class ChatMessage {
     this.deletedByUid = '',
     this.deletedByAdmin = false,
     this.imageUrl,
+    this.replyTo,
   });
 
   final String id;
@@ -501,6 +502,30 @@ class ChatMessage {
   final bool deletedByAdmin;
   final String? imageUrl;
 
+  /// الرسالة التي يرد عليها هذا الرد، نسخة مختصرة منها.
+  final ChatReply? replyTo;
+
+  ChatMessage copyWith({
+    String? text,
+    DateTime? editedAt,
+    DateTime? deletedAt,
+    String? deletedByUid,
+    bool? deletedByAdmin,
+  }) => ChatMessage(
+    id: id,
+    senderName: senderName,
+    senderEmail: senderEmail,
+    senderUid: senderUid,
+    text: text ?? this.text,
+    sentAt: sentAt,
+    editedAt: editedAt ?? this.editedAt,
+    deletedAt: deletedAt ?? this.deletedAt,
+    deletedByUid: deletedByUid ?? this.deletedByUid,
+    deletedByAdmin: deletedByAdmin ?? this.deletedByAdmin,
+    imageUrl: imageUrl,
+    replyTo: replyTo,
+  );
+
   Map<String, dynamic> toJson() => {
     'senderName': senderName,
     'senderEmail': senderEmail,
@@ -512,6 +537,7 @@ class ChatMessage {
     if (deletedByUid.isNotEmpty) 'deletedByUid': deletedByUid,
     'deletedByAdmin': deletedByAdmin,
     if (imageUrl != null) 'imageUrl': imageUrl,
+    if (replyTo != null) 'replyTo': replyTo!.toJson(),
   };
 
   factory ChatMessage.fromJson(String id, Map<String, dynamic> j) =>
@@ -532,7 +558,62 @@ class ChatMessage {
         deletedByUid: (j['deletedByUid'] ?? '').toString(),
         deletedByAdmin: j['deletedByAdmin'] == true,
         imageUrl: j['imageUrl']?.toString(),
+        replyTo: ChatReply.fromJson(j['replyTo']),
       );
+}
+
+class ChatReply {
+  const ChatReply({
+    required this.messageId,
+    required this.senderName,
+    this.senderUid = '',
+    this.text = '',
+    this.hasImage = false,
+  });
+
+  static const int maxTextLength = 120;
+
+  factory ChatReply.of(ChatMessage message) {
+    final text = message.text.trim().replaceAll(RegExp(r'\s+'), ' ');
+    return ChatReply(
+      messageId: message.id,
+      senderName: message.senderName,
+      senderUid: message.senderUid,
+      text: text.length > maxTextLength
+          ? '${text.substring(0, maxTextLength)}…'
+          : text,
+      hasImage: (message.imageUrl ?? '').isNotEmpty,
+    );
+  }
+
+  final String messageId;
+  final String senderName;
+  final String senderUid;
+  final String text;
+  final bool hasImage;
+
+  String get preview => text.isNotEmpty ? text : (hasImage ? 'صورة' : 'رسالة');
+
+  Map<String, dynamic> toJson() => {
+    'id': messageId,
+    'senderName': senderName,
+    if (senderUid.isNotEmpty) 'senderUid': senderUid,
+    if (text.isNotEmpty) 'text': text,
+    if (hasImage) 'hasImage': true,
+  };
+
+  static ChatReply? fromJson(dynamic value) {
+    if (value is! Map) return null;
+    final id = (value['id'] ?? '').toString();
+    if (id.isEmpty) return null;
+    return ChatReply(
+      messageId: id,
+      senderName: (value['senderName'] ?? 'مجهول').toString(),
+      senderUid: (value['senderUid'] ?? '').toString(),
+      text: (value['text'] ?? '').toString(),
+      hasImage: value['hasImage'] == true,
+    );
+  }
 }
 
 class DailyTaskSummary {
@@ -3805,7 +3886,11 @@ class AppStore {
     return role == UserRoleService.adminRole;
   }
 
-  static Future<bool> sendChatMessage(String text, {String? imageUrl}) async {
+  static Future<bool> sendChatMessage(
+    String text, {
+    String? imageUrl,
+    ChatReply? replyTo,
+  }) async {
     final ref = _chatRef;
     final senderUid = _uid;
     if (senderUid == null ||
@@ -3827,6 +3912,7 @@ class AppStore {
         text: text.trim(),
         sentAt: DateTime.now(),
         imageUrl: imageUrl,
+        replyTo: replyTo,
       );
       chatMessages.insert(0, msg);
       chatMessagesChange.value++;
@@ -3878,13 +3964,8 @@ class AppStore {
         Map<String, dynamic>.from(snapshot.value as Map),
       );
       if (msg.senderUid != senderUid) return false;
-      final updated = ChatMessage(
-        id: msgId,
-        senderName: msg.senderName,
-        senderEmail: msg.senderEmail,
-        senderUid: msg.senderUid,
+      final updated = msg.copyWith(
         text: newText.trim(),
-        sentAt: msg.sentAt,
         editedAt: DateTime.now(),
       );
       await ref
@@ -3930,17 +4011,10 @@ class AppStore {
           .timeout(const Duration(seconds: 10));
       final index = chatMessages.indexWhere((m) => m.id == msgId);
       if (index >= 0) {
-        chatMessages[index] = ChatMessage(
-          id: msgId,
-          senderName: msg.senderName,
-          senderEmail: msg.senderEmail,
-          senderUid: msg.senderUid,
-          text: msg.text,
-          sentAt: msg.sentAt,
+        chatMessages[index] = msg.copyWith(
           deletedAt: deletedAt,
           deletedByUid: senderUid,
           deletedByAdmin: isAdminUser,
-          imageUrl: msg.imageUrl,
         );
         chatMessagesChange.value++;
       }

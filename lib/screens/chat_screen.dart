@@ -2,6 +2,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models.dart';
@@ -19,9 +20,72 @@ class _ChatScreenState extends State<ChatScreen> {
   final ImagePicker _imagePicker = ImagePicker();
   final Set<String> _knownMessageIds = {};
   final List<ChatMessage> _pendingNotifications = [];
+  final FocusNode _inputFocus = FocusNode();
+  final Map<String, GlobalKey> _messageKeys = {};
   bool _sending = false;
   Future<bool>? _isAdminFuture;
   Timer? _notificationTimer;
+  Timer? _highlightTimer;
+
+  /// الرسالة التي يُكتب الرد عليها الآن.
+  ChatReply? _replyTo;
+  String? _highlightedId;
+
+  String? get _myUid => FirebaseAuth.instance.currentUser?.uid;
+
+  GlobalKey _keyFor(String id) => _messageKeys.putIfAbsent(id, GlobalKey.new);
+
+  void _startReply(ChatMessage message) {
+    if (message.deletedAt != null) return;
+    setState(() => _replyTo = ChatReply.of(message));
+    _inputFocus.requestFocus();
+  }
+
+  void _cancelReply() => setState(() => _replyTo = null);
+
+  String _replyAuthor(ChatReply reply) =>
+      reply.senderUid.isNotEmpty && reply.senderUid == _myUid
+      ? 'أنت'
+      : reply.senderName;
+
+  /// ينتقل إلى الرسالة الأصلية؛ القائمة كسولة فيُمرَّر حتى تُبنى.
+  Future<void> _jumpToMessage(String id) async {
+    final index = AppStore.chatMessages.indexWhere((m) => m.id == id);
+    if (index < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('الرسالة الأصلية لم تعد موجودة')),
+      );
+      return;
+    }
+    for (var step = 0; step < 40; step++) {
+      final target = _messageKeys[id]?.currentContext;
+      if (target != null) {
+        await Scrollable.ensureVisible(
+          target,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 250),
+        );
+        break;
+      }
+      if (!_scrollController.hasClients) return;
+      final position = _scrollController.position;
+      if (position.pixels >= position.maxScrollExtent) break;
+      _scrollController.jumpTo(
+        (position.pixels + position.viewportDimension * 0.8).clamp(
+          0,
+          position.maxScrollExtent,
+        ),
+      );
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
+    if (!mounted) return;
+    setState(() => _highlightedId = id);
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _highlightedId = null);
+    });
+  }
 
   @override
   void initState() {
@@ -37,6 +101,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _textController.dispose();
     _scrollController.dispose();
+    _inputFocus.dispose();
+    _highlightTimer?.cancel();
     AppStore.chatMessagesChange.removeListener(_handleChatMessagesChanged);
     _notificationTimer?.cancel();
     super.dispose();
@@ -46,8 +112,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final newMessages = <ChatMessage>[];
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
     for (final message in AppStore.chatMessages) {
-      if (_knownMessageIds.add(message.id) &&
-          message.senderUid != currentUid) {
+      if (_knownMessageIds.add(message.id) && message.senderUid != currentUid) {
         newMessages.add(message);
       }
     }
@@ -85,9 +150,14 @@ class _ChatScreenState extends State<ChatScreen> {
         ? _pendingNotifications.first
         : null;
     final senderName = previewMessage?.senderName ?? 'الدردشة';
+    final repliedToMe =
+        previewMessage?.replyTo != null &&
+        previewMessage!.replyTo!.senderUid.isNotEmpty &&
+        previewMessage.replyTo!.senderUid == _myUid;
     final previewText = previewMessage == null
         ? ''
-        : (previewMessage.text.isEmpty ? 'أرسل صورة' : previewMessage.text);
+        : (repliedToMe ? 'ردّ على رسالتك: ' : '') +
+              (previewMessage.text.isEmpty ? 'أرسل صورة' : previewMessage.text);
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 10, 12, 2),
@@ -176,10 +246,11 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _textController.text.trim();
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
-    final ok = await AppStore.sendChatMessage(text);
+    final ok = await AppStore.sendChatMessage(text, replyTo: _replyTo);
     if (!mounted) return;
     if (ok) {
       _textController.clear();
+      _replyTo = null;
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     } else {
       ScaffoldMessenger.of(
@@ -289,129 +360,152 @@ class _ChatScreenState extends State<ChatScreen> {
                     itemBuilder: (context, index) {
                       final msg = messages[index];
                       final isMe =
-                          msg.senderUid == FirebaseAuth.instance.currentUser?.uid;
+                          msg.senderUid ==
+                          FirebaseAuth.instance.currentUser?.uid;
                       final time =
                           '${msg.sentAt.hour.toString().padLeft(2, '0')}:${msg.sentAt.minute.toString().padLeft(2, '0')}';
                       final isDeleted = msg.deletedAt != null;
-                      return GestureDetector(
-                        onLongPress: () => _showMessageOptions(context, msg),
-                        child: Align(
-                          alignment: isMe
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(vertical: 6),
-                            padding: const EdgeInsets.all(12),
-                            constraints: BoxConstraints(
-                              maxWidth:
-                                  MediaQuery.of(context).size.width * 0.75,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isMe
-                                  ? (isDark
-                                        ? const Color(0xFF2563EB)
-                                        : Colors.blue.shade600)
-                                  : (isDark
-                                        ? const Color(0xFF1E293B)
-                                        : Colors.white),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: isDark
-                                    ? const Color(0xFF334155)
-                                    : Colors.grey.shade200,
+                      final highlighted = _highlightedId == msg.id;
+                      return SwipeToReply(
+                        key: _keyFor(msg.id),
+                        enabled: !isDeleted,
+                        onReply: () => _startReply(msg),
+                        child: GestureDetector(
+                          onLongPress: () => _showMessageOptions(context, msg),
+                          child: Align(
+                            alignment: isMe
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(vertical: 6),
+                              padding: const EdgeInsets.all(12),
+                              constraints: BoxConstraints(
+                                maxWidth:
+                                    MediaQuery.of(context).size.width * 0.75,
                               ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  msg.senderName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: isMe
-                                        ? Colors.white
-                                        : const Color(0xFF7C3AED),
-                                    fontWeight: FontWeight.w900,
-                                    fontSize: 13,
-                                    letterSpacing: 0.2,
-                                  ),
+                              decoration: BoxDecoration(
+                                color: isMe
+                                    ? (isDark
+                                          ? const Color(0xFF2563EB)
+                                          : Colors.blue.shade600)
+                                    : (isDark
+                                          ? const Color(0xFF1E293B)
+                                          : Colors.white),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: highlighted
+                                      ? Colors.amber
+                                      : (isDark
+                                            ? const Color(0xFF334155)
+                                            : Colors.grey.shade200),
+                                  width: highlighted ? 2 : 1,
                                 ),
-                                if (isDeleted) ...[
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    msg.senderName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: isMe
+                                          ? Colors.white
+                                          : const Color(0xFF7C3AED),
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 13,
+                                      letterSpacing: 0.2,
+                                    ),
+                                  ),
+                                  if (!isDeleted && msg.replyTo != null) ...[
+                                    const SizedBox(height: 6),
+                                    ReplyQuote(
+                                      author: _replyAuthor(msg.replyTo!),
+                                      text: msg.replyTo!.preview,
+                                      onMine: isMe,
+                                      isDark: isDark,
+                                      onTap: () => _jumpToMessage(
+                                        msg.replyTo!.messageId,
+                                      ),
+                                    ),
+                                  ],
+                                  if (isDeleted) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'تم حذف هذه الرسالة',
+                                      style: TextStyle(
+                                        color: isMe
+                                            ? Colors.white70
+                                            : (isDark
+                                                  ? const Color(0xFF94A3B8)
+                                                  : Colors.grey.shade600),
+                                        fontSize: 14,
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
+                                  ] else if (msg.text.isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      msg.text,
+                                      style: TextStyle(
+                                        color: isMe
+                                            ? Colors.white
+                                            : (isDark
+                                                  ? const Color(0xFFE2E8F0)
+                                                  : const Color(0xFF1F2937)),
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                  ],
+                                  if (!isDeleted &&
+                                      msg.imageUrl != null &&
+                                      msg.imageUrl!.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Image.network(
+                                        msg.imageUrl!,
+                                        width:
+                                            MediaQuery.of(context).size.width *
+                                            0.5,
+                                        fit: BoxFit.cover,
+                                        loadingBuilder:
+                                            (context, child, progress) {
+                                              if (progress == null)
+                                                return child;
+                                              return const SizedBox(
+                                                height: 120,
+                                                child: Center(
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                      ),
+                                                ),
+                                              );
+                                            },
+                                        errorBuilder:
+                                            (context, error, stackTrace) =>
+                                                const Icon(
+                                                  Icons.broken_image,
+                                                  size: 48,
+                                                ),
+                                      ),
+                                    ),
+                                  ],
                                   const SizedBox(height: 4),
                                   Text(
-                                    'تم حذف هذه الرسالة',
+                                    time,
                                     style: TextStyle(
                                       color: isMe
                                           ? Colors.white70
                                           : (isDark
                                                 ? const Color(0xFF94A3B8)
                                                 : Colors.grey.shade600),
-                                      fontSize: 14,
-                                      fontStyle: FontStyle.italic,
-                                    ),
-                                  ),
-                                ] else if (msg.text.isNotEmpty) ...[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    msg.text,
-                                    style: TextStyle(
-                                      color: isMe
-                                          ? Colors.white
-                                          : (isDark
-                                                ? const Color(0xFFE2E8F0)
-                                                : const Color(0xFF1F2937)),
-                                      fontSize: 15,
+                                      fontSize: 11,
                                     ),
                                   ),
                                 ],
-                                if (!isDeleted &&
-                                    msg.imageUrl != null &&
-                                    msg.imageUrl!.isNotEmpty) ...[
-                                  const SizedBox(height: 8),
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Image.network(
-                                      msg.imageUrl!,
-                                      width:
-                                          MediaQuery.of(context).size.width *
-                                          0.5,
-                                      fit: BoxFit.cover,
-                                      loadingBuilder:
-                                          (context, child, progress) {
-                                            if (progress == null) return child;
-                                            return const SizedBox(
-                                              height: 120,
-                                              child: Center(
-                                                child:
-                                                    CircularProgressIndicator(
-                                                      strokeWidth: 2,
-                                                    ),
-                                              ),
-                                            );
-                                          },
-                                      errorBuilder:
-                                          (context, error, stackTrace) =>
-                                              const Icon(
-                                                Icons.broken_image,
-                                                size: 48,
-                                              ),
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(height: 4),
-                                Text(
-                                  time,
-                                  style: TextStyle(
-                                    color: isMe
-                                        ? Colors.white70
-                                        : (isDark
-                                              ? const Color(0xFF94A3B8)
-                                              : Colors.grey.shade600),
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ),
                         ),
@@ -421,22 +515,56 @@ class _ChatScreenState extends State<ChatScreen> {
                 },
               ),
             ),
+            if (_replyTo != null)
+              Container(
+                key: const ValueKey('reply-bar'),
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                padding: const EdgeInsets.fromLTRB(12, 8, 4, 0),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.reply,
+                      size: 20,
+                      color: isDark
+                          ? const Color(0xFFA5B4FC)
+                          : Colors.blue.shade700,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ReplyQuote(
+                        author: 'الرد على ${_replyAuthor(_replyTo!)}',
+                        text: _replyTo!.preview,
+                        onMine: false,
+                        isDark: isDark,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'إلغاء الرد',
+                      onPressed: _cancelReply,
+                      icon: const Icon(Icons.close, size: 20),
+                    ),
+                  ],
+                ),
+              ),
             Container(
               decoration: BoxDecoration(
                 color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                border: Border(
-                  top: BorderSide(
-                    color: isDark
-                        ? const Color(0xFF334155)
-                        : Colors.grey.shade200,
-                  ),
-                ),
+                border: _replyTo != null
+                    ? null
+                    : Border(
+                        top: BorderSide(
+                          color: isDark
+                              ? const Color(0xFF334155)
+                              : Colors.grey.shade200,
+                        ),
+                      ),
               ),
               child: Row(
                 children: [
                   Expanded(
                     child: TextField(
                       controller: _textController,
+                      focusNode: _inputFocus,
                       style: TextStyle(
                         color: isDark
                             ? const Color(0xFFE2E8F0)
@@ -506,9 +634,14 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final url = await AppStore.uploadChatImage(file);
       if (url == null) throw Exception('فشل رفع الصورة');
-      final ok = await AppStore.sendChatMessage('', imageUrl: url);
+      final ok = await AppStore.sendChatMessage(
+        '',
+        imageUrl: url,
+        replyTo: _replyTo,
+      );
       if (!mounted) return;
       if (ok) {
+        _replyTo = null;
         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
       } else {
         ScaffoldMessenger.of(
@@ -526,7 +659,10 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _showMessageOptions(BuildContext context, ChatMessage msg) async {
+  Future<void> _showMessageOptions(
+    BuildContext context,
+    ChatMessage msg,
+  ) async {
     final isMe = msg.senderUid == FirebaseAuth.instance.currentUser?.uid;
     final isAdminUser = await AppStore.isAdmin;
     showModalBottomSheet(
@@ -535,6 +671,15 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (msg.deletedAt == null)
+              ListTile(
+                leading: const Icon(Icons.reply),
+                title: const Text('رد'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _startReply(msg);
+                },
+              ),
             if (isMe || isAdminUser) ...[
               ListTile(
                 leading: const Icon(Icons.delete),
@@ -638,5 +783,155 @@ class _ChatScreenState extends State<ChatScreen> {
         ).showSnackBar(const SnackBar(content: Text('تعذر حذف الرسالة')));
       }
     }
+  }
+}
+
+/// سحب الرسالة أفقياً يبدأ الرد عليها، كتطبيقات المحادثة.
+class SwipeToReply extends StatefulWidget {
+  const SwipeToReply({
+    super.key,
+    required this.child,
+    required this.onReply,
+    this.enabled = true,
+  });
+
+  static const double trigger = 56;
+  static const double maxOffset = 80;
+
+  final Widget child;
+  final VoidCallback onReply;
+  final bool enabled;
+
+  @override
+  State<SwipeToReply> createState() => _SwipeToReplyState();
+}
+
+class _SwipeToReplyState extends State<SwipeToReply> {
+  double _offset = 0;
+  bool _armed = false;
+
+  void _update(DragUpdateDetails details) {
+    final next = (_offset + details.delta.dx).clamp(
+      -SwipeToReply.maxOffset,
+      SwipeToReply.maxOffset,
+    );
+    final armed = next.abs() >= SwipeToReply.trigger;
+    if (armed && !_armed) HapticFeedback.selectionClick();
+    setState(() {
+      _offset = next;
+      _armed = armed;
+    });
+  }
+
+  void _end([DragEndDetails? _]) {
+    if (_armed) widget.onReply();
+    setState(() {
+      _offset = 0;
+      _armed = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.enabled) return widget.child;
+    final progress = (_offset.abs() / SwipeToReply.trigger).clamp(0.0, 1.0);
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragUpdate: _update,
+      onHorizontalDragEnd: _end,
+      onHorizontalDragCancel: _end,
+      child: Stack(
+        alignment: _offset >= 0
+            ? AlignmentDirectional.centerStart
+            : AlignmentDirectional.centerEnd,
+        children: [
+          if (_offset != 0)
+            Opacity(
+              opacity: progress,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: CircleAvatar(
+                  radius: 15,
+                  backgroundColor: Colors.blue.withValues(alpha: 0.15),
+                  child: Icon(
+                    Icons.reply,
+                    size: 18,
+                    color: Colors.blue.shade700,
+                  ),
+                ),
+              ),
+            ),
+          AnimatedContainer(
+            duration: Duration(milliseconds: _offset == 0 ? 180 : 0),
+            transform: Matrix4.translationValues(_offset, 0, 0),
+            child: widget.child,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// اقتباس الرسالة الأصلية داخل الرد وفوق خانة الكتابة.
+class ReplyQuote extends StatelessWidget {
+  const ReplyQuote({
+    super.key,
+    required this.author,
+    required this.text,
+    required this.onMine,
+    required this.isDark,
+    this.onTap,
+  });
+
+  final String author;
+  final String text;
+  final bool onMine;
+  final bool isDark;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = onMine ? Colors.white : const Color(0xFF7C3AED);
+    final background = onMine
+        ? Colors.white.withValues(alpha: 0.18)
+        : (isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9));
+    final textColor = onMine
+        ? Colors.white70
+        : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569));
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(8),
+          border: BorderDirectional(start: BorderSide(color: accent, width: 3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              author,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: accent,
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+              ),
+            ),
+            Text(
+              text,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: textColor, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
