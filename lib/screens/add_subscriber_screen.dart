@@ -422,57 +422,63 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                       });
                     },
                   ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: price,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.right,
-                    decoration: dec('مبلغ الاشتراك', Icons.payments_outlined),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: paid,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.right,
-                    decoration: dec(
-                      widget.subscriber == null
-                          ? 'المبلغ المدفوع عند التسجيل'
-                          : 'واصل الشهر الحالي',
-                      Icons.price_check_outlined,
+            // المبالغ تُسجَّل عند التفعيل؛ عند الإضافة لا يُسأل عنها.
+            if (widget.subscriber != null) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: price,
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.right,
+                      decoration: dec('مبلغ الاشتراك', Icons.payments_outlined),
                     ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: paid,
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.right,
+                      decoration: dec(
+                        widget.subscriber == null
+                            ? 'المبلغ المدفوع عند التسجيل'
+                            : 'واصل الشهر الحالي',
+                        Icons.price_check_outlined,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if ((widget.subscriber?.carriedDebt ?? 0) > 0.0001) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    'الدين المرحّل: ${moneyText(widget.subscriber!.carriedDebt)} • '
+                    'إجمالي المتبقي: ${moneyText(widget.subscriber!.remaining)}',
+                    style: TextStyle(color: Colors.orange.shade800),
                   ),
                 ),
               ],
-            ),
-            if ((widget.subscriber?.carriedDebt ?? 0) > 0.0001) ...[
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  'الدين المرحّل: ${moneyText(widget.subscriber!.carriedDebt)} • '
-                  'إجمالي المتبقي: ${moneyText(widget.subscriber!.remaining)}',
-                  style: TextStyle(color: Colors.orange.shade800),
+              const SizedBox(height: 12),
+              TextField(
+                controller: paymentDate,
+                textAlign: TextAlign.right,
+                decoration: dec(
+                  'تاريخ التسديد',
+                  Icons.event_available_outlined,
                 ),
               ),
             ],
-            const SizedBox(height: 12),
-            TextField(
-              controller: paymentDate,
-              textAlign: TextAlign.right,
-              decoration: dec('تاريخ التسديد', Icons.event_available_outlined),
-            ),
             const SizedBox(height: 12),
             if (widget.subscriber == null) ...[
               const Divider(height: 28),
               const Align(
                 alignment: Alignment.centerRight,
                 child: Text(
-                  'إضافة إلى SAS (اختياري)',
+                  'إضافة إلى SAS',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
@@ -613,8 +619,10 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                     );
                     return;
                   }
-                  final p = double.tryParse(price.text) ?? 0;
-                  final pd = double.tryParse(paid.text) ?? 0;
+                  // عند الإضافة الحقول مخفية: لا مبلغ ولا واصل ولا دين.
+                  final isNew = widget.subscriber == null;
+                  final p = isNew ? 0.0 : double.tryParse(price.text) ?? 0;
+                  final pd = isNew ? 0.0 : double.tryParse(paid.text) ?? 0;
                   if (!p.isFinite || !pd.isFinite || p < 0 || pd < 0) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
