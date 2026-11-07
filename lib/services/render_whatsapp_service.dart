@@ -225,7 +225,7 @@ class RenderWhatsAppService {
   }
 
   static String _withAgentPhoneFooter(String message) {
-    final agentLabel = AppStore.effectiveAgentName.trim();
+    final agentLabel = AppStore.messageSignature;
     final officePhone = AppStore.officePhone.trim();
     final footerParts = <String>[];
     if (agentLabel.isNotEmpty) footerParts.add(agentLabel);
@@ -291,7 +291,7 @@ class RenderWhatsAppService {
     final resolvedPackage = (packageName ?? s.packageDisplay).trim();
     final resolvedAmount = amount?.toStringAsFixed(0);
     final resolvedBalance = (balance ?? s.remaining).toStringAsFixed(0);
-    final resolvedAgent = (agentName ?? AppStore.effectiveAgentName).trim();
+    final resolvedAgent = (agentName ?? AppStore.messageSignature).trim();
     final resolvedWhatsApp = normalizePhone(AppStore.officePhone.trim());
     final resolvedStartDate = _fmt(s.startDate);
     final resolvedEndDate = _fmt(expiryDate ?? s.endDate);

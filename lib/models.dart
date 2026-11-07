@@ -1480,6 +1480,12 @@ class AppStore {
     return officeName.trim();
   }
 
+  /// توقيع رسائل المشتركين: اسم المكتب، والاسم الكامل يبقى للدردشة.
+  static String get messageSignature {
+    final office = officeName.trim();
+    return office.isNotEmpty ? office : effectiveAgentName;
+  }
+
   static String subscriptionPlanLabelFor(String plan) {
     switch (plan.trim()) {
       case 'free_15_days':

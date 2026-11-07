@@ -491,7 +491,7 @@ class WhatsAppNotificationDispatcher {
         '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
 
     final package = subscriber.packageDisplay.trim();
-    final agent = AppStore.effectiveAgentName.trim();
+    final agent = AppStore.messageSignature;
     final phone = RenderWhatsAppService.normalizePhone(AppStore.officePhone);
     final remaining = (balance ?? subscriber.remaining).toStringAsFixed(0);
     final payment = (paidAmount ?? subscriber.paid).toStringAsFixed(0);
@@ -537,7 +537,7 @@ class WhatsAppNotificationDispatcher {
   }
 
   static String _appendAgentFooter(String message) {
-    final agent = AppStore.effectiveAgentName.trim();
+    final agent = AppStore.messageSignature;
     final officePhone = AppStore.officePhone.trim();
     final parts = <String>[
       if (agent.isNotEmpty) agent,

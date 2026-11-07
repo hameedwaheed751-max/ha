@@ -69,12 +69,18 @@ void main() {
     () async {
       final originalOfficeName = AppStore.officeName;
       final originalOfficePhone = AppStore.officePhone;
+      final originalAgentName = AppStore.agentName;
       AppStore.officeName = 'مكتب تجريبي';
       AppStore.officePhone = '0790 111 2222';
+      AppStore.agentName = 'وكيل الاسم الكامل';
       addTearDown(() {
         AppStore.officeName = originalOfficeName;
         AppStore.officePhone = originalOfficePhone;
+        AppStore.agentName = originalAgentName;
       });
+      // الدردشة تبقى بالاسم الكامل، والرسالة توقَّع باسم المكتب.
+      expect(AppStore.effectiveAgentName, 'وكيل الاسم الكامل');
+      expect(AppStore.messageSignature, 'مكتب تجريبي');
 
       String? sentTo;
       String? sentText;
@@ -119,6 +125,7 @@ void main() {
       expect(sentText, contains('المبلغ الواصل: 20000 دينار عراقي'));
       expect(sentText, contains('المبلغ المتبقي: 30000 دينار عراقي'));
       expect(sentText, contains('مكتب تجريبي'));
+      expect(sentText, isNot(contains('وكيل الاسم الكامل')));
       expect(sentText, contains('9647901112222'));
     },
   );
