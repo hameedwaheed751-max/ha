@@ -1626,6 +1626,9 @@ class AppStore {
   static DateTime _lastChatOpenedAt = DateTime.now();
   static final ValueNotifier<bool> themeModeChange = ValueNotifier<bool>(false);
   static StreamSubscription<DatabaseEvent>? chatListener;
+  static StreamSubscription<DatabaseEvent>? _chatChangedListener;
+  static StreamSubscription<DatabaseEvent>? _chatRemovedListener;
+  static const String _chatSeenKey = 'chat_last_seen';
   static bool isDarkMode = false;
 
   static String get effectiveAgentName {
@@ -3957,9 +3960,12 @@ class AppStore {
   }
 
   static Future<void> startChatSync() async {
-    chatListener?.cancel();
+    stopChatSync();
     final ref = _chatRef;
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final seen = DateTime.tryParse(prefs.getString(_chatSeenKey) ?? '');
+      if (seen != null) _lastChatOpenedAt = seen;
       debugPrint('CHAT DEBUG UID: $_uid');
       debugPrint('CHAT DEBUG agentEmail: $agentEmail');
       debugPrint('CHAT DEBUG sasUsername: $sasUsername');
@@ -3975,11 +3981,14 @@ class AppStore {
         );
         final loaded = <ChatMessage>[];
         for (final entry in existing.entries) {
-          final msg = ChatMessage.fromJson(
-            entry.key,
-            Map<String, dynamic>.from(entry.value as Map),
+          // رسالة تالفة واحدة لا توقف تحميل الدردشة كلها.
+          if (entry.value is! Map) continue;
+          loaded.add(
+            ChatMessage.fromJson(
+              entry.key,
+              Map<String, dynamic>.from(entry.value as Map),
+            ),
           );
-          loaded.add(msg);
         }
         loaded.sort((a, b) => b.sentAt.compareTo(a.sentAt));
         chatMessages
@@ -4002,6 +4011,21 @@ class AppStore {
           chatMessagesChange.value++;
         }
       });
+      // التعديل والحذف من الأجهزة الأخرى يصلان مباشرة.
+      _chatChangedListener = ref.onChildChanged.listen((event) {
+        final snapshot = event.snapshot;
+        if (snapshot.key == null || snapshot.value is! Map) return;
+        applyChatChange(
+          ChatMessage.fromJson(
+            snapshot.key!,
+            Map<String, dynamic>.from(snapshot.value as Map),
+          ),
+        );
+      });
+      _chatRemovedListener = ref.onChildRemoved.listen((event) {
+        final key = event.snapshot.key;
+        if (key != null) applyChatRemoval(key);
+      });
     } catch (e) {
       debugPrint('Chat sync error: $e');
     }
@@ -4019,14 +4043,41 @@ class AppStore {
         .length;
   }
 
-  static void markChatOpened() {
-    _lastChatOpenedAt = DateTime.now();
+  /// تحديث رسالة موجودة بعد تعديلها أو حذفها.
+  static void applyChatChange(ChatMessage msg) {
+    final index = chatMessages.indexWhere((m) => m.id == msg.id);
+    if (index < 0) return;
+    chatMessages[index] = msg;
     chatMessagesChange.value++;
+  }
+
+  static void applyChatRemoval(String id) {
+    final before = chatMessages.length;
+    chatMessages.removeWhere((m) => m.id == id);
+    if (chatMessages.length != before) chatMessagesChange.value++;
+  }
+
+  static void markChatOpened() {
+    markChatSeen();
+    chatMessagesChange.value++;
+  }
+
+  /// كل ما وصل حتى الآن مقروء؛ يُحفظ ليصح العدد بعد إغلاق التطبيق.
+  static void markChatSeen() {
+    _lastChatOpenedAt = DateTime.now();
+    final stamp = _lastChatOpenedAt.toIso8601String();
+    SharedPreferences.getInstance()
+        .then((p) => p.setString(_chatSeenKey, stamp))
+        .catchError((_) => false);
   }
 
   static void stopChatSync() {
     chatListener?.cancel();
     chatListener = null;
+    _chatChangedListener?.cancel();
+    _chatChangedListener = null;
+    _chatRemovedListener?.cancel();
+    _chatRemovedListener = null;
   }
 
   static Future<bool> get isAdmin async {
@@ -4071,6 +4122,12 @@ class AppStore {
       return true;
     } catch (e) {
       debugPrint('Send chat message error: $e');
+      // لا تبقى رسالة لم تصل ظاهرة كأنها أُرسلت.
+      chatMessages.removeWhere((m) => m.id == msgId);
+      chatMessagesChange.value++;
+      // الكتابة قد تبقى في طابور Firebase وتصل لاحقاً؛ نلغيها كي لا
+      // تتكرر الرسالة إذا أعاد الوكيل إرسالها.
+      unawaited(ref.child(msgId).remove().catchError((_) {}));
       return false;
     }
   }
@@ -4111,7 +4168,7 @@ class AppStore {
         msgId,
         Map<String, dynamic>.from(snapshot.value as Map),
       );
-      if (msg.senderUid != senderUid) return false;
+      if (msg.senderUid != senderUid || msg.deletedAt != null) return false;
       final updated = msg.copyWith(
         text: newText.trim(),
         editedAt: DateTime.now(),

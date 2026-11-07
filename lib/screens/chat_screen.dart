@@ -43,6 +43,17 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _cancelReply() => setState(() => _replyTo = null);
 
+  /// نص الاقتباس من الرسالة الأصلية كما هي الآن: بعد تعديلها، أو مخفي
+  /// إذا حُذفت.
+  String _quoteText(ChatReply reply) {
+    for (final m in AppStore.chatMessages) {
+      if (m.id != reply.messageId) continue;
+      if (m.deletedAt != null) return 'تم حذف هذه الرسالة';
+      return ChatReply.of(m).preview;
+    }
+    return reply.preview;
+  }
+
   String _replyAuthor(ChatReply reply) =>
       reply.senderUid.isNotEmpty && reply.senderUid == _myUid
       ? 'أنت'
@@ -104,6 +115,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _inputFocus.dispose();
     _highlightTimer?.cancel();
     AppStore.chatMessagesChange.removeListener(_handleChatMessagesChanged);
+    AppStore.markChatSeen();
     _notificationTimer?.cancel();
     super.dispose();
   }
@@ -117,6 +129,8 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     }
     if (newMessages.isEmpty || !mounted) return;
+    // الشاشة مفتوحة فالرسالة مقروءة، ولا تُعدّ بعد الخروج.
+    AppStore.markChatSeen();
 
     setState(() {
       _pendingNotifications.addAll(newMessages.reversed);
@@ -147,8 +161,9 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildIncomingNotification(bool isDark) {
     final count = _pendingNotifications.length;
     final previewMessage = _pendingNotifications.isNotEmpty
-        ? _pendingNotifications.first
+        ? _pendingNotifications.last
         : null;
+    final senders = _pendingNotifications.map((m) => m.senderName).toSet();
     final senderName = previewMessage?.senderName ?? 'الدردشة';
     final repliedToMe =
         previewMessage?.replyTo != null &&
@@ -201,9 +216,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                   Text(
-                    count > 1
+                    count == 1
+                        ? '$senderName: $previewText'
+                        : senders.length == 1
                         ? '$count رسائل واردة من $senderName'
-                        : '$senderName: $previewText',
+                        : '$count رسائل من ${senders.length} أشخاص، آخرها من $senderName',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -234,8 +251,9 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!_scrollController.hasClients) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
+      // القائمة معكوسة: الأحدث عند الإزاحة صفر، أسفل الشاشة.
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
+        0,
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeOut,
       );
@@ -366,7 +384,13 @@ class _ChatScreenState extends State<ChatScreen> {
                           '${msg.sentAt.hour.toString().padLeft(2, '0')}:${msg.sentAt.minute.toString().padLeft(2, '0')}';
                       final isDeleted = msg.deletedAt != null;
                       final highlighted = _highlightedId == msg.id;
-                      return SwipeToReply(
+                      // القائمة معكوسة: الأقدم بعد هذه الرسالة في الفهرس.
+                      final older = index + 1 < messages.length
+                          ? messages[index + 1]
+                          : null;
+                      final newDay =
+                          older == null || !_sameDay(older.sentAt, msg.sentAt);
+                      final bubble = SwipeToReply(
                         key: _keyFor(msg.id),
                         enabled: !isDeleted,
                         onReply: () => _startReply(msg),
@@ -421,7 +445,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                     const SizedBox(height: 6),
                                     ReplyQuote(
                                       author: _replyAuthor(msg.replyTo!),
-                                      text: msg.replyTo!.preview,
+                                      text: _quoteText(msg.replyTo!),
                                       onMine: isMe,
                                       isDark: isDark,
                                       onTap: () => _jumpToMessage(
@@ -494,7 +518,9 @@ class _ChatScreenState extends State<ChatScreen> {
                                   ],
                                   const SizedBox(height: 4),
                                   Text(
-                                    time,
+                                    !isDeleted && msg.editedAt != null
+                                        ? 'معدّلة · $time'
+                                        : time,
                                     style: TextStyle(
                                       color: isMe
                                           ? Colors.white70
@@ -509,6 +535,13 @@ class _ChatScreenState extends State<ChatScreen> {
                             ),
                           ),
                         ),
+                      );
+                      if (!newDay) return bubble;
+                      return Column(
+                        children: [
+                          ChatDaySeparator(label: chatDayLabel(msg.sentAt)),
+                          bubble,
+                        ],
                       );
                     },
                   );
@@ -664,14 +697,16 @@ class _ChatScreenState extends State<ChatScreen> {
     ChatMessage msg,
   ) async {
     final isMe = msg.senderUid == FirebaseAuth.instance.currentUser?.uid;
-    final isAdminUser = await AppStore.isAdmin;
+    final isAdminUser = await (_isAdminFuture ?? AppStore.isAdmin);
+    if (!mounted) return;
+    final isDeleted = msg.deletedAt != null;
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (msg.deletedAt == null)
+            if (!isDeleted)
               ListTile(
                 leading: const Icon(Icons.reply),
                 title: const Text('رد'),
@@ -680,7 +715,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   _startReply(msg);
                 },
               ),
-            if (isMe || isAdminUser) ...[
+            if (!isDeleted && (isMe || isAdminUser)) ...[
               ListTile(
                 leading: const Icon(Icons.delete),
                 title: const Text('حذف'),
@@ -690,7 +725,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 },
               ),
             ],
-            if (isMe) ...[
+            if (!isDeleted && isMe && msg.text.isNotEmpty) ...[
               ListTile(
                 leading: const Icon(Icons.edit),
                 title: const Text('تعديل'),
@@ -930,6 +965,48 @@ class ReplyQuote extends StatelessWidget {
               style: TextStyle(color: textColor, fontSize: 13),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+bool _sameDay(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+
+/// عنوان اليوم فوق أول رسالة منه: اليوم، أمس، أو التاريخ.
+String chatDayLabel(DateTime day, {DateTime? now}) {
+  final today = now ?? DateTime.now();
+  if (_sameDay(day, today)) return 'اليوم';
+  if (_sameDay(day, today.subtract(const Duration(days: 1)))) return 'أمس';
+  return '${day.day}/${day.month}/${day.year}';
+}
+
+class ChatDaySeparator extends StatelessWidget {
+  const ChatDaySeparator({super.key, required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+            ),
+          ),
         ),
       ),
     );
