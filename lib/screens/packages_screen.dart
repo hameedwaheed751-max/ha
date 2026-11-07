@@ -76,8 +76,8 @@ class _PackagesScreenState extends State<PackagesScreen> {
   }
 
   Future<void> _syncFromSas() async {
-    final settings = await SasSettings.load();
-    if (settings.username.trim().isEmpty || settings.password.isEmpty) {
+    final accounts = await SasSettings.loadAll();
+    if (accounts.isEmpty) {
       _snack('أكمل إعدادات ربط SAS أولاً');
       return;
     }
@@ -85,7 +85,14 @@ class _PackagesScreenState extends State<PackagesScreen> {
     setState(() => _syncing = true);
     try {
       final before = AppStore.packages.where((p) => p.fromSas).length;
-      final added = await SasSyncService.syncPackages(SasApiService(settings));
+      var added = 0;
+      for (final settings in accounts) {
+        added += await SasSyncService.syncPackages(
+          SasApiService(settings),
+          // قائمة ساس واحد لا تمثل كل الباقات حين يوجد أكثر من ساس.
+          complete: accounts.length == 1,
+        );
+      }
       final now = AppStore.packages.where((p) => p.fromSas).length;
       if (!mounted) return;
       _snack(

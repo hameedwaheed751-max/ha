@@ -14,6 +14,33 @@ class SasSyncResult {
   });
 }
 
+class SasSyncAllResult {
+  const SasSyncAllResult({
+    required this.accounts,
+    required this.read,
+    required this.added,
+    required this.updated,
+    required this.failures,
+  });
+
+  final int accounts;
+  final int read;
+  final int added;
+  final int updated;
+
+  /// اسم الساس ← سبب فشل مزامنته.
+  final Map<String, String> failures;
+
+  bool get allFailed => accounts > 0 && failures.length == accounts;
+
+  String get summary {
+    final base = 'جديد $added، محدث $updated، مقروء $read';
+    if (failures.isEmpty) return base;
+    final names = failures.keys.join('، ');
+    return '$base — تعذرت مزامنة: $names';
+  }
+}
+
 class _SessionIndex {
   _SessionIndex(List<Map<String, dynamic>> sessions) {
     for (final session in sessions) {
@@ -142,7 +169,42 @@ class SasSyncService {
     );
   }
 
+  /// من يجوز أن تطابقه مزامنة هذا الساس باليوزر. الأساسي يطابق كل من لا
+  /// ساس إضافياً له كما كان سابقاً؛ الإضافي يطابق مشتركيه، والمحلي والسابق.
+  static bool belongsToAccount(Subscriber s, String account) {
+    if (account.isEmpty) return s.sasAccount.isEmpty;
+    if (s.sasAccount == account) return true;
+    return s.sasAccount.isEmpty && (s.source == 'local' || s.isFormer);
+  }
+
+  /// يزامن كل الساسات المربوطة واحداً بعد الآخر؛ فشل ساس لا يوقف الباقي.
+  static Future<SasSyncAllResult> syncAll({
+    Duration perAccount = const Duration(minutes: 2),
+  }) async {
+    final accounts = await SasSettings.loadAll();
+    var read = 0, added = 0, updated = 0;
+    final failures = <String, String>{};
+    for (final account in accounts) {
+      try {
+        final result = await sync(SasApiService(account)).timeout(perAccount);
+        read += result.read;
+        added += result.added;
+        updated += result.updated;
+      } catch (e) {
+        failures[account.displayName] = '$e';
+      }
+    }
+    return SasSyncAllResult(
+      accounts: accounts.length,
+      read: read,
+      added: added,
+      updated: updated,
+      failures: failures,
+    );
+  }
+
   static Future<SasSyncResult> sync(SasApiService api) async {
+    final account = api.settings.accountId;
     await TrialGuardService.ensureSasAllowed(
       api.settings.serverUrl,
       api.settings.username,
@@ -188,15 +250,18 @@ class SasSyncService {
       }
 
       final sasId = mapped.sasId;
+      mapped.sasAccount = account;
       var index = -1;
       if (sasId.isNotEmpty) {
         index = AppStore.subscribers.indexWhere(
-          (s) => s.source == 'sas' && s.sasId == sasId,
+          (s) =>
+              s.source == 'sas' && s.sasId == sasId && s.sasAccount == account,
         );
       }
       if (index < 0) {
         index = AppStore.subscribers.indexWhere(
           (s) =>
+              belongsToAccount(s, account) &&
               s.user.trim().toLowerCase() == mapped.user.trim().toLowerCase(),
         );
       }
@@ -233,6 +298,7 @@ class SasSyncService {
             old.active != mapped.active ||
             old.disabled != mapped.disabled ||
             old.source != 'sas' ||
+            old.sasAccount != account ||
             old.sasId != nextSasId;
 
         if (changed) {
@@ -248,6 +314,7 @@ class SasSyncService {
             ..active = mapped.active
             ..disabled = mapped.disabled
             ..source = 'sas'
+            ..sasAccount = account
             ..sasId = nextSasId
             ..sasData = _mergeSasDataPreservingActivation(old, mapped.sasData)
             ..sasOnline = mapped.sasOnline
@@ -267,7 +334,13 @@ class SasSyncService {
       for (final row in rows)
         if (row['profile_name'] is String) row['profile_name'] as String,
     ];
-    await syncPackages(api, extraNames: rowPackages, save: false);
+    await syncPackages(
+      api,
+      extraNames: rowPackages,
+      save: false,
+      // مع عدة ساسات لا تمثل قائمة ساس واحد كل الباقات.
+      complete: account.isEmpty && SasSettings.labels.isEmpty,
+    );
 
     await AppStore.save();
     return SasSyncResult(read: rows.length, added: added, updated: updated);
@@ -279,6 +352,7 @@ class SasSyncService {
     SasApiService api, {
     Iterable<String> extraNames = const [],
     bool save = true,
+    bool complete = true,
   }) async {
     final names = <String>[...extraNames];
     var profilesRead = false;
@@ -311,7 +385,10 @@ class SasSyncService {
     } catch (e) {
       debugPrint('fetchProfiles for packages failed (non-fatal): $e');
     }
-    final added = AppStore.mergeSasPackages(names, complete: profilesRead);
+    final added = AppStore.mergeSasPackages(
+      names,
+      complete: complete && profilesRead,
+    );
     if (save) await AppStore.save();
     return added;
   }
@@ -363,8 +440,10 @@ class SasSyncService {
     if (sessions.isEmpty) return null;
     final connected = _SessionIndex(sessions);
     var online = 0;
+    final account = api.settings.accountId;
     for (final subscriber in AppStore.subscribers) {
-      if (subscriber.source == 'ftth') continue;
+      if (subscriber.source == 'ftth' || subscriber.isFormer) continue;
+      if (subscriber.sasAccount != account) continue;
       final ip = connected.ipOf(subscriber);
       subscriber
         ..sasOnline = ip != null

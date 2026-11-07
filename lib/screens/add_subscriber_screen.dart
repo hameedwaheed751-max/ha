@@ -167,8 +167,32 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
       end.text = fmt(endDate!);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) loadSasLists();
+        _loadSasAccounts();
       });
     }
+  }
+
+  /// الساس الذي يُنشأ فيه المشترك الجديد؛ الفارغ هو الأساسي.
+  String _sasAccount = '';
+  List<SasSettings> _extraAccounts = const [];
+
+  Future<void> _loadSasAccounts() async {
+    try {
+      final extras = await SasSettings.loadExtras();
+      if (mounted) setState(() => _extraAccounts = extras);
+    } catch (_) {}
+  }
+
+  void _pickSasAccount(String? account) {
+    if (account == null || account == _sasAccount) return;
+    setState(() {
+      _sasAccount = account;
+      sasProfiles = [];
+      sasParents = [];
+      selectedProfileId = null;
+      selectedParentId = null;
+    });
+    loadSasLists();
   }
 
   @override
@@ -234,7 +258,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
       sasListsError = null;
     });
     try {
-      final settings = await SasSettings.load();
+      final settings = await SasSettings.forAccount(_sasAccount);
       final api = SasApiService(settings);
 
       // manager endpoint gives the available/current parent.
@@ -483,6 +507,26 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                 ),
               ),
               const SizedBox(height: 10),
+              if (_extraAccounts.isNotEmpty) ...[
+                DropdownButtonFormField<String>(
+                  key: const ValueKey('sas-account-picker'),
+                  initialValue: _sasAccount,
+                  decoration: dec('الساس', Icons.dns_outlined),
+                  items: [
+                    const DropdownMenuItem(
+                      value: '',
+                      child: Text('الساس الأساسي'),
+                    ),
+                    for (final account in _extraAccounts)
+                      DropdownMenuItem(
+                        value: account.accountId,
+                        child: Text(account.displayName),
+                      ),
+                  ],
+                  onChanged: _pickSasAccount,
+                ),
+                const SizedBox(height: 12),
+              ],
               TextField(
                 controller: sasPassword,
                 obscureText: true,
@@ -664,7 +708,9 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                         return;
                       }
                       try {
-                        final settings = await SasSettings.load();
+                        final settings = await SasSettings.forAccount(
+                          _sasAccount,
+                        );
                         final api = SasApiService(settings);
                         final parts = name.text.trim().split(RegExp(r'\s+'));
                         final firstName = parts.isEmpty
@@ -705,6 +751,8 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                       endDate: endDate!,
                       notes: notes.text.trim(),
                       paymentDate: paymentDate.text.trim(),
+                      // المزامنة تتبنّاه في نفس الساس الذي أُنشئ فيه.
+                      sasAccount: wantsSas ? _sasAccount : '',
                     );
                     subscriber.adjustPaidToTarget(
                       pd,
@@ -820,7 +868,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                     // لا نحفظ التعديل محلياً إذا رفضه الخادم.
                     if (s.source == 'sas' && s.sasId.trim().isNotEmpty) {
                       try {
-                        final settings = await SasSettings.load();
+                        final settings = await SasSettings.forSubscriber(s);
                         final api = SasApiService(settings);
                         final requestedName = name.text.trim();
                         final explicitNameChangedInApp =

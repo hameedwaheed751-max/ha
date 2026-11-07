@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
+import 'extra_sas_section.dart';
 
 class SasSettingsScreen extends StatefulWidget {
   const SasSettingsScreen({super.key});
@@ -309,6 +310,8 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                         label: const Text('حفظ إعدادات SAS'),
                       ),
                     ),
+                    const SizedBox(height: 14),
+                    const ExtraSasSection(),
                     const SizedBox(height: 22),
                     const Divider(),
                     const SizedBox(height: 10),
@@ -332,7 +335,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                           Icons.cloud_off,
                           color: Colors.deepOrange,
                         ),
-                        label: const Text('حذف مشتركي SAS فقط'),
+                        label: const Text('حذف مشتركي الساس الأساسي فقط'),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -364,11 +367,13 @@ class DeleteSubscribersDialog extends StatelessWidget {
     required this.all,
     required this.total,
     required this.debtors,
+    this.title,
   });
 
   final bool all;
   final int total;
   final List<Subscriber> debtors;
+  final String? title;
 
   @override
   Widget build(BuildContext context) {
@@ -377,7 +382,7 @@ class DeleteSubscribersDialog extends StatelessWidget {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: AlertDialog(
-        title: Text(all ? 'حذف جميع المشتركين؟' : 'حذف مشتركي SAS؟'),
+        title: Text(title ?? (all ? 'حذف جميع المشتركين؟' : 'حذف مشتركي SAS؟')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

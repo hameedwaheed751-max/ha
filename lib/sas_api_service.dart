@@ -12,6 +12,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'sas_http_overrides.dart'
     if (dart.library.io) 'sas_http_overrides_io.dart';
+import 'models.dart' show Subscriber;
 import 'services/runtime_app_config.dart';
 
 class SasSettings {
@@ -30,12 +31,216 @@ class SasSettings {
   String password;
   String webProxyUrl;
 
+  /// فارغ للساس الأساسي؛ للساسات الإضافية معرف ثابت يُحفظ على مشتركيها.
+  final String accountId;
+  String label;
+
   SasSettings({
     required this.serverUrl,
     required this.username,
     required this.password,
     this.webProxyUrl = '',
+    this.accountId = '',
+    this.label = '',
   });
+
+  bool get isPrimary => accountId.isEmpty;
+
+  String get displayName => label.trim().isNotEmpty
+      ? label.trim()
+      : (isPrimary ? 'الساس الأساسي' : username);
+
+  static const _extrasKey = 'sas_extra_accounts';
+  static String _extraPassKey(String id) => 'sas_extra_pass_$id';
+
+  static String newAccountId() =>
+      'sas${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+
+  /// إعدادات الساس الذي يتبعه المشترك.
+  static Future<SasSettings> forSubscriber(Subscriber subscriber) =>
+      forAccount(subscriber.sasAccount);
+
+  static Future<SasSettings> forAccount(String accountId) async {
+    if (accountId.trim().isEmpty) return load();
+    final extras = await loadExtras();
+    for (final account in extras) {
+      if (account.accountId == accountId) return account;
+    }
+    throw SasApiException(
+      'ساس هذا المشترك لم يعد مربوطاً. أعد إضافته من ربط SAS Radius',
+    );
+  }
+
+  /// الأساسي أولاً ثم الإضافية؛ الأساسي يُتجاوز إذا لم يُضبط.
+  static Future<List<SasSettings>> loadAll() async {
+    final primary = await load();
+    final configured =
+        primary.serverUrl.trim().isNotEmpty && primary.password.isNotEmpty;
+    return [if (configured) primary, ...await loadExtras()];
+  }
+
+  Map<String, dynamic> _extraJson({bool withPassword = false}) => {
+    'label': label.trim(),
+    'serverUrl': _normalizeServerUrl(serverUrl),
+    'username': username.trim(),
+    if (_normalizeProxyUrl(webProxyUrl).isNotEmpty)
+      'webProxyUrl': _normalizeProxyUrl(webProxyUrl),
+    if (withPassword) 'password': password,
+  };
+
+  static SasSettings? _extraFrom(String id, dynamic value, String password) {
+    if (value is! Map || id.trim().isEmpty) return null;
+    final server = _normalizeServerUrl('${value['serverUrl'] ?? ''}');
+    final user = '${value['username'] ?? ''}'.trim();
+    if (server.isEmpty || user.isEmpty) return null;
+    final proxy = '${value['webProxyUrl'] ?? ''}'.trim();
+    return SasSettings(
+      accountId: id,
+      label: '${value['label'] ?? ''}'.trim(),
+      serverUrl: server,
+      username: user,
+      password: password.isNotEmpty ? password : '${value['password'] ?? ''}',
+      webProxyUrl: proxy.isNotEmpty
+          ? _normalizeProxyUrl(proxy)
+          : _normalizeProxyUrl(_proxyEnv),
+    );
+  }
+
+  static Future<String> _readExtraPassword(
+    SharedPreferences p,
+    String id,
+  ) async {
+    try {
+      final v = await SasApiService._secureStorage.read(key: _extraPassKey(id));
+      if (v != null && v.isNotEmpty) return v;
+    } catch (_) {}
+    return p.getString(_extraPassKey(id)) ?? '';
+  }
+
+  static Future<void> _writeExtraPassword(
+    SharedPreferences p,
+    String id,
+    String password,
+  ) async {
+    try {
+      await SasApiService._secureStorage.write(
+        key: _extraPassKey(id),
+        value: password,
+      );
+    } catch (_) {
+      await p.setString(_extraPassKey(id), password);
+    }
+  }
+
+  /// الساسات الإضافية: من Firebase إن أمكن، وإلا من نسخة الجهاز.
+  static Future<List<SasSettings>> loadExtras() async {
+    final p = await SharedPreferences.getInstance();
+    Map<String, dynamic> stored = {};
+    try {
+      final raw = p.getString(_extrasKey);
+      if (raw != null) stored = Map<String, dynamic>.from(jsonDecode(raw));
+    } catch (_) {}
+
+    final uid = _uid;
+    if (uid != null) {
+      try {
+        final snapshot = await FirebaseDatabase.instance
+            .ref('agents/$uid/sasAccounts')
+            .get()
+            .timeout(const Duration(seconds: 5));
+        final value = snapshot.value;
+        final remote = <String, dynamic>{};
+        if (value is Map) {
+          for (final entry in value.entries) {
+            if (entry.value is! Map) continue;
+            final account = Map<String, dynamic>.from(entry.value as Map);
+            final password = '${account.remove('password') ?? ''}';
+            if (password.isNotEmpty) {
+              await _writeExtraPassword(p, '${entry.key}', password);
+            }
+            remote['${entry.key}'] = account;
+          }
+        }
+        stored = remote;
+        await p.setString(_extrasKey, jsonEncode(stored));
+      } catch (e) {
+        debugPrint('SAS extras pull failed (using device copy): $e');
+      }
+    }
+
+    final result = <SasSettings>[];
+    for (final entry in stored.entries) {
+      final account = _extraFrom(
+        entry.key,
+        entry.value,
+        await _readExtraPassword(p, entry.key),
+      );
+      if (account != null) result.add(account);
+    }
+    result.sort((a, b) => a.accountId.compareTo(b.accountId));
+    rememberLabels(result);
+    return result;
+  }
+
+  /// أسماء الساسات لعرضها على بطاقات المشتركين دون انتظار الشبكة.
+  static final Map<String, String> labels = {};
+
+  static void rememberLabels(List<SasSettings> extras) {
+    labels
+      ..clear()
+      ..addEntries(extras.map((a) => MapEntry(a.accountId, a.displayName)));
+  }
+
+  Future<void> saveExtra() async {
+    if (isPrimary) throw SasApiException('هذا هو الساس الأساسي');
+    final cleanedServerUrl = _normalizeServerUrl(serverUrl);
+    if (cleanedServerUrl.isEmpty || username.trim().isEmpty) {
+      throw SasApiException('أدخل رابط الساس واليوزر');
+    }
+    // السحابة أولاً: نسخة الجهاز تُستبدل بها عند كل تحميل.
+    final uid = _uid;
+    if (uid != null) {
+      await FirebaseDatabase.instance
+          .ref('agents/$uid/sasAccounts/$accountId')
+          .set(_extraJson(withPassword: true))
+          .timeout(const Duration(seconds: 8));
+    }
+    final p = await SharedPreferences.getInstance();
+    Map<String, dynamic> stored = {};
+    try {
+      final raw = p.getString(_extrasKey);
+      if (raw != null) stored = Map<String, dynamic>.from(jsonDecode(raw));
+    } catch (_) {}
+    stored[accountId] = _extraJson();
+    await p.setString(_extrasKey, jsonEncode(stored));
+    await _writeExtraPassword(p, accountId, password);
+    labels[accountId] = displayName;
+  }
+
+  static Future<void> removeExtra(String accountId) async {
+    if (accountId.trim().isEmpty) return;
+    final uid = _uid;
+    if (uid != null) {
+      await FirebaseDatabase.instance
+          .ref('agents/$uid/sasAccounts/$accountId')
+          .remove()
+          .timeout(const Duration(seconds: 8));
+    }
+    final p = await SharedPreferences.getInstance();
+    try {
+      final raw = p.getString(_extrasKey);
+      if (raw != null) {
+        final stored = Map<String, dynamic>.from(jsonDecode(raw))
+          ..remove(accountId);
+        await p.setString(_extrasKey, jsonEncode(stored));
+      }
+    } catch (_) {}
+    try {
+      await SasApiService._secureStorage.delete(key: _extraPassKey(accountId));
+    } catch (_) {}
+    await p.remove(_extraPassKey(accountId));
+    labels.remove(accountId);
+  }
 
   static String _normalizeServerUrl(String value) {
     var s = value.trim();
@@ -414,8 +619,8 @@ class SasApiService {
     'PROXY_TOKEN',
     defaultValue: '',
   );
-  static final Map<int, List<Map<String, dynamic>>> _extensionCache = {};
-  static final Map<int, DateTime> _extensionCacheAt = {};
+  static final Map<String, List<Map<String, dynamic>>> _extensionCache = {};
+  static final Map<String, DateTime> _extensionCacheAt = {};
 
   static const _passphrase = 'abcdefghijuklmno0123456789012345';
   final SasSettings settings;
@@ -1577,8 +1782,11 @@ class SasApiService {
       throw SasApiException('لم يرجع SAS البروفايل الحالي للمشترك');
     }
 
-    final cachedAt = _extensionCacheAt[currentProfileId];
-    final cached = _extensionCache[currentProfileId];
+    // معرفات الباقات تتكرر بين ساسات مختلفة.
+    final cacheKey =
+        '${settings.serverUrl}|${settings.username}|$currentProfileId';
+    final cachedAt = _extensionCacheAt[cacheKey];
+    final cached = _extensionCache[cacheKey];
     List<Map<String, dynamic>> rows;
 
     if (cached != null &&
@@ -1588,10 +1796,10 @@ class SasApiService {
     } else {
       final allowed = await _get('allowedExtensions/$currentProfileId');
       rows = _extractRows(allowed);
-      _extensionCache[currentProfileId] = rows
+      _extensionCache[cacheKey] = rows
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
-      _extensionCacheAt[currentProfileId] = DateTime.now();
+      _extensionCacheAt[cacheKey] = DateTime.now();
     }
 
     if (rows.isEmpty) {

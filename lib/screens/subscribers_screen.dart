@@ -70,6 +70,12 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   void initState() {
     super.initState();
     _loadColumnPreferences();
+    // أسماء الساسات الإضافية لبطاقات المشتركين.
+    if (AppStore.subscribers.any((s) => s.sasAccount.isNotEmpty)) {
+      SasSettings.loadExtras().then((_) {
+        if (mounted) setState(() {});
+      }, onError: (_) {});
+    }
     _filteredSubscribers = _buildFilteredSubscribers();
     AppStore.subscribersChange.addListener(_onSubscribersChanged);
   }
@@ -272,13 +278,24 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     setState(() => _isRefreshing = true);
     String message;
     try {
-      final settings = await SasSettings.load();
-      if (settings.username.trim().isEmpty || settings.password.isEmpty) {
+      final accounts = await SasSettings.loadAll();
+      if (accounts.isEmpty) {
         throw Exception('أكمل إعدادات ربط SAS أولاً');
       }
-      final online = await SasSyncService.refreshConnections(
-        SasApiService(settings),
-      ).timeout(const Duration(seconds: 30));
+      // كل ساس يحدّث متصلي مشتركيه؛ فشل أحدها لا يُلغي نتيجة الباقي.
+      int? online;
+      Object? lastError;
+      for (final settings in accounts) {
+        try {
+          final count = await SasSyncService.refreshConnections(
+            SasApiService(settings),
+          ).timeout(const Duration(seconds: 30));
+          if (count != null) online = (online ?? 0) + count;
+        } catch (e) {
+          lastError = e;
+        }
+      }
+      if (online == null && lastError != null) throw lastError;
       if (online != null) await AppStore.save();
       message = online == null
           ? 'لم يرجع SAS أي جلسة متصلة'
@@ -304,8 +321,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     if (syncing) return;
     setState(() => syncing = true);
     try {
-      final settings = await SasSettings.load();
-      if (settings.username.trim().isEmpty || settings.password.isEmpty) {
+      final result = await SasSyncService.syncAll();
+      if (result.accounts == 0) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('أكمل إعدادات ربط SAS أولاً')),
@@ -313,23 +330,14 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         }
         return;
       }
-
-      final api = SasApiService(settings);
-      final result = await SasSyncService.sync(api).timeout(
-        const Duration(minutes: 2),
-        onTimeout: () => throw Exception('انتهت مهلة المزامنة بعد دقيقتين'),
-      );
+      if (result.allFailed) throw Exception(result.failures.values.first);
       AppStore.lastSasSync = DateTime.now();
       await AppStore.save();
 
       if (mounted) {
         setState(() => selected = null);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'تمت المزامنة — جديد ${result.added}، محدث ${result.updated}، مقروء ${result.read}',
-            ),
-          ),
+          SnackBar(content: Text('تمت المزامنة — ${result.summary}')),
         );
       }
     } catch (e) {
@@ -1194,7 +1202,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     final activationPayment = await _confirmActivation(s);
     if (activationPayment == null) return;
     try {
-      final settings = await SasSettings.load();
+      final settings = await SasSettings.forSubscriber(s);
       if (settings.username.trim().isEmpty || settings.password.isEmpty) {
         throw Exception('أكمل إعدادات ربط SAS أولاً');
       }
@@ -1483,7 +1491,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     }
 
                     try {
-                      final settings = await SasSettings.load();
+                      final settings = await SasSettings.forSubscriber(s);
                       if (settings.username.trim().isEmpty ||
                           settings.password.isEmpty) {
                         throw Exception('أكمل إعدادات ربط SAS أولاً');
@@ -1569,7 +1577,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     }
 
                     try {
-                      final settings = await SasSettings.load();
+                      final settings = await SasSettings.forSubscriber(s);
                       if (settings.username.trim().isEmpty ||
                           settings.password.isEmpty) {
                         throw Exception('أكمل إعدادات ربط SAS أولاً');
@@ -1776,7 +1784,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         builder: (ctx, setLocal) {
           Future<void> loadProfiles() async {
             try {
-              final settings = await SasSettings.load();
+              final settings = await SasSettings.forSubscriber(s);
               final api = SasApiService(settings);
               final rows = await api.fetchExtendProfiles(
                 int.parse(s.sasId.toString()),
@@ -1928,7 +1936,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                             return;
                           }
                           try {
-                            final settings = await SasSettings.load();
+                            final settings = await SasSettings.forSubscriber(s);
                             final api = SasApiService(settings);
                             final transactionId = _newGuid();
 
@@ -2025,7 +2033,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
 
     try {
-      final settings = await SasSettings.load();
+      final settings = await SasSettings.forSubscriber(s);
       final api = SasApiService(settings);
       if (!mounted) return;
       showDialog(
@@ -3312,6 +3320,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             await _changePackage(s);
             break;
           case 'disable':
+            if (_blockFormer(s)) break;
             final rawId = s.sasId.trim().isNotEmpty
                 ? s.sasId.trim()
                 : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
@@ -3329,7 +3338,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               break;
             }
             try {
-              final settings = await SasSettings.load();
+              final settings = await SasSettings.forSubscriber(s);
               if (settings.username.trim().isEmpty ||
                   settings.password.isEmpty) {
                 throw Exception('أكمل إعدادات ربط SAS أولاً');
@@ -3359,6 +3368,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             }
             break;
           case 'enable':
+            if (_blockFormer(s)) break;
             final rawId = s.sasId.trim().isNotEmpty
                 ? s.sasId.trim()
                 : (s.sasData['id'] ?? s.sasData['user_id'] ?? '')
@@ -3378,7 +3388,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               break;
             }
             try {
-              final settings = await SasSettings.load();
+              final settings = await SasSettings.forSubscriber(s);
               if (settings.username.trim().isEmpty ||
                   settings.password.isEmpty) {
                 throw Exception('أكمل إعدادات ربط SAS أولاً');
@@ -4060,6 +4070,13 @@ class _SubscriberCard extends StatelessWidget {
                   runSpacing: 4,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
+                    // اسم الساس يظهر لمشتركي الساسات الإضافية فقط.
+                    if (s.sasAccount.isNotEmpty)
+                      _pill(
+                        SasSettings.labels[s.sasAccount] ?? 'ساس آخر',
+                        Icons.dns_rounded,
+                        Colors.indigo,
+                      ),
                     if (hasDebt)
                       _pill(
                         'دين: ${moneyText(s.remaining)}',

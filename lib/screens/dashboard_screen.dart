@@ -1851,8 +1851,8 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _syncSubscribersFromDashboard() async {
     try {
-      final settings = await SasSettings.load();
-      if (settings.username.trim().isEmpty || settings.password.isEmpty) {
+      final result = await SasSyncService.syncAll();
+      if (result.accounts == 0) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('أكمل إعدادات ربط SAS أولاً')),
@@ -1860,21 +1860,12 @@ class _DashboardScreenState extends State<DashboardScreen>
         }
         return;
       }
-
-      final api = SasApiService(settings);
-      final result = await SasSyncService.sync(api).timeout(
-        const Duration(minutes: 2),
-        onTimeout: () => throw Exception('انتهت مهلة المزامنة بعد دقيقتين'),
-      );
+      if (result.allFailed) throw Exception(result.failures.values.first);
       AppStore.lastSasSync = DateTime.now();
       await AppStore.save();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'تمت المزامنة — جديد ${result.added}، محدث ${result.updated}، مقروء ${result.read}',
-            ),
-          ),
+          SnackBar(content: Text('تمت المزامنة — ${result.summary}')),
         );
         setState(() {});
       }

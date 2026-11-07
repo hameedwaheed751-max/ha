@@ -806,6 +806,7 @@ class Subscriber {
     this.points = 0,
     this.source = 'local',
     this.sasId = '',
+    this.sasAccount = '',
     this.sasOnline = false,
     Map<String, dynamic>? sasData,
     List<PaymentRecord>? payments,
@@ -848,6 +849,9 @@ class Subscriber {
   Map<String, dynamic> sasData;
   List<PaymentRecord> payments;
   List<InvoiceRecord> invoices;
+
+  /// الساس الذي جاء منه المشترك؛ الفارغ هو الساس الأساسي.
+  String sasAccount;
 
   /// مشترك أُبقي بعد حذف ساسه لأن عليه ديناً: لا عمليات ساس عليه.
   static const String formerSource = 'former';
@@ -1294,6 +1298,7 @@ class Subscriber {
     'points': points,
     'source': source,
     'sasId': sasId,
+    if (sasAccount.isNotEmpty) 'sasAccount': sasAccount,
     'sasOnline': sasOnline,
     'sasData': sasData,
     'payments': payments.map((e) => e.toJson()).toList(),
@@ -1333,6 +1338,7 @@ class Subscriber {
       points: j['points'] ?? 0,
       source: j['source'] ?? 'local',
       sasId: (j['sasId'] ?? '').toString(),
+      sasAccount: (j['sasAccount'] ?? '').toString(),
       sasOnline: j['sasOnline'] == true || _detectOnline(sasData),
       sasData: sasData,
       payments: j['payments'] is List
@@ -3373,22 +3379,35 @@ class AppStore {
     }
   }
 
-  static bool _isSasSubscriber(Subscriber s) => s.source == 'sas';
+  /// مشتركو ساس واحد؛ الفارغ هو الساس الأساسي.
+  static bool Function(Subscriber) _ofSas(String account) =>
+      (s) => s.source == 'sas' && s.sasAccount == account;
+
+  static bool Function(Subscriber) _deleteTarget(bool all, String account) =>
+      all ? (_) => true : _ofSas(account);
 
   /// المدينون بين من سيحذفهم الزر، ليُسأل الوكيل عنهم قبل الحذف.
-  static List<Subscriber> debtorsAmong({required bool all}) => [
-    for (final s in subscribers)
-      if ((all || _isSasSubscriber(s)) && s.hasDebt) s,
-  ];
+  static List<Subscriber> debtorsAmong({
+    required bool all,
+    String account = '',
+  }) {
+    final target = _deleteTarget(all, account);
+    return [
+      for (final s in subscribers)
+        if (target(s) && s.hasDebt) s,
+    ];
+  }
 
-  static int countToDelete({required bool all}) =>
-      all ? subscribers.length : subscribers.where(_isSasSubscriber).length;
+  static int countToDelete({required bool all, String account = ''}) =>
+      subscribers.where(_deleteTarget(all, account)).length;
 
   static Future<void> deleteAllSubscribers({bool keepDebtors = false}) =>
       _removeSubscribers((_) => true, keepDebtors: keepDebtors);
 
-  static Future<void> deleteSasSubscribersOnly({bool keepDebtors = false}) =>
-      _removeSubscribers(_isSasSubscriber, keepDebtors: keepDebtors);
+  static Future<void> deleteSasSubscribersOnly({
+    bool keepDebtors = false,
+    String account = '',
+  }) => _removeSubscribers(_ofSas(account), keepDebtors: keepDebtors);
 
   /// المدين المُبقى يبقى بدينه ووصولاته؛ مشترك الساس أو FTTH يصير «سابقاً».
   static Future<void> _removeSubscribers(
@@ -3396,13 +3415,15 @@ class AppStore {
     required bool keepDebtors,
   }) async {
     if (!keepDebtors) return _deleteSubscribersWhere(target);
-    final archived = <Subscriber, String>{};
+    final archived = <Subscriber, (String, String)>{};
     for (final s in subscribers) {
       if (!target(s) || !s.hasDebt) continue;
       if (s.source == 'sas' || s.source == 'ftth') {
-        archived[s] = s.source;
+        archived[s] = (s.source, s.sasAccount);
+        // بلا ساس: أي ساس يجده لاحقاً بنفس اليوزر يستعيده بدينه.
         s
           ..source = Subscriber.formerSource
+          ..sasAccount = ''
           ..sasOnline = false
           ..liveOnline = null;
       }
@@ -3411,7 +3432,11 @@ class AppStore {
       await _deleteSubscribersWhere((s) => target(s) && !s.hasDebt);
       if (archived.isNotEmpty) await save();
     } catch (_) {
-      archived.forEach((s, source) => s.source = source);
+      archived.forEach((s, previous) {
+        s
+          ..source = previous.$1
+          ..sasAccount = previous.$2;
+      });
       rethrow;
     }
   }

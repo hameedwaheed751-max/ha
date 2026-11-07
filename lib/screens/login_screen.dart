@@ -7,7 +7,6 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models.dart';
-import '../sas_api_service.dart';
 import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
 import '../services/app_startup.dart';
@@ -183,11 +182,10 @@ class _LoginScreenState extends State<LoginScreen> {
       Future<void>(() async {
         await TrialGuardService.claimExistingPhone();
         try {
-          final settings = await SasSettings.load();
-          if (settings.username.trim().isNotEmpty &&
-              settings.password.isNotEmpty) {
-            final api = SasApiService(settings);
-            await SasSyncService.sync(api).timeout(const Duration(seconds: 25));
+          final result = await SasSyncService.syncAll(
+            perAccount: const Duration(seconds: 25),
+          );
+          if (result.accounts > 0 && !result.allFailed) {
             AppStore.lastSasSync = DateTime.now();
             await AppStore.save();
           }
