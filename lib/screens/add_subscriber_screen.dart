@@ -161,8 +161,9 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
       _openedBillingMonthKey = s.billingMonthKey;
       _populateFromSubscriber(s);
     } else {
-      startDate = DateTime.now();
-      endDate = DateTime.now().add(const Duration(days: 30));
+      final now = DateTime.now();
+      startDate = DateTime(now.year, now.month, now.day);
+      endDate = startDate;
       start.text = fmt(startDate!);
       end.text = fmt(endDate!);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -598,23 +599,26 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ],
-            const SizedBox(height: 12),
-            TextField(
-              controller: start,
-              readOnly: true,
-              onTap: () => pick(true),
-              decoration: dec(
-                'تاريخ بداية الاشتراك',
-                Icons.calendar_today_outlined,
+            // المشترك الجديد غير مفعّل؛ تواريخه تأتي من الساس عند التفعيل.
+            if (widget.subscriber != null) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: start,
+                readOnly: true,
+                onTap: () => pick(true),
+                decoration: dec(
+                  'تاريخ بداية الاشتراك',
+                  Icons.calendar_today_outlined,
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: end,
-              readOnly: true,
-              onTap: () => pick(false),
-              decoration: dec('تاريخ انتهاء الاشتراك', Icons.event_outlined),
-            ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: end,
+                readOnly: true,
+                onTap: () => pick(false),
+                decoration: dec('تاريخ انتهاء الاشتراك', Icons.event_outlined),
+              ),
+            ],
             const SizedBox(height: 12),
             TextField(
               controller: notes,
@@ -751,6 +755,8 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                       endDate: endDate!,
                       notes: notes.text.trim(),
                       paymentDate: paymentDate.text.trim(),
+                      // التفعيل من الساس؛ حتى ذلك الحين يظهر «غير مفعّل».
+                      active: false,
                       // المزامنة تتبنّاه في نفس الساس الذي أُنشئ فيه.
                       sasAccount: wantsSas ? _sasAccount : '',
                     );

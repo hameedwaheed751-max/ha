@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled/models.dart';
 import 'package:untitled/sas_api_service.dart';
 import 'package:untitled/sas_sync_service.dart';
-import 'package:untitled/screens/extra_sas_section.dart';
+import 'package:untitled/screens/sas_settings_screen.dart';
 
 /// ساس وهمي: الأساسي بمعرف فارغ، والإضافي بمعرفه.
 class _FakeSas extends SasApiService {
@@ -85,22 +85,44 @@ void main() {
     expect(Subscriber.fromJson({'user': 'old'}).sasAccount, '');
   });
 
-  test('the same username in two SAS stays two subscribers', () async {
+  test('the same username in two SAS stays one card with two ids', () async {
     await SasSyncService.sync(_FakeSas('', [_row('7', 'ali', 'علي أ')]));
     SasSettings.labels['k2'] = 'ساس k2';
-    await SasSyncService.sync(_FakeSas('k2', [_row('7', 'ali', 'علي ب')]));
+    await SasSyncService.sync(_FakeSas('k2', [_row('31', 'ali', 'علي ب')]));
 
-    expect(AppStore.subscribers.length, 2);
-    final primary = AppStore.subscribers.firstWhere((s) => s.sasAccount == '');
-    final extra = AppStore.subscribers.firstWhere((s) => s.sasAccount == 'k2');
-    expect(primary.name, 'علي أ');
-    expect(extra.name, 'علي ب');
+    final s = AppStore.subscribers.single;
+    expect(s.sasAccount, '');
+    expect(s.name, 'علي أ', reason: 'the reference SAS owns the data');
+    expect(s.inSeveralSas, isTrue);
+    expect(s.idIn(''), '7');
+    expect(s.idIn('k2'), '31');
 
-    // مزامنة الأساسي ثانيةً لا تمس مشترك الساس الآخر بنفس اليوزر والمعرف.
+    // الوكيل يختار الساس الآخر مرجعاً: تتبعه العمليات ومزامنته.
+    s.useSas('k2');
+    expect(s.sasAccount, 'k2');
+    expect(s.sasId, '31');
+    await SasSyncService.sync(_FakeSas('k2', [_row('31', 'ali', 'علي ب')]));
     await SasSyncService.sync(_FakeSas('', [_row('7', 'ali', 'علي أ2')]));
-    expect(primary.name, 'علي أ2');
-    expect(extra.name, 'علي ب');
-    expect(extra.sasAccount, 'k2');
+    expect(AppStore.subscribers.length, 1);
+    expect(s.name, 'علي ب');
+    expect(s.idIn(''), '7');
+
+    final decoded = Subscriber.fromJson(s.toJson());
+    expect(decoded.sasAccount, 'k2');
+    expect(decoded.idIn(''), '7');
+    expect(decoded.idIn('k2'), '31');
+  });
+
+  test('deleting one SAS moves a shared subscriber to the other', () async {
+    final shared = _sub('ali', sasId: '7')..sasIds['k2'] = '31';
+    AppStore.subscribers.addAll([shared, _sub('only', sasId: '8')]);
+    expect(AppStore.countToDelete(all: false), 1);
+
+    await AppStore.deleteSasSubscribersOnly();
+    expect(AppStore.subscribers.single, same(shared));
+    expect(shared.sasAccount, 'k2');
+    expect(shared.sasId, '31');
+    expect(shared.inSeveralSas, isFalse);
   });
 
   test('a primary-only agent syncs exactly as before', () async {
@@ -163,53 +185,106 @@ void main() {
     expect(kept.sasAccount, '');
   });
 
+  SasSettings primary() => SasSettings(
+    serverUrl: 'https://one.example.com',
+    username: 'm1',
+    password: 'p',
+    label: 'ساس المنصور',
+    company: 'شركة الأفق',
+  );
+
+  Future<void> pumpScreen(
+    WidgetTester tester, {
+    required bool paid,
+    List<SasSettings> extras = const [],
+  }) async {
+    tester.view.physicalSize = const Size(400, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SasSettingsScreen(
+          loadPrimary: () async => primary(),
+          loadExtras: () async => extras,
+          planAllowsExtra: () => paid,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('on the free trial adding a second SAS asks for a paid plan', (
     tester,
   ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: ExtraSasSection(
-            planAllowsExtra: () => false,
-            loadAccounts: () async => const [],
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
+    await pumpScreen(tester, paid: false);
     await tester.tap(find.text('إضافة ساس آخر'));
     await tester.pumpAndSettle();
     expect(find.text('تحتاج إلى خطة مدفوعة'), findsOneWidget);
-    expect(find.text(ExtraSasSection.paidPlanMessage), findsOneWidget);
-    expect(find.byType(ExtraSasDialog), findsNothing);
+    expect(find.text(SasSettingsScreen.paidPlanMessage), findsOneWidget);
+    expect(find.byType(SasAccountDialog), findsNothing);
   });
 
-  testWidgets('on a paid plan the extra SAS form opens', (tester) async {
-    AppStore.sasUsername = 'main';
-    addTearDown(() => AppStore.sasUsername = '');
+  testWidgets('every SAS is a card with its company and the same menu', (
+    tester,
+  ) async {
+    await pumpScreen(
+      tester,
+      paid: true,
+      extras: [
+        SasSettings(
+          serverUrl: 'https://two.example.com',
+          username: 'm2',
+          password: 'p',
+          accountId: 'k2',
+          label: 'ساس الكرادة',
+        ),
+      ],
+    );
+    expect(find.byType(SasAccountCard), findsNWidgets(2));
+    expect(find.text('شركة الأفق'), findsOneWidget);
+    expect(find.text('ساس المنصور'), findsOneWidget);
+    expect(find.text('أساسي'), findsOneWidget);
+    expect(find.text('ساس الكرادة'), findsOneWidget);
+    expect(find.text('شركة غير محددة'), findsOneWidget);
+
+    for (final card in ['sas-', 'sas-k2']) {
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ValueKey(card)),
+          matching: find.byType(PopupMenuButton<SasCardAction>),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('مزامنة'), findsOneWidget);
+      expect(find.text('تعديل'), findsOneWidget);
+      expect(find.text('حذف مشتركي هذا الساس'), findsOneWidget);
+      expect(find.text('حذف الساس'), findsOneWidget);
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+    }
+
+    await tester.tap(find.text('إضافة ساس آخر'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SasAccountDialog), findsOneWidget);
+    expect(find.text('اسم الشركة'), findsOneWidget);
+  });
+
+  testWidgets('deleting a SAS shows its company and notes', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: ExtraSasSection(
-            planAllowsExtra: () => true,
-            loadAccounts: () async => [
-              SasSettings(
-                serverUrl: 'https://two.example.com',
-                username: 'm2',
-                password: 'p',
-                accountId: 'k2',
-                label: 'ساس الكرادة',
-              ),
-            ],
-          ),
+        home: DeleteSubscribersDialog(
+          all: false,
+          total: 3,
+          debtors: [_sub('owes', debt: 9000)],
+          title: 'حذف ساس الكرادة؟',
+          company: 'شركة الأفق',
+          notes: const ['ملاحظة تجريبية'],
         ),
       ),
     );
-    await tester.pumpAndSettle();
-    expect(find.text('ساس الكرادة'), findsOneWidget);
-    await tester.tap(find.text('إضافة ساس آخر'));
-    await tester.pumpAndSettle();
-    expect(find.byType(ExtraSasDialog), findsOneWidget);
-    expect(find.text('تحتاج إلى خطة مدفوعة'), findsNothing);
+    expect(find.text('شركة الأفق'), findsOneWidget);
+    expect(find.text('حذف ساس الكرادة؟'), findsOneWidget);
+    expect(find.text('ملاحظة تجريبية'), findsOneWidget);
+    expect(find.textContaining('بينهم 1 مدين'), findsOneWidget);
   });
 }

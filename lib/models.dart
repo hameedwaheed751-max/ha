@@ -807,6 +807,7 @@ class Subscriber {
     this.source = 'local',
     this.sasId = '',
     this.sasAccount = '',
+    Map<String, String>? sasIds,
     this.sasOnline = false,
     Map<String, dynamic>? sasData,
     List<PaymentRecord>? payments,
@@ -816,6 +817,7 @@ class Subscriber {
        payments = payments ?? <PaymentRecord>[],
        invoices = invoices ?? <InvoiceRecord>[],
        sasData = sasData ?? <String, dynamic>{},
+       sasIds = sasIds ?? <String, String>{},
        _billingMonthKeyNeedsPersistence = billingMonthKeyWasMissing,
        _billingMonthKey = billingMonthKey?.trim().isNotEmpty == true
            ? billingMonthKey!.trim()
@@ -850,13 +852,67 @@ class Subscriber {
   List<PaymentRecord> payments;
   List<InvoiceRecord> invoices;
 
-  /// الساس الذي جاء منه المشترك؛ الفارغ هو الساس الأساسي.
+  /// الساس المرجع للمشترك؛ الفارغ هو الساس الأساسي. منه تُقرأ بياناته وإليه
+  /// تُرسل عملياته.
   String sasAccount;
+
+  /// معرف المشترك في كل ساس وُجد فيه بنفس اليوزر، ليبقى بطاقة واحدة.
+  final Map<String, String> sasIds;
+
+  /// مفتاح Firebase لا يقبل الفراغ، فيُحفظ الأساسي بهذا الاسم.
+  static const String _primarySasKey = '_main';
+
+  /// معرفه في ساس معين، أو null إذا لم يُر فيه.
+  String? idIn(String account) {
+    final id = sasIds[account];
+    if (id != null && id.isNotEmpty) return id;
+    if (source == 'sas' && sasAccount == account && sasId.isNotEmpty) {
+      return sasId;
+    }
+    return null;
+  }
+
+  /// الساسات التي يوجد فيها المشترك، والمرجع منها دائماً.
+  Set<String> get sasPresence => {
+    ...sasIds.keys,
+    if (source == 'sas') sasAccount,
+  };
+
+  bool get inSeveralSas => sasPresence.length > 1;
+
+  /// يجعل ساساً آخر يوجد فيه المشترك هو المرجع لعملياته.
+  void useSas(String account) {
+    final id = sasIds[account];
+    if (id == null || account == sasAccount) return;
+    // معرف المرجع لا يُخزن في sasIds؛ المرجع القديم يصير وجوداً فقط.
+    if (source == 'sas' && sasId.isNotEmpty) sasIds[sasAccount] = sasId;
+    sasIds.remove(account);
+    sasAccount = account;
+    sasId = id;
+  }
+
+  /// يُبعد ساساً حُذف؛ إن كان المرجع ينتقل إلى ساس آخر يوجد فيه.
+  /// يرجع false إذا لم يبقَ له ساس آخر.
+  bool detachSas(String account) {
+    if (sasAccount != account) {
+      sasIds.remove(account);
+      return true;
+    }
+    sasIds.remove(account);
+    if (sasIds.isEmpty) return false;
+    final next = sasIds.keys.first;
+    sasId = sasIds.remove(next)!;
+    sasAccount = next;
+    return true;
+  }
 
   /// مشترك أُبقي بعد حذف ساسه لأن عليه ديناً: لا عمليات ساس عليه.
   static const String formerSource = 'former';
   bool get isFormer => source == formerSource;
   bool get hasDebt => remaining > 0.0001;
+
+  /// أُضيف من التطبيق ولم يُفعَّل بعد من الساس.
+  bool get awaitingActivation => source == 'local' && !active && !disabled;
 
   double get carriedDebt => _carriedDebt ?? 0;
   set carriedDebt(double value) => _carriedDebt = value;
@@ -1299,6 +1355,11 @@ class Subscriber {
     'source': source,
     'sasId': sasId,
     if (sasAccount.isNotEmpty) 'sasAccount': sasAccount,
+    if (sasIds.isNotEmpty)
+      'sasIds': {
+        for (final e in sasIds.entries)
+          (e.key.isEmpty ? _primarySasKey : e.key): e.value,
+      },
     'sasOnline': sasOnline,
     'sasData': sasData,
     'payments': payments.map((e) => e.toJson()).toList(),
@@ -1339,6 +1400,12 @@ class Subscriber {
       source: j['source'] ?? 'local',
       sasId: (j['sasId'] ?? '').toString(),
       sasAccount: (j['sasAccount'] ?? '').toString(),
+      sasIds: j['sasIds'] is Map
+          ? {
+              for (final e in (j['sasIds'] as Map).entries)
+                (e.key == _primarySasKey ? '' : '${e.key}'): '${e.value}',
+            }
+          : null,
       sasOnline: j['sasOnline'] == true || _detectOnline(sasData),
       sasData: sasData,
       payments: j['payments'] is List
@@ -3379,9 +3446,13 @@ class AppStore {
     }
   }
 
-  /// مشتركو ساس واحد؛ الفارغ هو الساس الأساسي.
+  /// مشتركو ساس واحد لا يوجدون في غيره؛ الفارغ هو الساس الأساسي. من يوجد
+  /// في ساس آخر أيضاً لا يُحذف بل ينتقل مرجعه إليه.
   static bool Function(Subscriber) _ofSas(String account) =>
-      (s) => s.source == 'sas' && s.sasAccount == account;
+      (s) =>
+          s.source == 'sas' &&
+          s.sasPresence.length == 1 &&
+          s.sasPresence.contains(account);
 
   static bool Function(Subscriber) _deleteTarget(bool all, String account) =>
       all ? (_) => true : _ofSas(account);
@@ -3407,7 +3478,19 @@ class AppStore {
   static Future<void> deleteSasSubscribersOnly({
     bool keepDebtors = false,
     String account = '',
-  }) => _removeSubscribers(_ofSas(account), keepDebtors: keepDebtors);
+  }) async {
+    var detached = false;
+    for (final s in subscribers) {
+      if (s.source == 'sas' &&
+          s.inSeveralSas &&
+          s.sasPresence.contains(account)) {
+        s.detachSas(account);
+        detached = true;
+      }
+    }
+    await _removeSubscribers(_ofSas(account), keepDebtors: keepDebtors);
+    if (detached) await save();
+  }
 
   /// المدين المُبقى يبقى بدينه ووصولاته؛ مشترك الساس أو FTTH يصير «سابقاً».
   static Future<void> _removeSubscribers(

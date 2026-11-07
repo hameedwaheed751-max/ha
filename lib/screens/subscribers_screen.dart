@@ -71,8 +71,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     super.initState();
     _loadColumnPreferences();
     // أسماء الساسات الإضافية لبطاقات المشتركين.
-    if (AppStore.subscribers.any((s) => s.sasAccount.isNotEmpty)) {
-      SasSettings.loadExtras().then((_) {
+    if (AppStore.subscribers.any(
+      (s) => s.sasAccount.isNotEmpty || s.sasIds.isNotEmpty,
+    )) {
+      SasSettings.loadAll().then((_) {
         if (mounted) setState(() {});
       }, onError: (_) {});
     }
@@ -1440,6 +1442,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     if (changed == true && mounted) setState(() {});
                   },
                 ),
+                if (s.inSeveralSas)
+                  _op(Icons.alt_route, Colors.indigo, 'الساس المرجع', () {
+                    Navigator.pop(ctx);
+                    _pickReferenceSas(s);
+                  }),
                 _op(Icons.person_add, Colors.teal, 'إضافة مشترك جديد', () {
                   Navigator.pop(ctx);
                   add();
@@ -1750,6 +1757,67 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         borderSide: BorderSide(color: Color(0xFF2E7D32), width: 2),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    );
+  }
+
+  /// يختار الوكيل الساس المرجع لمشترك موجود في أكثر من ساس؛ منه تُقرأ
+  /// بياناته وإليه تُرسل عملياته من تفعيل وتجديد وغيرها.
+  Future<void> _pickReferenceSas(Subscriber s) async {
+    final presence = s.sasPresence.toList()
+      ..sort((a, b) => a.isEmpty ? -1 : (b.isEmpty ? 1 : a.compareTo(b)));
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  '${s.name} موجود في ${presence.length} ساس. اختر الساس '
+                  'الذي تُرسل إليه عمليات التفعيل والتجديد وغيرها.',
+                ),
+              ),
+              for (final account in presence)
+                ListTile(
+                  leading: Icon(
+                    account == s.sasAccount
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: Colors.indigo,
+                  ),
+                  title: Text(SasSettings.labelFor(account)),
+                  subtitle: Text('المعرف: ${s.idIn(account) ?? '-'}'),
+                  onTap: () => Navigator.pop(ctx, account),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null || picked == s.sasAccount || !mounted) return;
+    setState(() => s.useSas(picked));
+    await AppStore.save();
+    // بيانات المشترك تُقرأ الآن من الساس المرجع الجديد.
+    try {
+      final userId = int.tryParse(s.sasId.trim());
+      if (userId != null) {
+        final api = SasApiService(await SasSettings.forSubscriber(s));
+        SasSyncService.applyUserSnapshot(s, await api.fetchUser(userId));
+        await AppStore.save();
+      }
+    } catch (e) {
+      debugPrint('Refresh after picking SAS failed: $e');
+    }
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('صار ${SasSettings.labelFor(picked)} مرجع ${s.name}'),
+      ),
     );
   }
 
@@ -3545,6 +3613,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                             setState(() => selected = s);
                             operations();
                           },
+                          onPickSas: () => _pickReferenceSas(s),
                         ),
                       if (data.length > _visibleCards)
                         Padding(
@@ -3837,6 +3906,7 @@ class _SubscriberCard extends StatelessWidget {
     required this.onActivate,
     required this.onPay,
     required this.onMore,
+    this.onPickSas,
   });
 
   static const _green = Color(0xFF1B8A4B);
@@ -3849,11 +3919,15 @@ class _SubscriberCard extends StatelessWidget {
   final VoidCallback onActivate;
   final VoidCallback onPay;
   final VoidCallback onMore;
+  final VoidCallback? onPickSas;
 
   (String, Color, IconData) get _status {
     final s = subscriber;
     if (s.isFormer) {
       return ('مشترك سابق', Colors.blueGrey, Icons.history_rounded);
+    }
+    if (s.awaitingActivation) {
+      return ('غير مفعّل', Colors.blueGrey, Icons.hourglass_empty_rounded);
     }
     if (s.disabled) {
       return ('معطل', _amber, Icons.pause_circle_rounded);
@@ -4070,10 +4144,21 @@ class _SubscriberCard extends StatelessWidget {
                   runSpacing: 4,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    // اسم الساس يظهر لمشتركي الساسات الإضافية فقط.
-                    if (s.sasAccount.isNotEmpty)
+                    // الموجود في أكثر من ساس: الضغط يختار الساس المرجع.
+                    if (s.inSeveralSas)
+                      InkWell(
+                        key: ValueKey('pick-sas-${s.subscriberId}'),
+                        onTap: onPickSas,
+                        borderRadius: BorderRadius.circular(14),
+                        child: _pill(
+                          '${SasSettings.labelFor(s.sasAccount)} ▾ (${s.sasPresence.length} ساس)',
+                          Icons.alt_route_rounded,
+                          Colors.indigo,
+                        ),
+                      )
+                    else if (s.sasAccount.isNotEmpty)
                       _pill(
-                        SasSettings.labels[s.sasAccount] ?? 'ساس آخر',
+                        SasSettings.labelFor(s.sasAccount),
                         Icons.dns_rounded,
                         Colors.indigo,
                       ),

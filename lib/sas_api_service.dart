@@ -35,6 +35,9 @@ class SasSettings {
   final String accountId;
   String label;
 
+  /// اسم الشركة يظهر فوق اسم الساس.
+  String company;
+
   SasSettings({
     required this.serverUrl,
     required this.username,
@@ -42,6 +45,7 @@ class SasSettings {
     this.webProxyUrl = '',
     this.accountId = '',
     this.label = '',
+    this.company = '',
   });
 
   bool get isPrimary => accountId.isEmpty;
@@ -50,7 +54,14 @@ class SasSettings {
       ? label.trim()
       : (isPrimary ? 'الساس الأساسي' : username);
 
+  static const _labelKey = 'sas_label';
+  static const _companyKey = 'sas_company';
   static const _extrasKey = 'sas_extra_accounts';
+
+  static bool get hasExtras => labels.keys.any((k) => k.isNotEmpty);
+
+  static String labelFor(String account) =>
+      labels[account] ?? (account.isEmpty ? 'الساس الأساسي' : 'ساس آخر');
   static String _extraPassKey(String id) => 'sas_extra_pass_$id';
 
   static String newAccountId() =>
@@ -81,6 +92,7 @@ class SasSettings {
 
   Map<String, dynamic> _extraJson({bool withPassword = false}) => {
     'label': label.trim(),
+    if (company.trim().isNotEmpty) 'company': company.trim(),
     'serverUrl': _normalizeServerUrl(serverUrl),
     'username': username.trim(),
     if (_normalizeProxyUrl(webProxyUrl).isNotEmpty)
@@ -97,6 +109,7 @@ class SasSettings {
     return SasSettings(
       accountId: id,
       label: '${value['label'] ?? ''}'.trim(),
+      company: '${value['company'] ?? ''}'.trim(),
       serverUrl: server,
       username: user,
       password: password.isNotEmpty ? password : '${value['password'] ?? ''}',
@@ -187,7 +200,7 @@ class SasSettings {
 
   static void rememberLabels(List<SasSettings> extras) {
     labels
-      ..clear()
+      ..removeWhere((key, _) => key.isNotEmpty)
       ..addEntries(extras.map((a) => MapEntry(a.accountId, a.displayName)));
   }
 
@@ -347,6 +360,8 @@ class SasSettings {
       if (sasData['username'] != null) {
         await p.setString(_userKey, sasData['username'].toString());
       }
+      await p.setString(_labelKey, '${sasData['label'] ?? ''}'.trim());
+      await p.setString(_companyKey, '${sasData['company'] ?? ''}'.trim());
       final proxyCandidate =
           sasData['webProxyUrl'] ??
           sasData['proxyUrl'] ??
@@ -390,7 +405,7 @@ class SasSettings {
       p.getString('render_proxy_url'),
     ].firstWhere((v) => v != null && v.trim().isNotEmpty, orElse: () => null);
 
-    return SasSettings(
+    final primary = SasSettings(
       serverUrl: p.getString(_serverKey)?.trim().isNotEmpty == true
           ? _normalizeServerUrl(p.getString(_serverKey)!)
           : '',
@@ -401,7 +416,43 @@ class SasSettings {
       webProxyUrl: proxyFromPrefs != null && proxyFromPrefs.trim().isNotEmpty
           ? _normalizeProxyUrl(proxyFromPrefs)
           : _normalizeProxyUrl(_proxyEnv),
+      label: p.getString(_labelKey) ?? '',
+      company: p.getString(_companyKey) ?? '',
     );
+    labels[''] = primary.displayName;
+    return primary;
+  }
+
+  bool get isConfigured =>
+      _normalizeServerUrl(serverUrl).isNotEmpty && password.isNotEmpty;
+
+  /// فصل الساس الأساسي: تُمسح بياناته من الجهاز والسحابة، والمشتركون كما هم.
+  static Future<void> clearPrimary() async {
+    final uid = _uid;
+    if (uid != null) {
+      await FirebaseDatabase.instance
+          .ref('agents/$uid/sas')
+          .remove()
+          .timeout(const Duration(seconds: 8));
+      await FirebaseDatabase.instance
+          .ref('agents/$uid/profile')
+          .update({'sasUsername': ''})
+          .timeout(const Duration(seconds: 5));
+    }
+    final p = await SharedPreferences.getInstance();
+    for (final key in [
+      _serverKey,
+      _userKey,
+      _passKey,
+      _labelKey,
+      _companyKey,
+    ]) {
+      await p.remove(key);
+    }
+    try {
+      await SasApiService._secureStorage.delete(key: _securePassKey);
+    } catch (_) {}
+    labels.remove('');
   }
 
   Future<void> save() async {
@@ -412,6 +463,9 @@ class SasSettings {
     final p = await SharedPreferences.getInstance();
     await p.setString(_serverKey, cleanedServerUrl);
     await p.setString(_userKey, username.trim());
+    await p.setString(_labelKey, label.trim());
+    await p.setString(_companyKey, company.trim());
+    labels[''] = displayName;
     final cleanedProxyUrl = _normalizeProxyUrl(webProxyUrl);
     if (cleanedProxyUrl.isNotEmpty) {
       await p.setString(_proxyKey, cleanedProxyUrl);
@@ -454,6 +508,8 @@ class SasSettings {
               'username': normalizedSasUser,
               'password': password,
               if (cleanedProxyUrl.isNotEmpty) 'webProxyUrl': cleanedProxyUrl,
+              if (label.trim().isNotEmpty) 'label': label.trim(),
+              if (company.trim().isNotEmpty) 'company': company.trim(),
             })
             .timeout(const Duration(seconds: 8));
 

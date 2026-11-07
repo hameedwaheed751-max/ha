@@ -169,12 +169,13 @@ class SasSyncService {
     );
   }
 
-  /// من يجوز أن تطابقه مزامنة هذا الساس باليوزر. الأساسي يطابق كل من لا
-  /// ساس إضافياً له كما كان سابقاً؛ الإضافي يطابق مشتركيه، والمحلي والسابق.
-  static bool belongsToAccount(Subscriber s, String account) {
-    if (account.isEmpty) return s.sasAccount.isEmpty;
-    if (s.sasAccount == account) return true;
-    return s.sasAccount.isEmpty && (s.source == 'local' || s.isFormer);
+  /// هل يأخذ هذا الساس بيانات المشترك ويصير مرجعه. مشترك ساس آخر يبقى على
+  /// مرجعه ويُسجَّل وجوده هنا فقط، فلا يتكرر في القائمة.
+  static bool adoptsInto(Subscriber s, String account) {
+    if (s.isFormer) return true;
+    if (s.source == 'ftth') return account.isEmpty;
+    if (s.source == 'sas') return s.sasAccount == account;
+    return s.sasAccount.isEmpty || s.sasAccount == account;
   }
 
   /// يزامن كل الساسات المربوطة واحداً بعد الآخر؛ فشل ساس لا يوقف الباقي.
@@ -251,26 +252,36 @@ class SasSyncService {
 
       final sasId = mapped.sasId;
       mapped.sasAccount = account;
+      final userKey = mapped.user.trim().toLowerCase();
+      bool sameUser(Subscriber s) => s.user.trim().toLowerCase() == userKey;
       var index = -1;
       if (sasId.isNotEmpty) {
         index = AppStore.subscribers.indexWhere(
-          (s) =>
-              s.source == 'sas' && s.sasId == sasId && s.sasAccount == account,
+          (s) => s.idIn(account) == sasId,
         );
       }
       if (index < 0) {
         index = AppStore.subscribers.indexWhere(
-          (s) =>
-              belongsToAccount(s, account) &&
-              s.user.trim().toLowerCase() == mapped.user.trim().toLowerCase(),
+          (s) => sameUser(s) && adoptsInto(s, account),
+        );
+      }
+      if (index < 0) {
+        index = AppStore.subscribers.indexWhere(
+          (s) => sameUser(s) && s.source != 'ftth',
         );
       }
 
       if (index < 0) {
         AppStore.subscribers.add(mapped);
         added++;
+      } else if (!adoptsInto(AppStore.subscribers[index], account)) {
+        // موجود بساس مرجع آخر: نسجّل معرفه هنا ليختاره الوكيل إن أراد.
+        if (sasId.isNotEmpty) {
+          AppStore.subscribers[index].sasIds[account] = sasId;
+        }
       } else {
         final old = AppStore.subscribers[index];
+        old.sasIds.remove(account);
 
         final nextUser = mapped.user.isNotEmpty ? mapped.user : old.user;
         final nextName = mapped.name.isNotEmpty ? mapped.name : old.name;
@@ -339,7 +350,7 @@ class SasSyncService {
       extraNames: rowPackages,
       save: false,
       // مع عدة ساسات لا تمثل قائمة ساس واحد كل الباقات.
-      complete: account.isEmpty && SasSettings.labels.isEmpty,
+      complete: account.isEmpty && !SasSettings.hasExtras,
     );
 
     await AppStore.save();

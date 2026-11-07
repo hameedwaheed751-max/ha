@@ -30,6 +30,27 @@ void main() {
     expect(find.text('تاريخ التسديد'), findsNothing);
     expect(find.text('إضافة إلى SAS'), findsOneWidget);
     expect(find.textContaining('اختياري'), findsNothing);
+    expect(find.text('تاريخ بداية الاشتراك'), findsNothing);
+    expect(find.text('تاريخ انتهاء الاشتراك'), findsNothing);
+  });
+
+  testWidgets('a subscriber added in the app waits for SAS activation', (
+    tester,
+  ) async {
+    AppStore.subscribers.clear();
+    addTearDown(AppStore.subscribers.clear);
+    await pump(tester);
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'new.user');
+    await tester.enterText(fields.at(1), 'مشترك جديد');
+    await tester.tap(find.text('حفظ المشترك'));
+    await tester.pump(const Duration(seconds: 1));
+
+    final s = AppStore.subscribers.single;
+    expect(s.active, isFalse);
+    expect(s.isActive, isFalse);
+    expect(s.awaitingActivation, isTrue);
+    expect(s.remaining, 0);
   });
 
   testWidgets('editing a subscriber still shows the amounts', (tester) async {
