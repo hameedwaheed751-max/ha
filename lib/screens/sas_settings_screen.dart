@@ -13,8 +13,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
   final server = TextEditingController();
   final user = TextEditingController();
   final pass = TextEditingController();
-  String _proxyUrl =
-      'https://netagent-sas-proxy.wakeel-net-hamwdy.workers.dev';
+  String _proxyUrl = 'https://netagent-sas-proxy.wakeel-net-hamwdy.workers.dev';
   bool loading = true, testing = false, hide = true;
   String? result;
 
@@ -100,39 +99,37 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
   }
 
   Future<void> _confirmDelete(bool all) async {
-    final ok = await showDialog<bool>(
+    final total = AppStore.countToDelete(all: all);
+    if (total == 0) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('لا يوجد مشتركون للحذف')));
+      return;
+    }
+    final choice = await showDialog<DeleteSubscribersChoice>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(all ? 'حذف جميع المشتركين؟' : 'حذف مشتركي SAS؟'),
-        content: Text(
-          all
-              ? 'سيتم حذف جميع المشتركين المحليين وSAS من التطبيق. لا يمكن التراجع.'
-              : 'سيتم حذف المشتركين القادمين من SAS فقط، وتبقى البيانات المحلية.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('حذف'),
-          ),
-        ],
+      builder: (_) => DeleteSubscribersDialog(
+        all: all,
+        total: total,
+        debtors: AppStore.debtorsAmong(all: all),
       ),
     );
-    if (ok != true) return;
+    if (choice == null) return;
+    final keepDebtors = choice == DeleteSubscribersChoice.keepDebtors;
     try {
       if (all) {
-        await AppStore.deleteAllSubscribers();
+        await AppStore.deleteAllSubscribers(keepDebtors: keepDebtors);
       } else {
-        await AppStore.deleteSasSubscribersOnly();
+        await AppStore.deleteSasSubscribersOnly(keepDebtors: keepDebtors);
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(all ? 'تم حذف جميع المشتركين' : 'تم حذف مشتركي SAS'),
+            content: Text(
+              keepDebtors
+                  ? 'تم الحذف، وبقي المدينون في قائمة الديون كمشتركين سابقين'
+                  : (all ? 'تم حذف جميع المشتركين' : 'تم حذف مشتركي SAS'),
+            ),
           ),
         );
       }
@@ -356,4 +353,87 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
             ),
     ),
   );
+}
+
+enum DeleteSubscribersChoice { keepDebtors, deleteEverything }
+
+/// يسأل الوكيل في كل حذف عن المدينين: إبقاؤهم بديونهم أو حذفهم معها.
+class DeleteSubscribersDialog extends StatelessWidget {
+  const DeleteSubscribersDialog({
+    super.key,
+    required this.all,
+    required this.total,
+    required this.debtors,
+  });
+
+  final bool all;
+  final int total;
+  final List<Subscriber> debtors;
+
+  @override
+  Widget build(BuildContext context) {
+    final debt = debtors.fold<double>(0, (sum, s) => sum + s.remaining);
+    final hasDebtors = debtors.isNotEmpty;
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: Text(all ? 'حذف جميع المشتركين؟' : 'حذف مشتركي SAS؟'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              all
+                  ? 'سيُحذف $total مشترك من التطبيق. لا يمكن التراجع.'
+                  : 'سيُحذف $total مشترك قادم من SAS، وتبقى البيانات المحلية.',
+            ),
+            if (hasDebtors) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'بينهم ${debtors.length} مدين بمجموع '
+                  '${moneyText(debt)}.\n'
+                  'إبقاؤهم يحفظ ديونهم ووصولاتهم في قائمة الديون كمشتركين '
+                  'سابقين، ويمكن تسديدها لاحقاً.',
+                  style: TextStyle(color: Colors.orange.shade900),
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء'),
+          ),
+          if (hasDebtors)
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: () => Navigator.pop(
+                context,
+                DeleteSubscribersChoice.deleteEverything,
+              ),
+              child: const Text('حذف الجميع مع ديونهم'),
+            ),
+          FilledButton(
+            style: hasDebtors
+                ? null
+                : FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(
+              context,
+              hasDebtors
+                  ? DeleteSubscribersChoice.keepDebtors
+                  : DeleteSubscribersChoice.deleteEverything,
+            ),
+            child: Text(hasDebtors ? 'حذف مع إبقاء المدينين' : 'حذف'),
+          ),
+        ],
+      ),
+    );
+  }
 }

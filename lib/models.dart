@@ -849,6 +849,11 @@ class Subscriber {
   List<PaymentRecord> payments;
   List<InvoiceRecord> invoices;
 
+  /// مشترك أُبقي بعد حذف ساسه لأن عليه ديناً: لا عمليات ساس عليه.
+  static const String formerSource = 'former';
+  bool get isFormer => source == formerSource;
+  bool get hasDebt => remaining > 0.0001;
+
   double get carriedDebt => _carriedDebt ?? 0;
   set carriedDebt(double value) => _carriedDebt = value;
 
@@ -3368,12 +3373,47 @@ class AppStore {
     }
   }
 
-  static Future<void> deleteAllSubscribers() async {
-    await _deleteSubscribersWhere((_) => true);
-  }
+  static bool _isSasSubscriber(Subscriber s) => s.source == 'sas';
 
-  static Future<void> deleteSasSubscribersOnly() async {
-    await _deleteSubscribersWhere((subscriber) => subscriber.source == 'sas');
+  /// المدينون بين من سيحذفهم الزر، ليُسأل الوكيل عنهم قبل الحذف.
+  static List<Subscriber> debtorsAmong({required bool all}) => [
+    for (final s in subscribers)
+      if ((all || _isSasSubscriber(s)) && s.hasDebt) s,
+  ];
+
+  static int countToDelete({required bool all}) =>
+      all ? subscribers.length : subscribers.where(_isSasSubscriber).length;
+
+  static Future<void> deleteAllSubscribers({bool keepDebtors = false}) =>
+      _removeSubscribers((_) => true, keepDebtors: keepDebtors);
+
+  static Future<void> deleteSasSubscribersOnly({bool keepDebtors = false}) =>
+      _removeSubscribers(_isSasSubscriber, keepDebtors: keepDebtors);
+
+  /// المدين المُبقى يبقى بدينه ووصولاته؛ مشترك الساس أو FTTH يصير «سابقاً».
+  static Future<void> _removeSubscribers(
+    bool Function(Subscriber subscriber) target, {
+    required bool keepDebtors,
+  }) async {
+    if (!keepDebtors) return _deleteSubscribersWhere(target);
+    final archived = <Subscriber, String>{};
+    for (final s in subscribers) {
+      if (!target(s) || !s.hasDebt) continue;
+      if (s.source == 'sas' || s.source == 'ftth') {
+        archived[s] = s.source;
+        s
+          ..source = Subscriber.formerSource
+          ..sasOnline = false
+          ..liveOnline = null;
+      }
+    }
+    try {
+      await _deleteSubscribersWhere((s) => target(s) && !s.hasDebt);
+      if (archived.isNotEmpty) await save();
+    } catch (_) {
+      archived.forEach((s, source) => s.source = source);
+      rethrow;
+    }
   }
 
   static Future<void> deleteSubscriber(Subscriber subscriber) async {

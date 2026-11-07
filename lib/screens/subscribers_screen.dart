@@ -1149,6 +1149,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     if (s.source == 'ftth') {
       return _activateFtthSubscriber(s, modalContext: modalContext);
     }
+    if (_blockFormer(s)) return;
     if (operationBusy) return;
     operationBusy = true;
     try {
@@ -1373,7 +1374,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     final s = selected;
     if (s == null) return;
     // هذه العمليات تخاطب SAS فقط، ومعرف FTTH قد يطابق مشتركاً آخر فيه.
-    final isSas = s.source != 'ftth';
+    final isSas = s.source != 'ftth' && !s.isFormer;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1744,7 +1745,22 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
   }
 
+  /// المشترك السابق حُذف ساسه: يبقى لديونه فقط ولا يُرسل عنه شيء للساس.
+  bool _blockFormer(Subscriber s) {
+    if (!s.isFormer) return false;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'مشترك سابق من ساس محذوف: يبقى لتسديد دينه فقط. '
+          'يعود تلقائياً إذا ظهر في مزامنة الساس.',
+        ),
+      ),
+    );
+    return true;
+  }
+
   void _extend(Subscriber s) {
+    if (_blockFormer(s)) return;
     int? selectedProfileId;
     String selectedMethod = 'reward_points';
     List<Map<String, dynamic>> profiles = [];
@@ -1996,6 +2012,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   }
 
   Future<void> _changePackage(Subscriber s) async {
+    if (_blockFormer(s)) return;
     final rawId = s.sasId.trim().isNotEmpty
         ? s.sasId.trim()
         : (s.sasData['id'] ?? s.sasData['user_id'] ?? '').toString().trim();
@@ -3825,6 +3842,9 @@ class _SubscriberCard extends StatelessWidget {
 
   (String, Color, IconData) get _status {
     final s = subscriber;
+    if (s.isFormer) {
+      return ('مشترك سابق', Colors.blueGrey, Icons.history_rounded);
+    }
     if (s.disabled) {
       return ('معطل', _amber, Icons.pause_circle_rounded);
     }
