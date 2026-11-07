@@ -801,9 +801,56 @@ class SasApiService {
     return computeOriginFor(settings.serverUrl);
   }
 
+  /// The API base that answered a login, per saved server URL. Some
+  /// companies host SAS under a folder or another path, so the default
+  /// base answers 404 and login tries the other known layouts.
+  static final Map<String, String> _discoveredApiBase = {};
+
   String get _sasApiBase {
-    return computeApiBaseFor(settings.serverUrl);
+    return _discoveredApiBase[settings.serverUrl.trim()] ??
+        computeApiBaseFor(settings.serverUrl);
   }
+
+  /// Every API base worth trying for [serverUrl], the usual one first.
+  static List<String> apiBaseCandidatesFor(String serverUrl) {
+    final raw = serverUrl.trim();
+    final input = SasSettings._normalizeServerUrl(raw);
+    if (input.isEmpty) return const [];
+    final out = <String>[];
+    void add(String base) {
+      if (!out.contains(base)) out.add(base);
+    }
+
+    void addFor(String url) {
+      final origin = computeOriginFor(url);
+      add(computeApiBaseFor(url));
+      var path = Uri.parse(SasSettings._normalizeServerUrl(url)).path;
+      if (!path.toLowerCase().contains('/api/')) {
+        path = path.replaceAll(RegExp(r'/+$'), '');
+        final tail = RegExp(
+          r'/(login|auth|admin|user|index\.html?|index\.php)$',
+          caseSensitive: false,
+        );
+        while (tail.hasMatch(path)) {
+          path = path.replaceFirst(tail, '');
+        }
+        if (path.isNotEmpty) {
+          add('$origin$path/admin/api/index.php/api/');
+          add('$origin$path/api/index.php/api/');
+        }
+      }
+      add('$origin/api/index.php/api/');
+    }
+
+    addFor(input);
+    // No scheme typed: the panel may only answer on plain http.
+    if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+      addFor('http://${input.substring('https://'.length)}');
+    }
+    return out;
+  }
+
+  static bool _isNotFound(Object e) => e.toString().contains('HTTP 404');
 
   bool get _isResellerServer {
     final normalizedUrl = SasSettings._normalizeServerUrl(settings.serverUrl);
@@ -1089,6 +1136,39 @@ class SasApiService {
       return;
     }
 
+    final key = settings.serverUrl.trim();
+    final known = _discoveredApiBase[key];
+    final candidates = [
+      ?known,
+      ...apiBaseCandidatesFor(key).where((b) => b != known),
+    ];
+    Object? lastError;
+    for (final base in candidates) {
+      _discoveredApiBase[key] = base;
+      try {
+        await _loginAtCurrentBase();
+        _debugLog('[SAS DEBUG][LOGIN] api_base=$base');
+        return;
+      } catch (e) {
+        lastError = e;
+        if (!_isNotFound(e)) {
+          if (known == null) _discoveredApiBase.remove(key);
+          rethrow;
+        }
+      }
+    }
+    _discoveredApiBase.remove(key);
+    if (lastError != null && _isNotFound(lastError)) {
+      throw SasApiException(
+        'رابط الساس غير صحيح: الخادم لا يحتوي على واجهة SAS في هذا العنوان '
+        '(HTTP 404). افتح لوحة الساس في المتصفح وانسخ الرابط كما يظهر، '
+        'مع رقم المنفذ إن وُجد (مثل :8443) و http أو https.',
+      );
+    }
+    throw lastError ?? SasApiException('فشل تسجيل الدخول إلى SAS');
+  }
+
+  Future<void> _loginAtCurrentBase() async {
     final username = settings.username.trim();
     final password = settings.password;
 
@@ -2337,7 +2417,7 @@ class SasApiService {
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
       final body = res.body.trim();
-      final detail = body.isEmpty
+      final detail = body.isEmpty || body.startsWith('<')
           ? ''
           : ': ${body.length > 180 ? body.substring(0, 180) : body}';
       throw SasApiException('SAS رجع خطأ HTTP ${res.statusCode}$detail');
@@ -2521,7 +2601,7 @@ class SasApiService {
 
     if (res.statusCode < 200 || res.statusCode >= 400) {
       final body = res.body.trim();
-      final detail = body.isEmpty
+      final detail = body.isEmpty || body.startsWith('<')
           ? ''
           : ': ${body.length > 180 ? body.substring(0, 180) : body}';
       throw SasApiException('SAS رجع خطأ HTTP ${res.statusCode}$detail');
