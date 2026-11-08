@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models.dart';
+import '../services/user_role_service.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -428,18 +429,32 @@ class _ChatScreenState extends State<ChatScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    msg.senderName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: isMe
-                                          ? Colors.white
-                                          : const Color(0xFF7C3AED),
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 13,
-                                      letterSpacing: 0.2,
-                                    ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          msg.senderName,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: isMe
+                                                ? Colors.white
+                                                : const Color(0xFF7C3AED),
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: 13,
+                                            letterSpacing: 0.2,
+                                          ),
+                                        ),
+                                      ),
+                                      // الشارة من حساب المرسل الفعلي، لا من
+                                      // الاسم الذي يكتبه.
+                                      if (msg.senderUid ==
+                                          UserRoleService.trustedAdminUid) ...[
+                                        const SizedBox(width: 6),
+                                        const AdminBadge(),
+                                      ],
+                                    ],
                                   ),
                                   if (!isDeleted && msg.replyTo != null) ...[
                                     const SizedBox(height: 6),
@@ -597,6 +612,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   Expanded(
                     child: TextField(
                       controller: _textController,
+                      maxLength: AppStore.chatTextMaxLength,
+                      maxLengthEnforcement: MaxLengthEnforcement.enforced,
                       focusNode: _inputFocus,
                       style: TextStyle(
                         color: isDark
@@ -604,6 +621,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             : const Color(0xFF1F2937),
                       ),
                       decoration: InputDecoration(
+                        counterText: '',
                         hintText: 'اكتب رسالة...',
                         hintStyle: TextStyle(
                           color: isDark
@@ -755,6 +773,7 @@ class _ChatScreenState extends State<ChatScreen> {
         content: TextField(
           controller: controller,
           maxLines: null,
+          maxLength: AppStore.chatTextMaxLength,
           decoration: const InputDecoration(border: OutlineInputBorder()),
         ),
         actions: [
@@ -1008,6 +1027,37 @@ class ChatDaySeparator extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// شارة رسائل الإدارة.
+class AdminBadge extends StatelessWidget {
+  const AdminBadge({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF59E0B),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.verified, size: 12, color: Colors.white),
+          SizedBox(width: 3),
+          Text(
+            'الإدارة',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
       ),
     );
   }

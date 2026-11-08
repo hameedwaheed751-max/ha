@@ -67,8 +67,21 @@ void main() {
 
   testWidgets('the day separator shows its label', (tester) async {
     await tester.pumpWidget(
-      const MaterialApp(home: Scaffold(body: ChatDaySeparator(label: 'أمس'))),
+      const MaterialApp(
+        home: Scaffold(body: ChatDaySeparator(label: 'أمس')),
+      ),
     );
     expect(find.text('أمس'), findsOneWidget);
+  });
+
+  testWidgets('the admin badge says الإدارة', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: AdminBadge())),
+    );
+    expect(find.text('الإدارة'), findsOneWidget);
+  });
+
+  test('the chat limit matches the Firebase rules', () {
+    expect(AppStore.chatTextMaxLength, 2000);
   });
 }

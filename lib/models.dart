@@ -4104,6 +4104,15 @@ class AppStore {
     return role == UserRoleService.adminRole;
   }
 
+  /// حدود قواعد Firebase للدردشة.
+  static const int chatTextMaxLength = 2000;
+
+  static String _chatSenderName() {
+    final name = effectiveAgentName.trim();
+    if (name.isEmpty) return 'وكيل';
+    return name.length > 80 ? name.substring(0, 80) : name;
+  }
+
   static Future<bool> sendChatMessage(
     String text, {
     String? imageUrl,
@@ -4124,7 +4133,8 @@ class AppStore {
     try {
       final msg = ChatMessage(
         id: msgId,
-        senderName: effectiveAgentName,
+        // قواعد Firebase ترفض اسماً أطول من 80 حرفاً.
+        senderName: _chatSenderName(),
         senderEmail: agentEmail,
         senderUid: senderUid,
         text: text.trim(),
