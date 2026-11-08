@@ -22,15 +22,15 @@ class _PingScreenState extends State<PingScreen> {
   int _sent = 0;
   int _received = 0;
   Ping? _activePing;
-  String? _sasHost;
+  List<(String, String)> _sasTargets = const [];
 
   int get _packetBytes => Platform.isWindows ? 32 : 64;
 
   @override
   void initState() {
     super.initState();
-    loadSasPingHost().then((host) {
-      if (mounted && host != null) setState(() => _sasHost = host);
+    loadSasPingTargets().then((targets) {
+      if (mounted) setState(() => _sasTargets = targets);
     });
   }
 
@@ -156,7 +156,7 @@ class _PingScreenState extends State<PingScreen> {
       error: _error,
       onRun: _runPing,
       onStop: _stopPing,
-      quickTargets: pingQuickTargets(_sasHost),
+      quickTargets: pingQuickTargets(_sasTargets),
       onQuickTarget: _pingTarget,
       idleHint: 'أدخل IP أو اسم المضيف لبدء Ping مستمر',
     );

@@ -61,7 +61,9 @@ void main() {
         error: null,
         onRun: () {},
         onStop: () {},
-        quickTargets: pingQuickTargets('sas.example-isp.iq'),
+        quickTargets: pingQuickTargets(const [
+          ('خادم SAS', 'sas.example-isp.iq'),
+        ]),
         onQuickTarget: (_) {},
         idleHint: 'أدخل IP',
         note:

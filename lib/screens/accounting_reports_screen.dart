@@ -7,18 +7,10 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_project_national_service.dart';
+import '../services/sas_wallets.dart';
 import 'subscriber_details_screen.dart';
 
-/// رقم من رد الساس مهما كان شكله: 250000 أو "250,000.00" أو "250,000 IQD"
-/// أو {value: ...}.
-double? parseSasAmount(dynamic raw) {
-  if (raw is num) return raw.toDouble();
-  if (raw is Map) {
-    return parseSasAmount(raw['value'] ?? raw['amount'] ?? raw['balance']);
-  }
-  final match = RegExp(r'-?\d[\d,]*(?:\.\d+)?').firstMatch('${raw ?? ''}');
-  return match == null ? null : double.tryParse(match[0]!.replaceAll(',', ''));
-}
+export '../services/sas_wallets.dart' show parseSasAmount;
 
 /// تفعيل لمشترك FTTH. السجلات القديمة بلا مصدر تُعرف من المشترك نفسه.
 bool isFtthActivation(AccountingActivationRecord record) {
@@ -56,8 +48,14 @@ class AccountingReportsScreen extends StatefulWidget {
 
 class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
-  double? _sasBalance;
+
+  /// أرصدة كل الساسات المربوطة.
+  SasWallets? _wallets;
   bool _loadingSasBalance = false;
+
+  /// كل الساسات؛ الجدول المالي يعرض واحداً منها يختاره الوكيل.
+  List<SasSettings> _sasAccounts = const [];
+  String _reportAccount = '';
   bool _ftthConfigured = false;
   double? _ftthBalance;
   bool _loadingFtthBalance = false;
@@ -66,11 +64,13 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
   SasFinancialPage? _financialPage;
   bool _loadingFinancialReport = false;
   String? _financialReportError;
-  SasManagerJournalMonth? _journalMonth;
+
+  /// سجل الشهر لكل ساس، بمعرفه.
+  Map<String, SasManagerJournalMonth> _journals = const {};
   int _activationPage = 1;
   static const _activationsPerPage = 10;
   bool _loadingJournalMonth = false;
-  String? _journalMonthError;
+  Map<String, String> _journalErrors = const {};
 
   static const _monthNames = <String>[
     'كانون الثاني',
@@ -100,12 +100,52 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
   }
 
   /// الرصيد المباشر من الساس، وإلا الرصيد بعد آخر حركة في سجل الشهر الحالي.
-  double? get _currentSasBalance {
-    if (_sasBalance != null) return _sasBalance;
+  /// رصيد ساس: المباشر منه، وإلا الرصيد بعد آخر حركة في سجل الشهر الحالي.
+  double? _balanceOf(String account) {
+    for (final wallet in _wallets?.items ?? const <SasWallet>[]) {
+      if (wallet.account.accountId == account && wallet.balance != null) {
+        return wallet.balance;
+      }
+    }
     final now = DateTime.now();
     final current = _month.year == now.year && _month.month == now.month;
-    return current ? _journalMonth?.latestBalance : null;
+    return current ? _journals[account]?.latestBalance : null;
   }
+
+  /// مجموع أرصدة الساسات المعروفة.
+  double? get _currentSasBalance {
+    final known = _sasAccounts
+        .map((a) => _balanceOf(a.accountId))
+        .whereType<double>()
+        .toList();
+    if (known.isEmpty) return null;
+    return known.fold<double>(0, (sum, v) => sum + v);
+  }
+
+  double? get _monthDeposits => _journals.isEmpty
+      ? null
+      : _journals.values.fold<double>(0, (sum, j) => sum + j.deposits);
+
+  double? get _monthDeductions => _journals.isEmpty
+      ? null
+      : _journals.values.fold<double>(0, (sum, j) => sum + j.deductions);
+
+  String _accountName(String account) {
+    for (final a in _sasAccounts) {
+      if (a.accountId == account) return a.displayName;
+    }
+    return SasSettings.labelFor(account);
+  }
+
+  String? get _journalMonthError => _journalErrors.isEmpty
+      ? null
+      : _journalErrors.entries
+            .map(
+              (e) => _sasAccounts.length > 1
+                  ? '${_accountName(e.key)}: ${e.value}'
+                  : e.value,
+            )
+            .join('\n');
 
   String get _monthLabel => '${_monthNames[_month.month - 1]} ${_month.year}';
 
@@ -200,32 +240,16 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     _loadJournalMonth();
   }
 
-  int? _firstSasUserId() {
-    for (final subscriber in AppStore.subscribers) {
-      final raw = subscriber.sasId.trim().isNotEmpty
-          ? subscriber.sasId.trim()
-          : (subscriber.sasData['id'] ?? subscriber.sasData['user_id'] ?? '')
-                .toString()
-                .trim();
-      final userId = int.tryParse(raw);
-      if (userId != null) return userId;
-    }
-    return null;
-  }
-
   Future<void> _loadSasBalance() async {
     if (_loadingSasBalance) return;
-    final userId = _firstSasUserId();
-    if (userId == null) return;
     setState(() => _loadingSasBalance = true);
     try {
-      final settings = await SasSettings.load();
-      final wallet = await SasApiService(settings).fetchDashboardWallet(userId);
-      final raw = wallet['balance'];
-      final value = parseSasAmount(raw);
-      if (mounted) setState(() => _sasBalance = value);
+      final accounts = await SasSettings.loadAll();
+      if (mounted) setState(() => _sasAccounts = accounts);
+      final wallets = await SasWallets.load(loadAccounts: () async => accounts);
+      if (mounted) setState(() => _wallets = wallets);
     } catch (_) {
-      if (mounted) setState(() => _sasBalance = null);
+      if (mounted) setState(() => _wallets = null);
     } finally {
       if (mounted) setState(() => _loadingSasBalance = false);
     }
@@ -271,7 +295,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
       _financialReportError = null;
     });
     try {
-      final settings = await SasSettings.load();
+      final settings = await SasSettings.forAccount(_reportAccount);
       final result = await SasApiService(
         settings,
       ).fetchFinancialReport(selectedType, page: page, count: 10);
@@ -294,22 +318,33 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
     final requestedMonth = _month;
     setState(() {
       _loadingJournalMonth = true;
-      _journalMonth = null;
-      _journalMonthError = null;
+      _journals = const {};
+      _journalErrors = const {};
     });
     try {
-      final settings = await SasSettings.load();
-      final result = await SasApiService(
-        settings,
-      ).fetchManagerJournalMonth(requestedMonth);
-      if (!mounted || requestedMonth != _month) return;
-      setState(() => _journalMonth = result);
-    } catch (error) {
+      final accounts = await SasSettings.loadAll();
+      final journals = <String, SasManagerJournalMonth>{};
+      final errors = <String, String>{};
+      await Future.wait(
+        accounts.map((account) async {
+          try {
+            journals[account.accountId] = await SasApiService(
+              account,
+            ).fetchManagerJournalMonth(requestedMonth);
+          } catch (error) {
+            errors[account.accountId] = error.toString();
+          }
+        }),
+      );
       if (!mounted || requestedMonth != _month) return;
       setState(() {
-        _journalMonth = null;
-        _journalMonthError = error.toString();
+        _sasAccounts = accounts;
+        _journals = journals;
+        _journalErrors = errors;
       });
+    } catch (error) {
+      if (!mounted || requestedMonth != _month) return;
+      setState(() => _journalErrors = {'': error.toString()});
     } finally {
       if (mounted && requestedMonth == _month) {
         setState(() => _loadingJournalMonth = false);
@@ -372,9 +407,17 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
       row('المتبقي الآن على المشتركين', _currentOutstandingDebt);
       row('');
       row('الأرصدة');
-      row('إيداعات الساس هذا الشهر', _journalMonth?.deposits ?? 'غير متاح');
-      row('استقطاعات الساس هذا الشهر', _journalMonth?.deductions ?? 'غير متاح');
+      row('إيداعات الساس هذا الشهر', _monthDeposits ?? 'غير متاح');
+      row('استقطاعات الساس هذا الشهر', _monthDeductions ?? 'غير متاح');
       row('رصيد الساس الحالي', _currentSasBalance ?? 'غير متاح');
+      if (_sasAccounts.length > 1) {
+        for (final account in _sasAccounts) {
+          row(
+            'رصيد ${account.displayName}',
+            _balanceOf(account.accountId) ?? 'غير متاح',
+          );
+        }
+      }
       if (_ftthConfigured) row('رصيد محفظة FTTH', _ftthBalance ?? 'غير متاح');
       row('');
       row('تفاصيل التفعيلات');
@@ -592,7 +635,9 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                   icon: Icons.account_balance_wallet_outlined,
                   children: [
                     _WalletCard(
-                      title: 'رصيد الساس',
+                      title: _sasAccounts.length > 1
+                          ? 'رصيد الساسات (${_sasAccounts.length})'
+                          : 'رصيد الساس',
                       icon: Icons.cloud_outlined,
                       colors: const [Color(0xFF1B5E20), Color(0xFF43A047)],
                       value: _loadingSasBalance && _currentSasBalance == null
@@ -601,21 +646,29 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                           ? 'غير متاح'
                           : _money(_currentSasBalance!),
                       lines: [
+                        if (_sasAccounts.length > 1)
+                          for (final account in _sasAccounts)
+                            (
+                              account.displayName,
+                              _balanceOf(account.accountId) == null
+                                  ? 'غير متاح'
+                                  : _money(_balanceOf(account.accountId)!),
+                            ),
                         (
                           'إيداعات $_monthLabel',
                           _loadingJournalMonth
                               ? '...'
-                              : _journalMonth == null
+                              : _monthDeposits == null
                               ? 'غير متاح'
-                              : _money(_journalMonth!.deposits),
+                              : _money(_monthDeposits!),
                         ),
                         (
                           'استقطاعات $_monthLabel',
                           _loadingJournalMonth
                               ? '...'
-                              : _journalMonth == null
+                              : _monthDeductions == null
                               ? 'غير متاح'
-                              : _money(_journalMonth!.deductions),
+                              : _money(_monthDeductions!),
                         ),
                       ],
                     ),
@@ -674,6 +727,29 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                   ),
                 ],
                 const SizedBox(height: 28),
+                if (_sasAccounts.length > 1) ...[
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      for (final account in _sasAccounts)
+                        ChoiceChip(
+                          key: ValueKey('report-sas-${account.accountId}'),
+                          label: Text(account.displayName),
+                          selected: _reportAccount == account.accountId,
+                          onSelected: (_) {
+                            if (_reportAccount == account.accountId) return;
+                            setState(() {
+                              _reportAccount = account.accountId;
+                              _financialPage = null;
+                            });
+                            _loadFinancialReport();
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 _SasFinancialReports(
                   selectedType: _reportType,
                   page: _financialPage,

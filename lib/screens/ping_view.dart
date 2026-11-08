@@ -34,19 +34,28 @@ String normalizePingHost(String value) {
   return uri?.host.isNotEmpty == true ? uri!.host : trimmed;
 }
 
-/// The agent's own SAS server host, or null when none is set.
-Future<String?> loadSasPingHost() async {
+/// خوادم كل ساسات الوكيل، كل خادم مرة واحدة.
+Future<List<(String, String)>> loadSasPingTargets() async {
   try {
-    final settings = await SasSettings.load();
-    final host = normalizePingHost(settings.serverUrl);
-    return host.isEmpty ? null : host;
+    final accounts = await SasSettings.loadAll();
+    final seen = <String>{};
+    final targets = <(String, String)>[];
+    for (final account in accounts) {
+      final host = normalizePingHost(account.serverUrl);
+      if (host.isEmpty || !seen.add(host)) continue;
+      final label = accounts.length > 1
+          ? 'خادم ${account.displayName}'
+          : 'خادم SAS';
+      targets.add((label, host));
+    }
+    return targets;
   } catch (_) {
-    return null;
+    return const [];
   }
 }
 
-List<(String, String)> pingQuickTargets(String? sasHost) => [
-  if (sasHost != null) ('خادم SAS', sasHost),
+List<(String, String)> pingQuickTargets(List<(String, String)> sasTargets) => [
+  ...sasTargets,
   ('Google DNS', '8.8.8.8'),
   ('Cloudflare', '1.1.1.1'),
   ('Google', 'google.com'),

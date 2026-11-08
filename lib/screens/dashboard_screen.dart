@@ -13,6 +13,7 @@ import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
 import '../services/app_notifications.dart';
 import '../services/render_whatsapp_service.dart';
+import '../services/sas_wallets.dart';
 import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
 import 'subscribers_screen.dart';
@@ -22,6 +23,7 @@ import 'app_notifications_screen.dart';
 import 'subscriber_details_screen.dart';
 import 'packages_screen.dart';
 import 'sas_settings_screen.dart';
+import 'sas_wallet_breakdown.dart';
 import 'sas_project_national_screen.dart';
 import 'receipt_screen.dart';
 import 'quick_reports_screen.dart';
@@ -52,6 +54,9 @@ class _DashboardScreenState extends State<DashboardScreen>
     with WidgetsBindingObserver {
   String? sasBalanceText;
   String? sasRewardPointsText;
+
+  /// رصيد كل ساس على حدة، للتفصيل تحت المجموع.
+  SasWallets? sasWallets;
   bool sasWalletLoading = false;
   DateTime _dashboardDate = DateTime.now();
   Timer? _subscriptionGuardTimer;
@@ -217,32 +222,15 @@ class _DashboardScreenState extends State<DashboardScreen>
   Future<void> _loadSasWallet() async {
     if (sasWalletLoading) return;
     setState(() => sasWalletLoading = true);
-
     try {
-      int? userId;
-      for (final s in AppStore.subscribers) {
-        final raw = s.sasId.trim().isNotEmpty
-            ? s.sasId.trim()
-            : (s.sasData['id'] ?? s.sasData['user_id'] ?? '').toString().trim();
-        final parsed = int.tryParse(raw);
-        if (parsed != null) {
-          userId = parsed;
-          break;
-        }
-      }
-
-      if (userId == null) {
-        throw Exception('لا يوجد مشترك متزامن يحمل SAS ID');
-      }
-
-      final settings = await SasSettings.load();
-      final api = SasApiService(settings);
-      final wallet = await api.fetchDashboardWallet(userId);
-
+      final wallets = await SasWallets.load();
       if (!mounted) return;
       setState(() {
-        sasBalanceText = wallet['balance']?.toString();
-        sasRewardPointsText = wallet['reward_points']?.toString();
+        sasWallets = wallets;
+        final balance = wallets.totalBalance;
+        final points = wallets.totalRewardPoints;
+        sasBalanceText = balance == null ? null : moneyText(balance);
+        sasRewardPointsText = points == null ? null : moneyText(points);
       });
     } catch (_) {
       // نبقي الداشبورد شغال حتى إذا تعذر جلب بيانات SAS.
@@ -1672,6 +1660,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                   title: 'بيانات SAS المباشرة',
                   onTap: () async {
                     Navigator.pop(context);
+                    final settings = await pickSasAccount(
+                      context,
+                      title: 'بيانات أي ساس؟',
+                    );
+                    if (settings == null || !context.mounted) return;
                     showDialog(
                       context: context,
                       barrierDismissible: false,
@@ -1679,7 +1672,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                           const Center(child: CircularProgressIndicator()),
                     );
                     try {
-                      final settings = await SasSettings.load();
                       final api = SasApiService(settings);
                       final data = await api.fetchDashboardWidgets();
                       if (context.mounted) Navigator.pop(context);
@@ -1706,7 +1698,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                         builder: (ctx) => Directionality(
                           textDirection: TextDirection.rtl,
                           child: AlertDialog(
-                            title: const Text('بيانات SAS المباشرة'),
+                            title: Text(
+                              'بيانات SAS المباشرة — ${settings.displayName}',
+                            ),
                             content: SingleChildScrollView(
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -2622,6 +2616,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     final points = sasWalletLoading && sasRewardPointsText == null
         ? '...'
         : (sasRewardPointsText ?? '--');
+    final wallets = sasWallets;
 
     return _dashboardPanel(
       title: 'معلومات الساس',
@@ -2638,31 +2633,42 @@ class _DashboardScreenState extends State<DashboardScreen>
               )
             : const Icon(Icons.refresh_rounded, size: 20),
       ),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: DashboardStatCard(
-                label: 'الرصيد',
-                value: balance,
-                assetName: _dashboardIcon('balance'),
-                color: const Color(0xFF00796B),
-                onTap: _loadSasWallet,
-              ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: DashboardStatCard(
+                    label: wallets != null && wallets.several
+                        ? 'مجموع الرصيد'
+                        : 'الرصيد',
+                    value: balance,
+                    assetName: _dashboardIcon('balance'),
+                    color: const Color(0xFF00796B),
+                    onTap: _loadSasWallet,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DashboardStatCard(
+                    label: 'النقاط التشجيعية',
+                    value: points,
+                    assetName: _dashboardIcon('points'),
+                    color: const Color(0xFF7446D7),
+                    onTap: _loadSasWallet,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: DashboardStatCard(
-                label: 'النقاط التشجيعية',
-                value: points,
-                assetName: _dashboardIcon('points'),
-                color: const Color(0xFF7446D7),
-                onTap: _loadSasWallet,
-              ),
-            ),
+          ),
+          if (wallets != null && wallets.several) ...[
+            const SizedBox(height: 8),
+            SasWalletBreakdown(wallets: wallets),
           ],
-        ),
+        ],
       ),
     );
   }

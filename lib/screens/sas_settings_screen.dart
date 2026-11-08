@@ -978,3 +978,51 @@ class DeleteSubscribersDialog extends StatelessWidget {
     );
   }
 }
+
+/// يختار الوكيل ساساً حين يربط أكثر من واحد؛ مع ساس واحد يُرجع مباشرة.
+/// null إن ألغى الاختيار أو لم يربط أي ساس.
+Future<SasSettings?> pickSasAccount(
+  BuildContext context, {
+  String title = 'اختر الساس',
+  Future<List<SasSettings>> Function()? loadAccounts,
+}) async {
+  final accounts = await (loadAccounts ?? SasSettings.loadAll)();
+  if (accounts.length <= 1 || !context.mounted) {
+    return accounts.isEmpty ? null : accounts.first;
+  }
+  return showModalBottomSheet<SasSettings>(
+    context: context,
+    builder: (sheetContext) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            for (final account in accounts)
+              ListTile(
+                key: ValueKey('pick-account-${account.accountId}'),
+                leading: const Icon(Icons.dns_rounded),
+                title: Text(account.displayName),
+                subtitle: Text(
+                  account.company.trim().isNotEmpty
+                      ? account.company.trim()
+                      : account.username,
+                ),
+                onTap: () => Navigator.pop(sheetContext, account),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
