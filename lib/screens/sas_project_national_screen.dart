@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../sas_project_national_service.dart';
@@ -127,28 +126,21 @@ class _SasProjectNationalScreenState extends State<SasProjectNationalScreen> {
               obscureText: _hidePassword,
               decoration: _decoration('كلمة المرور', Icons.lock_outline)
                   .copyWith(
-                suffixIcon: IconButton(
-                  tooltip: _hidePassword ? 'إظهار كلمة المرور' : 'إخفاء كلمة المرور',
-                  icon: Icon(
-                    _hidePassword ? Icons.visibility : Icons.visibility_off,
+                    suffixIcon: IconButton(
+                      tooltip: _hidePassword
+                          ? 'إظهار كلمة المرور'
+                          : 'إخفاء كلمة المرور',
+                      icon: Icon(
+                        _hidePassword ? Icons.visibility : Icons.visibility_off,
+                      ),
+                      onPressed: () =>
+                          setState(() => _hidePassword = !_hidePassword),
+                    ),
                   ),
-                  onPressed: () => setState(() => _hidePassword = !_hidePassword),
-                ),
-              ),
             ),
-            if (kIsWeb) ...[
-              const SizedBox(height: 16),
-              Text(
-                SasProjectNationalService.webUnsupportedMessage,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: kIsWeb || _loading || _settingsLoading ? null : _sync,
+              onPressed: _loading || _settingsLoading ? null : _sync,
               icon: _loading
                   ? const SizedBox(
                       width: 18,
@@ -156,7 +148,9 @@ class _SasProjectNationalScreenState extends State<SasProjectNationalScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.sync),
-              label: Text(_loading ? 'جارِ المزامنة...' : 'مزامنة بيانات المشتركين'),
+              label: Text(
+                _loading ? 'جارِ المزامنة...' : 'مزامنة بيانات المشتركين',
+              ),
             ),
             if (_result != null) ...[
               const SizedBox(height: 16),

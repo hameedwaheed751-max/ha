@@ -550,36 +550,55 @@ class SasProjectNationalService {
     };
   }
 
-  /// موقع FTTH يسمح للمتصفح بكل الرؤوس عبر `*`، والمتصفحات لا تعدّ ذلك
-  /// سماحاً بـ Authorization، فتُحجب كل الطلبات بعد الدخول. وبروكسي الويب
-  /// لا يصل إلى admin.ftth.iq (يرد 520)، لذلك يعمل FTTH من تطبيق الهاتف فقط.
+  /// المتصفح يرفض الطلب إذا لم يسمح موقع FTTH بقراءته من موقعنا (CORS).
+  /// يظهر الخطأ عندها كخطأ اتصال بلا رمز حالة.
   static const webUnsupportedMessage =
-      'ساس المشروع الوطني لا يعمل من المتصفح لأن موقع FTTH يمنع ذلك. '
+      'المتصفح منع الاتصال بموقع FTTH. '
       'استخدم تطبيق أندرويد للمزامنة والتفعيل.';
 
-  Future<void> login() async {
-    if (kIsWeb) {
-      throw const SasProjectNationalException(webUnsupportedMessage);
+  /// طلب كتابة قد يكون نُفّذ في FTTH ثم منع المتصفح قراءة رده.
+  static const webUnreadableWriteMessage =
+      'لم يستطع المتصفح قراءة رد FTTH، وقد تكون العملية نُفّذت. '
+      'لا تُعد المحاولة قبل مزامنة FTTH والتأكد من حالة المشترك.';
+
+  /// على الويب: خطأ الاتصال يعني غالباً منع المتصفح، فنشرح ذلك للوكيل.
+  static Future<http.Response> _webGuard(
+    Future<http.Response> Function() request, {
+    required bool write,
+  }) async {
+    if (!kIsWeb) return request();
+    try {
+      return await request();
+    } on http.ClientException {
+      throw SasProjectNationalException(
+        write ? webUnreadableWriteMessage : webUnsupportedMessage,
+      );
     }
+  }
+
+  Future<void> login() async {
     _log('login start: POST /api/auth/Contractor/token');
-    final response = await _client
-        .post(
-          _uri('/api/auth/Contractor/token'),
-          headers: {
-            'Accept': 'application/json, text/plain, */*',
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-Client-App': settings.clientApp,
-            'X-User-Role': settings.userRole,
-          },
-          body: {
-            'grant_type': 'password',
-            'scope': 'openid profile',
-            'client_id': '',
-            'username': settings.username.trim(),
-            'password': settings.password,
-          },
-        )
-        .timeout(const Duration(seconds: 45));
+    final response = await _webGuard(
+      write: false,
+      () => _client
+          .post(
+            _uri('/api/auth/Contractor/token'),
+            headers: {
+              'Accept': 'application/json, text/plain, */*',
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'X-Client-App': settings.clientApp,
+              'X-User-Role': settings.userRole,
+            },
+            body: {
+              'grant_type': 'password',
+              'scope': 'openid profile',
+              'client_id': '',
+              'username': settings.username.trim(),
+              'password': settings.password,
+            },
+          )
+          .timeout(const Duration(seconds: 45)),
+    );
 
     _log('login response: HTTP ${response.statusCode}');
     final data = _decodeObject(response, 'FTTH login');
@@ -597,10 +616,9 @@ class SasProjectNationalService {
     _log('login success: access token received');
   }
 
-  /// مزامنة بالإعدادات المحفوظة، تُستدعى عند فتح التطبيق. لا تفعل شيئاً على
-  /// الويب أو إن لم تُضبط الإعدادات بعد.
+  /// مزامنة بالإعدادات المحفوظة، تُستدعى عند فتح التطبيق. لا تفعل شيئاً إن
+  /// لم تُضبط الإعدادات بعد.
   static Future<SasProjectNationalSyncResult?> syncSaved() async {
-    if (kIsWeb) return null;
     final settings = await SasProjectNationalSettings.load();
     if (!settings.isComplete) return null;
     final service = SasProjectNationalService(settings);
@@ -1129,6 +1147,7 @@ class SasProjectNationalService {
     return _send(
       'GET $path',
       () => _client.get(_uri(path, query), headers: _headers()),
+      write: false,
     );
   }
 
@@ -1144,8 +1163,9 @@ class SasProjectNationalService {
         headers: {
           ..._headers(),
           'Content-Type': 'application/json',
-          'Origin': _baseUrl,
-          'Referer': ?referer,
+          // المتصفح يمنع تعيين هذين الرأسين بنفسه.
+          if (!kIsWeb) 'Origin': _baseUrl,
+          if (!kIsWeb) 'Referer': ?referer,
         },
         body: jsonEncode(body),
       ),
@@ -1156,15 +1176,20 @@ class SasProjectNationalService {
   /// قبل تنفيذه، فلا خطر من تكرار الخصم.
   Future<dynamic> _send(
     String operation,
-    Future<http.Response> Function() request,
-  ) async {
+    Future<http.Response> Function() request, {
+    bool write = true,
+  }) async {
     if (!isAuthenticated) await login();
-    var response = await request().timeout(const Duration(seconds: 45));
+    Future<http.Response> guarded() => _webGuard(
+      () => request().timeout(const Duration(seconds: 45)),
+      write: write,
+    );
+    var response = await guarded();
     _log('$operation response: HTTP ${response.statusCode}');
     if (response.statusCode == 401) {
       _accessToken = null;
       await login();
-      response = await request().timeout(const Duration(seconds: 45));
+      response = await guarded();
       _log('$operation retry response: HTTP ${response.statusCode}');
     }
     if (response.statusCode >= 200 &&
