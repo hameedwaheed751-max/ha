@@ -36,6 +36,9 @@ class _SasProjectNationalScreenState extends State<SasProjectNationalScreen> {
       _serverController.text = settings.baseUrl;
       _usernameController.text = settings.username;
       _passwordController.text = settings.password;
+      if (settings.needsPassword) {
+        _result = SasProjectNationalSettings.missingPasswordMessage;
+      }
     } finally {
       if (mounted) setState(() => _settingsLoading = false);
     }

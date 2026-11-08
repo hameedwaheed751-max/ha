@@ -47,12 +47,16 @@ class SasProjectNationalSettings {
     final value = (await ref.get().timeout(const Duration(seconds: 5))).value;
     if (value is! Map) return false;
     final username = (value['username'] ?? '').toString().trim();
-    final password = (value['password'] ?? '').toString();
-    if (username.isEmpty || password.isEmpty) return false;
+    if (username.isEmpty) return false;
     final baseUrl = (value['baseUrl'] ?? '').toString().trim();
     if (baseUrl.isNotEmpty) await prefs.setString(_baseUrlKey, baseUrl);
     await prefs.setString(_usernameKey, username);
-    await _storePassword(prefs, password);
+    // كلمة مرور قديمة في السحابة تملأ الجهاز الجديد فقط، ولا تستبدل ما
+    // أدخله الوكيل هنا. الجديدة لا تُرفع أصلاً.
+    final password = (value['password'] ?? '').toString();
+    if (password.isNotEmpty && (await _loadLocal(prefs)).password.isEmpty) {
+      await _storePassword(prefs, password);
+    }
     return true;
   }
 
@@ -105,11 +109,11 @@ class SasProjectNationalSettings {
     await prefs.setString(_usernameKey, username.trim());
     await _storePassword(prefs, password);
     try {
+      // كلمة المرور على الجهاز فقط، في التخزين الآمن.
       await _remoteRef()
-          ?.set({
+          ?.update({
             'baseUrl': baseUrl.trim(),
             'username': username.trim(),
-            'password': password,
             'updatedAt': ServerValue.timestamp,
           })
           .timeout(const Duration(seconds: 8));
@@ -119,6 +123,13 @@ class SasProjectNationalSettings {
   }
 
   bool get isComplete => username.trim().isNotEmpty && password.isNotEmpty;
+
+  /// الحساب مربوط لكن كلمة المرور لم تُدخل على هذا الجهاز.
+  bool get needsPassword => username.trim().isNotEmpty && password.isEmpty;
+
+  static const missingPasswordMessage =
+      'أدخل كلمة مرور ساس المشروع الوطني على هذا الجهاز ثم احفظ. '
+      'تُحفظ على الجهاز فقط.';
 }
 
 class SasProjectNationalData {
@@ -577,6 +588,11 @@ class SasProjectNationalService {
   }
 
   Future<void> login() async {
+    if (settings.password.isEmpty) {
+      throw const SasProjectNationalException(
+        SasProjectNationalSettings.missingPasswordMessage,
+      );
+    }
     _log('login start: POST /api/auth/Contractor/token');
     final response = await _webGuard(
       write: false,

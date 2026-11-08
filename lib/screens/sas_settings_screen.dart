@@ -43,7 +43,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
   String? _busyId;
 
   List<SasSettings> get _accounts => [
-    if (_primary != null && _primary!.isConfigured) _primary!,
+    if (_primary != null && _primary!.isLinked) _primary!,
     ..._extras,
   ];
 
@@ -82,7 +82,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
       .length;
 
   Future<void> _add() async {
-    final primaryReady = _primary?.isConfigured == true;
+    final primaryReady = _primary?.isLinked == true;
     if (primaryReady) {
       final allowed =
           (widget.planAllowsExtra ??
@@ -570,6 +570,47 @@ class SasAccountCard extends StatelessWidget {
                       color: colors.onSurfaceVariant,
                     ),
                   ),
+                  if (account.needsPassword) ...[
+                    const SizedBox(height: 6),
+                    InkWell(
+                      key: ValueKey('needs-password-${account.accountId}'),
+                      onTap: enabled
+                          ? () => onSelected(SasCardAction.edit)
+                          : null,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colors.errorContainer,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.lock_outline,
+                              size: 16,
+                              color: colors.onErrorContainer,
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'أدخل كلمة المرور على هذا الجهاز',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.onErrorContainer,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 2),
                   Text(
                     '$subscribers مشترك',
@@ -786,6 +827,7 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
                 controller: _pass,
                 obscureText: _hide,
                 decoration: _dec('كلمة المرور', Icons.lock_outline).copyWith(
+                  helperText: 'تُحفظ على هذا الجهاز فقط',
                   suffixIcon: IconButton(
                     onPressed: () => setState(() => _hide = !_hide),
                     icon: Icon(_hide ? Icons.visibility : Icons.visibility_off),

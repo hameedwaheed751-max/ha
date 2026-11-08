@@ -2320,6 +2320,18 @@ class AppStore {
     if (!clearStorage) return;
 
     final p = await SharedPreferences.getInstance();
+    // كلمات مرور الساسات الإضافية للحساب السابق لا تبقى لحساب آخر.
+    final extraPasswordKeys = <String>[];
+    try {
+      final raw = p.getString('sas_extra_accounts');
+      if (raw != null) {
+        final ids = (jsonDecode(raw) as Map).keys;
+        extraPasswordKeys.addAll(ids.map((id) => 'sas_extra_pass_$id'));
+      }
+    } catch (_) {}
+    for (final key in extraPasswordKeys) {
+      await p.remove(key);
+    }
     const keysToClear = <String>[
       'officeName',
       'officePhone',
@@ -2354,6 +2366,9 @@ class AppStore {
       'ftth_sas_base_url',
       'ftth_sas_username',
       'ftth_sas_password',
+      'sas_extra_accounts',
+      'sas_label',
+      'sas_company',
       'render_whatsapp_send_logs',
       'subscribersRevision',
       'packagesRevision',
@@ -2385,7 +2400,11 @@ class AppStore {
     await p.remove(_localAccountingKey(accountingActivationsKey));
     await p.remove(_localAccountingKey('accountingBalanceAdditions'));
     const secureStorage = FlutterSecureStorage();
-    for (final key in const ['sas_manager_password_sec', 'ftth_sas_password']) {
+    for (final key in [
+      'sas_manager_password_sec',
+      'ftth_sas_password',
+      ...extraPasswordKeys,
+    ]) {
       try {
         await secureStorage.delete(key: key);
       } catch (e) {

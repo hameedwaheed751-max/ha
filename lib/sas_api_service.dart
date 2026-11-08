@@ -85,19 +85,29 @@ class SasSettings {
   /// الأساسي أولاً ثم الإضافية؛ الأساسي يُتجاوز إذا لم يُضبط.
   static Future<List<SasSettings>> loadAll() async {
     final primary = await load();
-    final configured =
-        primary.serverUrl.trim().isNotEmpty && primary.password.isNotEmpty;
-    return [if (configured) primary, ...await loadExtras()];
+    // مربوط بلا كلمة مرور على هذا الجهاز: يبقى ظاهراً ويُطلب إدخالها.
+    return [if (primary.isLinked) primary, ...await loadExtras()];
   }
 
-  Map<String, dynamic> _extraJson({bool withPassword = false}) => {
+  Map<String, dynamic> _extraJson() => {
     'label': label.trim(),
     if (company.trim().isNotEmpty) 'company': company.trim(),
     'serverUrl': _normalizeServerUrl(serverUrl),
     'username': username.trim(),
     if (_normalizeProxyUrl(webProxyUrl).isNotEmpty)
       'webProxyUrl': _normalizeProxyUrl(webProxyUrl),
-    if (withPassword) 'password': password,
+  };
+
+  /// ما يُكتب في السحابة: كل شيء عدا كلمة المرور، فهي على الجهاز فقط.
+  /// الحقول الفارغة تُمسح، وكلمة مرور قديمة محفوظة هناك لا تُلمس.
+  Map<String, dynamic> _extraCloudPatch() => {
+    'label': label.trim(),
+    'company': company.trim().isNotEmpty ? company.trim() : null,
+    'serverUrl': _normalizeServerUrl(serverUrl),
+    'username': username.trim(),
+    'webProxyUrl': _normalizeProxyUrl(webProxyUrl).isNotEmpty
+        ? _normalizeProxyUrl(webProxyUrl)
+        : null,
   };
 
   static SasSettings? _extraFrom(String id, dynamic value, String password) {
@@ -112,7 +122,7 @@ class SasSettings {
       company: '${value['company'] ?? ''}'.trim(),
       serverUrl: server,
       username: user,
-      password: password.isNotEmpty ? password : '${value['password'] ?? ''}',
+      password: password,
       webProxyUrl: proxy.isNotEmpty
           ? _normalizeProxyUrl(proxy)
           : _normalizeProxyUrl(_proxyEnv),
@@ -168,7 +178,10 @@ class SasSettings {
             if (entry.value is! Map) continue;
             final account = Map<String, dynamic>.from(entry.value as Map);
             final password = '${account.remove('password') ?? ''}';
-            if (password.isNotEmpty) {
+            // نسخة السحابة القديمة تملأ الجهاز الجديد فقط، ولا تستبدل كلمة
+            // مرور أدخلها الوكيل هنا.
+            if (password.isNotEmpty &&
+                (await _readExtraPassword(p, '${entry.key}')).isEmpty) {
               await _writeExtraPassword(p, '${entry.key}', password);
             }
             remote['${entry.key}'] = account;
@@ -215,7 +228,7 @@ class SasSettings {
     if (uid != null) {
       await FirebaseDatabase.instance
           .ref('agents/$uid/sasAccounts/$accountId')
-          .set(_extraJson(withPassword: true))
+          .update(_extraCloudPatch())
           .timeout(const Duration(seconds: 8));
     }
     final p = await SharedPreferences.getInstance();
@@ -374,7 +387,8 @@ class SasSettings {
         );
       }
       if (sasData['password'] != null &&
-          sasData['password'].toString().isNotEmpty) {
+          sasData['password'].toString().isNotEmpty &&
+          (await _loadPassword(p)).isEmpty) {
         try {
           await SasApiService._secureStorage.write(
             key: _securePassKey,
@@ -423,8 +437,17 @@ class SasSettings {
     return primary;
   }
 
-  bool get isConfigured =>
-      _normalizeServerUrl(serverUrl).isNotEmpty && password.isNotEmpty;
+  bool get isConfigured => isLinked && password.isNotEmpty;
+
+  /// مربوط بالحساب، حتى لو لم تُدخل كلمة مروره على هذا الجهاز بعد.
+  bool get isLinked => _normalizeServerUrl(serverUrl).isNotEmpty;
+
+  bool get needsPassword => isLinked && password.isEmpty;
+
+  /// يظهر عندما يُفتح الحساب على جهاز لم تُدخل فيه كلمة مرور الساس.
+  String get missingPasswordMessage =>
+      'أدخل كلمة مرور "$displayName" على هذا الجهاز: '
+      'ربط SAS Radius ← تعديل. تُحفظ على الجهاز فقط.';
 
   /// فصل الساس الأساسي: تُمسح بياناته من الجهاز والسحابة، والمشتركون كما هم.
   static Future<void> clearPrimary() async {
@@ -502,14 +525,16 @@ class SasSettings {
 
         final agentRef = FirebaseDatabase.instance.ref('agents/$_uid');
         final sasRef = agentRef.child('sas');
+        // كلمة المرور لا تُرفع؛ تبقى على الجهاز في التخزين الآمن.
         await sasRef
-            .set({
+            .update({
               'serverUrl': cleanedServerUrl,
               'username': normalizedSasUser,
-              'password': password,
-              if (cleanedProxyUrl.isNotEmpty) 'webProxyUrl': cleanedProxyUrl,
-              if (label.trim().isNotEmpty) 'label': label.trim(),
-              if (company.trim().isNotEmpty) 'company': company.trim(),
+              'webProxyUrl': cleanedProxyUrl.isNotEmpty
+                  ? cleanedProxyUrl
+                  : null,
+              'label': label.trim().isNotEmpty ? label.trim() : null,
+              'company': company.trim().isNotEmpty ? company.trim() : null,
             })
             .timeout(const Duration(seconds: 8));
 
@@ -1016,6 +1041,9 @@ class SasApiService {
   }
 
   Future<void> login() async {
+    if (settings.password.isEmpty) {
+      throw SasApiException(settings.missingPasswordMessage);
+    }
     final normalizedUrl = SasSettings._normalizeServerUrl(settings.serverUrl);
     if (normalizedUrl.contains('reseller.nbtel.iq') ||
         normalizedUrl.contains('reseller.nbtle.iq')) {

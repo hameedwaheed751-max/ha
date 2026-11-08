@@ -788,7 +788,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     SasProjectNationalService? service;
     try {
       final settings = await SasProjectNationalSettings.load();
-      if (settings.username.trim().isEmpty || settings.password.isEmpty) {
+      if (settings.needsPassword) {
+        throw Exception(SasProjectNationalSettings.missingPasswordMessage);
+      }
+      if (settings.username.trim().isEmpty) {
         throw Exception('أكمل إعدادات ساس المشروع الوطني أولاً');
       }
       service = SasProjectNationalService(settings);
