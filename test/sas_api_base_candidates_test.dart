@@ -27,4 +27,21 @@ void main() {
     final c = SasApiService.apiBaseCandidatesFor('https://sas.example.iq');
     expect(c.every((b) => b.startsWith('https://')), isTrue);
   });
+
+  test('a typed http address tries https after it, for the web proxy', () {
+    final c = SasApiService.apiBaseCandidatesFor('http://sas.example.iq');
+    expect(c.first, 'http://sas.example.iq/admin/api/index.php/api/');
+    expect(c, contains('https://sas.example.iq/admin/api/index.php/api/'));
+    expect(
+      c.indexOf('https://sas.example.iq/admin/api/index.php/api/'),
+      greaterThan(0),
+    );
+  });
+
+  test('a leading slash before http is ignored', () {
+    final c = SasApiService.apiBaseCandidatesFor('/http://sas.example.iq/');
+    expect(c.first, 'http://sas.example.iq/admin/api/index.php/api/');
+    expect(c, contains('https://sas.example.iq/admin/api/index.php/api/'));
+    expect(c.every((b) => !b.contains('//sas.example.iq/http')), isTrue);
+  });
 }

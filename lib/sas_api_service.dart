@@ -823,6 +823,9 @@ class SasApiService {
   }
 
   String get _sasOrigin {
+    // الأساس الذي قبل الدخول قد يكون https بدل http المكتوب.
+    final discovered = _discoveredApiBase[settings.serverUrl.trim()];
+    if (discovered != null) return computeOriginFor(discovered);
     return computeOriginFor(settings.serverUrl);
   }
 
@@ -869,13 +872,25 @@ class SasApiService {
 
     addFor(input);
     // No scheme typed: the panel may only answer on plain http.
-    if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+    // يُكتب الرابط أحياناً بشرطة في أوله: «/http://...».
+    final typed = raw.replaceFirst(RegExp(r'^[/\s]+'), '').toLowerCase();
+    if (!typed.startsWith('http://') && !typed.startsWith('https://')) {
       addFor('http://${input.substring('https://'.length)}');
+    }
+    // http مكتوب: وسيط الموقع يقبل https فقط، فيُجرَّب بعده.
+    if (typed.startsWith('http://')) {
+      addFor('https://${input.substring('http://'.length)}');
     }
     return out;
   }
 
   static bool _isNotFound(Object e) => e.toString().contains('HTTP 404');
+
+  /// وسيط الموقع رفض رابط http: يُجرَّب الرابط نفسه بـ https.
+  static bool _isHttpsOnly(Object e) =>
+      e.toString().contains('Only https SAS targets');
+
+  static bool _tryNextBase(Object e) => _isNotFound(e) || _isHttpsOnly(e);
 
   bool get _isResellerServer {
     final normalizedUrl = SasSettings._normalizeServerUrl(settings.serverUrl);
@@ -1179,7 +1194,7 @@ class SasApiService {
         return;
       } catch (e) {
         lastError = e;
-        if (!_isNotFound(e)) {
+        if (!_tryNextBase(e)) {
           if (known == null) _discoveredApiBase.remove(key);
           rethrow;
         }
