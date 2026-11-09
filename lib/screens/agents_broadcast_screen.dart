@@ -26,6 +26,7 @@ class AgentRecipient {
 List<AgentRecipient> agentBroadcastRecipients(
   Iterable<SubscriptionRequestModel> requests, {
   bool approvedOnly = true,
+  Map<String, AgentProfile> profiles = const {},
 }) {
   final recipients = <AgentRecipient>[];
   final phones = <String>{};
@@ -38,13 +39,18 @@ List<AgentRecipient> agentBroadcastRecipients(
           (r) => r.status == SubscriptionRequestService.approvedStatus,
         );
     if (approvedOnly && !approved) continue;
+    final profile = profiles[current.uid];
     final withPhone = [current, ...agent.older].firstWhere(
       (r) => RenderWhatsAppService.normalizePhone(r.phone).isNotEmpty,
       orElse: () => current,
     );
-    final phone = RenderWhatsAppService.normalizePhone(withPhone.phone);
+    // الرقم الذي عدّله الوكيل في ملفه يتقدم على رقم طلبه.
+    final phone = RenderWhatsAppService.normalizePhone(
+      profile?.phoneOr(withPhone.phone) ?? withPhone.phone,
+    );
     if (phone.isEmpty || !phones.add(phone)) continue;
-    final name = '${current.firstName} ${current.lastName}'.trim();
+    final fromRequest = '${current.firstName} ${current.lastName}'.trim();
+    final name = profile?.nameOr(fromRequest) ?? fromRequest;
     recipients.add(
       AgentRecipient(
         uid: current.uid,
@@ -84,6 +90,7 @@ class _AgentsBroadcastScreenState extends State<AgentsBroadcastScreen> {
   late final Stream<List<SubscriptionRequestModel>> _requests =
       SubscriptionRequestService.watchRequests();
   bool _approvedOnly = true;
+  Future<Map<String, AgentProfile>>? _profiles;
   final Set<String> _excluded = {};
   bool _sending = false;
   bool _stop = false;
@@ -260,91 +267,106 @@ class _AgentsBroadcastScreenState extends State<AgentsBroadcastScreen> {
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
-            final all = agentBroadcastRecipients(
-              snapshot.data!,
-              approvedOnly: _approvedOnly,
+            _profiles ??= SubscriptionRequestService.loadAgentProfiles(
+              snapshot.data!.map((r) => r.uid),
             );
-            final chosen = all
-                .where((a) => !_excluded.contains(a.uid))
-                .toList();
-            return ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                TextField(
-                  key: const ValueKey('agents-broadcast-text'),
-                  controller: _template,
-                  enabled: !_sending,
-                  minLines: 5,
-                  maxLines: 12,
-                  decoration: const InputDecoration(
-                    labelText: 'نص الرسالة',
-                    helperText: '{name} اسم الوكيل، {plan} باقته في التطبيق',
-                    border: OutlineInputBorder(),
+            return FutureBuilder<Map<String, AgentProfile>>(
+              future: _profiles,
+              builder: (context, profiles) {
+                if (profiles.connectionState != ConnectionState.done) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return _body(
+                  agentBroadcastRecipients(
+                    snapshot.data!,
+                    approvedOnly: _approvedOnly,
+                    profiles: profiles.data ?? const {},
                   ),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 12),
-                SegmentedButton<bool>(
-                  segments: const [
-                    ButtonSegment(value: true, label: Text('المقبولون')),
-                    ButtonSegment(value: false, label: Text('كل الوكلاء')),
-                  ],
-                  selected: {_approvedOnly},
-                  onSelectionChanged: _sending
-                      ? null
-                      : (value) => setState(() => _approvedOnly = value.first),
-                ),
-                const SizedBox(height: 12),
-                if (_sending) ...[
-                  LinearProgressIndicator(
-                    value: _total == 0 ? null : _progress / _total,
-                  ),
-                  const SizedBox(height: 6),
-                  Text('جارٍ الإرسال $_progress من $_total'),
-                  TextButton(
-                    onPressed: () => setState(() => _stop = true),
-                    child: const Text('إيقاف'),
-                  ),
-                ] else
-                  FilledButton.icon(
-                    key: const ValueKey('agents-broadcast-send'),
-                    onPressed: chosen.isEmpty ? null : () => _send(chosen),
-                    icon: const Icon(Icons.send_rounded),
-                    label: Text('إرسال إلى ${chosen.length} وكيل'),
-                  ),
-                const SizedBox(height: 12),
-                Text(
-                  'الوكلاء (${all.length}) — أزل العلامة عمن لا تريد مراسلته',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                if (all.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('لا يوجد وكيل له رقم هاتف'),
-                  ),
-                for (final agent in all)
-                  CheckboxListTile(
-                    key: ValueKey('agent-${agent.uid}'),
-                    contentPadding: EdgeInsets.zero,
-                    value: !_excluded.contains(agent.uid),
-                    onChanged: _sending
-                        ? null
-                        : (on) => setState(
-                            () => on == true
-                                ? _excluded.remove(agent.uid)
-                                : _excluded.add(agent.uid),
-                          ),
-                    title: Text(agent.name),
-                    subtitle: Text(
-                      '${agent.phone} • ${agent.plan}'
-                      '${agent.approved ? '' : ' • لم يُقبل'}',
-                    ),
-                  ),
-              ],
+                );
+              },
             );
           },
         ),
       ),
+    );
+  }
+
+  Widget _body(List<AgentRecipient> all) {
+    final chosen = all.where((a) => !_excluded.contains(a.uid)).toList();
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        TextField(
+          key: const ValueKey('agents-broadcast-text'),
+          controller: _template,
+          enabled: !_sending,
+          minLines: 5,
+          maxLines: 12,
+          decoration: const InputDecoration(
+            labelText: 'نص الرسالة',
+            helperText: '{name} اسم الوكيل، {plan} باقته في التطبيق',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 12),
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: true, label: Text('المقبولون')),
+            ButtonSegment(value: false, label: Text('كل الوكلاء')),
+          ],
+          selected: {_approvedOnly},
+          onSelectionChanged: _sending
+              ? null
+              : (value) => setState(() => _approvedOnly = value.first),
+        ),
+        const SizedBox(height: 12),
+        if (_sending) ...[
+          LinearProgressIndicator(
+            value: _total == 0 ? null : _progress / _total,
+          ),
+          const SizedBox(height: 6),
+          Text('جارٍ الإرسال $_progress من $_total'),
+          TextButton(
+            onPressed: () => setState(() => _stop = true),
+            child: const Text('إيقاف'),
+          ),
+        ] else
+          FilledButton.icon(
+            key: const ValueKey('agents-broadcast-send'),
+            onPressed: chosen.isEmpty ? null : () => _send(chosen),
+            icon: const Icon(Icons.send_rounded),
+            label: Text('إرسال إلى ${chosen.length} وكيل'),
+          ),
+        const SizedBox(height: 12),
+        Text(
+          'الوكلاء (${all.length}) — أزل العلامة عمن لا تريد مراسلته',
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        if (all.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('لا يوجد وكيل له رقم هاتف'),
+          ),
+        for (final agent in all)
+          CheckboxListTile(
+            key: ValueKey('agent-${agent.uid}'),
+            contentPadding: EdgeInsets.zero,
+            value: !_excluded.contains(agent.uid),
+            onChanged: _sending
+                ? null
+                : (on) => setState(
+                    () => on == true
+                        ? _excluded.remove(agent.uid)
+                        : _excluded.add(agent.uid),
+                  ),
+            title: Text(agent.name),
+            subtitle: Text(
+              '${agent.phone} • ${agent.plan}'
+              '${agent.approved ? '' : ' • لم يُقبل'}',
+            ),
+          ),
+      ],
     );
   }
 }

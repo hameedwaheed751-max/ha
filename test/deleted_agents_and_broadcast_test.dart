@@ -127,4 +127,23 @@ void main() {
       'مرحباً علي (سنة)',
     );
   });
+
+  test('the profile the agent edited wins over the request', () {
+    final profile = AgentProfile.fromValue({
+      'firstName': 'علي',
+      'lastName': 'حسن',
+      'phone': '07812345678',
+      'email': 'new@x.com',
+    })!;
+    expect(profile.name, 'علي حسن');
+    expect(profile.phoneOr('07700000000'), '07812345678');
+    expect(const AgentProfile().phoneOr('07700000000'), '07700000000');
+
+    final recipients = agentBroadcastRecipients(
+      [_request('a', uid: 'u1')],
+      profiles: {'u1': profile},
+    );
+    expect(recipients.single.phone, endsWith('7812345678'));
+    expect(recipients.single.name, 'علي حسن');
+  });
 }

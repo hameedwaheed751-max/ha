@@ -125,6 +125,31 @@ class SubscriptionRequestModel {
   }
 }
 
+/// بيانات الوكيل كما عدّلها في ملفه الشخصي؛ أحدث من نسخة طلب الاشتراك.
+class AgentProfile {
+  const AgentProfile({this.name = '', this.phone = '', this.email = ''});
+
+  final String name;
+  final String phone;
+  final String email;
+
+  static AgentProfile? fromValue(Object? value) {
+    if (value is! Map) return null;
+    String field(String key) => '${value[key] ?? ''}'.trim();
+    final full = '${field('firstName')} ${field('lastName')}'.trim();
+    return AgentProfile(
+      name: field('name').isNotEmpty ? field('name') : full,
+      phone: field('phone'),
+      email: field('email'),
+    );
+  }
+
+  /// الاسم والرقم والبريد من الملف إن وُجدت، وإلا من الطلب.
+  String nameOr(String fallback) => name.isNotEmpty ? name : fallback;
+  String phoneOr(String fallback) => phone.isNotEmpty ? phone : fallback;
+  String emailOr(String fallback) => email.isNotEmpty ? email : fallback;
+}
+
 class AgentRequests {
   const AgentRequests({required this.current, required this.older});
 
@@ -481,6 +506,33 @@ class SubscriptionRequestService {
       knownUids: knownUids,
       existingAgents: existing,
     );
+  }
+
+  /// ملف الوكيل الشخصي مباشرة، ليظهر رقمه واسمه بعد تعديلهما.
+  static Stream<AgentProfile?> watchAgentProfile(String uid) {
+    _requireTrustedAdmin();
+    return _root
+        .child('agents/$uid/profile')
+        .onValue
+        .map((event) => AgentProfile.fromValue(event.snapshot.value));
+  }
+
+  /// ملفات عدة وكلاء مرة واحدة؛ من تعذرت قراءته يبقى بيانات طلبه.
+  static Future<Map<String, AgentProfile>> loadAgentProfiles(
+    Iterable<String> uids,
+  ) async {
+    _requireTrustedAdmin();
+    final profiles = <String, AgentProfile>{};
+    await Future.wait(
+      uids.toSet().where((uid) => uid.isNotEmpty).map((uid) async {
+        try {
+          final value = (await _root.child('agents/$uid/profile').get()).value;
+          final profile = AgentProfile.fromValue(value);
+          if (profile != null) profiles[uid] = profile;
+        } catch (_) {}
+      }),
+    );
+    return profiles;
   }
 
   /// عدد مشتركي الوكيل المحفوظين في حسابه، ومنهم من جاء من مزامنة ساسه.

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models.dart';
@@ -37,8 +39,32 @@ class _SubscriptionRequestsAdminScreenState
   /// وكلاء حُذفوا قبل حفظ طلباتهم، من بصماتهم؛ يُقرأ مرة.
   Future<List<SubscriptionRequestModel>>? _deletedFromClaims;
 
+  /// ملف كل وكيل مباشرة، فيظهر رقمه أو اسمه بعد أن يعدّله.
+  final Map<String, AgentProfile> _profiles = {};
+  final Map<String, StreamSubscription<AgentProfile?>> _profileWatchers = {};
+
+  void _watchProfile(SubscriptionRequestModel request) {
+    final uid = request.uid;
+    if (uid.isEmpty || request.isDeleted) return;
+    if (_profileWatchers.containsKey(uid)) return;
+    _profileWatchers[uid] = SubscriptionRequestService.watchAgentProfile(uid)
+        .listen((profile) {
+          if (!mounted) return;
+          setState(() {
+            if (profile == null) {
+              _profiles.remove(uid);
+            } else {
+              _profiles[uid] = profile;
+            }
+          });
+        }, onError: (_) {});
+  }
+
   @override
   void dispose() {
+    for (final watcher in _profileWatchers.values) {
+      watcher.cancel();
+    }
     _searchController.dispose();
     super.dispose();
   }
@@ -50,8 +76,16 @@ class _SubscriptionRequestsAdminScreenState
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  String _agentName(SubscriptionRequestModel request) =>
-      '${request.firstName} ${request.lastName}'.trim();
+  String _agentName(SubscriptionRequestModel request) {
+    final fromRequest = '${request.firstName} ${request.lastName}'.trim();
+    return _profiles[request.uid]?.nameOr(fromRequest) ?? fromRequest;
+  }
+
+  String _phone(SubscriptionRequestModel request) =>
+      _profiles[request.uid]?.phoneOr(request.phone) ?? request.phone;
+
+  String _email(SubscriptionRequestModel request) =>
+      _profiles[request.uid]?.emailOr(request.email) ?? request.email;
 
   String _safeEventId(String value) =>
       value.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
@@ -104,12 +138,12 @@ class _SubscriptionRequestsAdminScreenState
       final notified = await _afterDecision(
         event: DailyTaskEvent(
           type: 'payment_approved',
-          subscriberUser: request.email,
+          subscriberUser: _email(request),
           subscriberName: _agentName(request),
           at: DateTime.now(),
           note: 'تم قبول طلب الدفع - $planLabel',
         ),
-        phone: request.phone,
+        phone: _phone(request),
         text:
             'مرحباً ${_agentName(request)}،\n✅ تم قبول طلب الاشتراك بنجاح.\n📦 الباقة: $planLabel\n📅 ينتهي الاشتراك: ${_dateText(endDate)}\n\nشكراً لاختياركم خدمتنا.',
         eventType: 'payment_approved',
@@ -170,12 +204,12 @@ class _SubscriptionRequestsAdminScreenState
       final notified = await _afterDecision(
         event: DailyTaskEvent(
           type: 'payment_rejected',
-          subscriberUser: request.email,
+          subscriberUser: _email(request),
           subscriberName: _agentName(request),
           at: DateTime.now(),
           note: reason,
         ),
-        phone: request.phone,
+        phone: _phone(request),
         text:
             'مرحباً ${_agentName(request)}،\n❌ تم رفض طلب الاشتراك.\nالسبب: $reason\n\nللاستفسار يرجى التواصل مع:\n🏢 ${AppStore.effectiveAgentName}\n\nشكراً لكم.',
         eventType: 'payment_rejected',
@@ -356,13 +390,15 @@ class _SubscriptionRequestsAdminScreenState
     final confirmed = await _confirm(
       title: 'إعادة تعيين كلمة المرور',
       content:
-          'سيصل إلى ${request.email} رابط يختار به الوكيل كلمة مرور جديدة.',
+          'سيصل إلى ${_email(request)} رابط يختار به الوكيل كلمة مرور جديدة.',
       confirmLabel: 'إرسال الرابط',
     );
     if (!confirmed) return;
     await _runAction(() async {
-      await SubscriptionRequestService.sendPasswordReset(email: request.email);
-      return 'تم إرسال رابط إعادة التعيين إلى ${request.email}';
+      await SubscriptionRequestService.sendPasswordReset(
+        email: _email(request),
+      );
+      return 'تم إرسال رابط إعادة التعيين إلى ${_email(request)}';
     }, 'فشل إرسال الرابط');
   }
 
@@ -408,7 +444,7 @@ class _SubscriptionRequestsAdminScreenState
         builder: (_) => _TrialClaimsDialog(
           agentName: _agentName(request),
           uid: request.uid,
-          phone: request.phone,
+          phone: _phone(request),
         ),
       );
 
@@ -444,7 +480,7 @@ class _SubscriptionRequestsAdminScreenState
           child: Text('إنهاء الاشتراك'),
         ),
       ],
-      if (request.email.isNotEmpty)
+      if (_email(request).isNotEmpty)
         const PopupMenuItem(
           value: _AdminAction.resetPassword,
           child: Text('إعادة تعيين كلمة المرور'),
@@ -593,8 +629,8 @@ class _SubscriptionRequestsAdminScreenState
     final request = agent.current;
     return [
       _agentName(request),
-      request.phone,
-      request.email,
+      _phone(request),
+      _email(request),
       request.requestId,
       request.selectedPlan,
       SubscriptionRequestService.planLabelFor(request.selectedPlan),
@@ -612,6 +648,7 @@ class _SubscriptionRequestsAdminScreenState
 
   Widget _requestCard(AgentRequests agent) {
     final request = agent.current;
+    _watchProfile(request);
     final status = request.status;
     final canReview = SubscriptionRequestService.isOpenForReview({
       'status': status,
@@ -696,8 +733,8 @@ class _SubscriptionRequestsAdminScreenState
               'الباقة: ${SubscriptionRequestService.planLabelFor(request.selectedPlan)}',
             ),
             Text('السعر: ${_amountText(request.amount)}'),
-            Text('الهاتف: ${request.phone.isEmpty ? '—' : request.phone}'),
-            Text('البريد: ${request.email.isEmpty ? '—' : request.email}'),
+            Text('الهاتف: ${_phone(request).isEmpty ? '—' : _phone(request)}'),
+            Text('البريد: ${_email(request).isEmpty ? '—' : _email(request)}'),
             Text(
               'رقم التحويل: ${request.transferNumber.isEmpty ? '—' : request.transferNumber}',
             ),
