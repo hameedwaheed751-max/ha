@@ -41,7 +41,20 @@ class SubscriptionRequestModel {
     this.reviewedAt,
     this.isRenewal = false,
     this.collectionPath = 'subscriptionRequests',
+    this.deletedAt,
+    this.deletedSas = '',
   });
+
+  /// حين حذف المدير الوكيل؛ يبقى طلبه مرفوضاً ليُعرف من حُذف.
+  final DateTime? deletedAt;
+
+  /// الساس الذي كان الوكيل مرتبطاً به عند حذفه.
+  final String deletedSas;
+
+  /// بطاقة وكيل محذوف: محفوظة عند الحذف، أو مستعادة من بصماته.
+  bool get isDeleted =>
+      deletedAt != null ||
+      collectionPath == SubscriptionRequestService.deletedClaimsPath;
 
   final String requestId;
   final String uid;
@@ -106,6 +119,8 @@ class SubscriptionRequestModel {
       isRenewal: data['isRenewal'] == true,
       collectionPath: (data['collectionPath'] ?? 'subscriptionRequests')
           .toString(),
+      deletedAt: _parseDateTime(data['deletedAt']),
+      deletedSas: (data['deletedSas'] ?? '').toString(),
     );
   }
 }
@@ -125,6 +140,10 @@ class SubscriptionRequestService {
   static const String approvedStatus = 'approved';
   static const String rejectedStatus = 'rejected';
   static const String reviewingStatus = 'reviewing';
+
+  /// مصدر بطاقات الوكلاء المحذوفين قبل حفظ طلباتهم: بصمات الباقة المجانية.
+  static const String deletedClaimsPath = 'trialClaims';
+  static const String deletedReason = 'حذف المدير الوكيل وبياناته';
   static const String trustedAdminUid = 'wE10WciDVudIOJziBurjhBxpDfO2';
 
   /// مهلة حجز الطلب أثناء القبول؛ بعدها يُعد الحجز متروكاً، كأن أُغلق التطبيق
@@ -251,17 +270,16 @@ class SubscriptionRequestService {
       throw StateError('لا يمكن حذف حساب المدير');
     }
 
-    final profile = (await _root.child('agents/$id/profile').get()).value;
-    final sasUsername = profile is Map
-        ? '${profile['sasUsername'] ?? ''}'.trim()
-        : '';
+    final profileValue = (await _root.child('agents/$id/profile').get()).value;
+    final profile = profileValue is Map
+        ? Map<String, dynamic>.from(profileValue)
+        : const <String, dynamic>{};
+    final sasValue = (await _root.child('agents/$id/sas').get()).value;
+    final sas = sasValue is Map
+        ? Map<String, dynamic>.from(sasValue)
+        : const <String, dynamic>{};
 
-    final updates = <String, Object?>{'agents/$id': null};
-    if (sasUsername.isNotEmpty && !sasUsername.contains('/')) {
-      updates['agents/${id}_$sasUsername'] = null;
-    }
-    final receipts = <String>[];
-    var requests = 0;
+    final requests = <String, Map<String, dynamic>>{};
     for (final path in [collectionName, legacyCollectionName]) {
       final snapshot = await _root
           .child('$adminRootNode/$path')
@@ -273,12 +291,22 @@ class SubscriptionRequestService {
       for (final entry in value.entries) {
         final request = entry.value;
         if (request is! Map || '${request['uid']}' != id) continue;
-        updates['$adminRootNode/$path/${entry.key}'] = null;
-        requests++;
-        final receipt = '${request['receiptImageUrl'] ?? ''}'.trim();
-        if (receipt.isNotEmpty) receipts.add(receipt);
+        requests['$adminRootNode/$path/${entry.key}'] =
+            Map<String, dynamic>.from(request);
       }
     }
+
+    final updates = deletionUpdates(
+      uid: id,
+      profile: profile,
+      sas: sas,
+      requests: requests,
+      now: DateTime.now().toUtc(),
+    );
+    final receipts = [
+      for (final request in requests.values)
+        '${request['receiptImageUrl'] ?? ''}'.trim(),
+    ].where((url) => url.isNotEmpty).toList();
 
     // تحديث واحد: إما يُحذف كل شيء أو لا يُحذف شيء.
     await _root.update(updates);
@@ -293,9 +321,165 @@ class SubscriptionRequestService {
       }
     }
     return AgentDeletionResult(
-      requests: requests,
+      requests: requests.length,
       receipts: receipts.length,
       receiptsDeleted: receiptsDeleted,
+    );
+  }
+
+  /// ما يكتبه حذف الوكيل: تُمحى بياناته، وتبقى طلباته مرفوضة بلا صور
+  /// إيصالات ليراها المدير في «مرفوض». وكيل بلا طلبات تُنشأ له بطاقة.
+  static Map<String, Object?> deletionUpdates({
+    required String uid,
+    required Map<String, dynamic> profile,
+    required Map<String, dynamic> sas,
+    required Map<String, Map<String, dynamic>> requests,
+    required DateTime now,
+  }) {
+    final at = now.toIso8601String();
+    final sasUser = '${sas['username'] ?? profile['sasUsername'] ?? ''}'.trim();
+    final sasServer = '${sas['serverUrl'] ?? ''}'.trim();
+    final sasLabel = sasUser.isEmpty
+        ? ''
+        : sasServer.isEmpty
+        ? sasUser
+        : '$sasUser @ ${TrialGuardService.normalizeSas(sasServer, sasUser).split('|').first}';
+
+    final updates = <String, Object?>{'agents/$uid': null};
+    final legacySas = '${profile['sasUsername'] ?? ''}'.trim();
+    if (legacySas.isNotEmpty && !legacySas.contains('/')) {
+      updates['agents/${uid}_$legacySas'] = null;
+    }
+    final marks = <String, Object?>{
+      'status': rejectedStatus,
+      'rejectionReason': deletedReason,
+      'reviewerUid': trustedAdminUid,
+      'reviewedAt': at,
+      'deletedAt': at,
+      'deletedSas': sasLabel,
+      'receiptImageUrl': null,
+      'receiptImage': null,
+      'reviewDecision': null,
+    };
+    for (final path in requests.keys) {
+      for (final mark in marks.entries) {
+        updates['$path/${mark.key}'] = mark.value;
+      }
+    }
+    if (requests.isEmpty) {
+      String field(String key) => '${profile[key] ?? ''}'.trim();
+      var first = field('firstName');
+      var last = field('lastName');
+      if (first.isEmpty && last.isEmpty) first = field('name');
+      final created = _parseDateTime(profile['createdAt']);
+      final requestId = 'deleted_$uid';
+      updates['$adminRootNode/$collectionName/$requestId'] = {
+        'requestId': requestId,
+        'uid': uid,
+        'email': field('email'),
+        'firstName': first,
+        'lastName': last,
+        'phone': field('phone'),
+        'selectedPlan': '',
+        'amount': '',
+        'paymentMethod': '',
+        'transferNumber': '',
+        'createdAt': (created ?? now).millisecondsSinceEpoch,
+        for (final mark in marks.entries)
+          if (mark.value != null) mark.key: mark.value,
+      };
+    }
+    return updates;
+  }
+
+  /// وكلاء حُذفوا قبل حفظ طلباتهم: بقيت بصماتهم فقط (المعرف والتاريخ).
+  /// كل معرف لا طلب له ولا حساب يصبح بطاقة مرفوضة.
+  static List<SubscriptionRequestModel> deletedAgentCards({
+    required Object? claims,
+    required Set<String> knownUids,
+    required Set<String> existingAgents,
+  }) {
+    if (claims is! Map) return const [];
+    final kinds = <String, Set<String>>{};
+    final firstAt = <String, int>{};
+    for (final kindEntry in claims.entries) {
+      final byHash = kindEntry.value;
+      if (byHash is! Map) continue;
+      for (final claim in byHash.values) {
+        if (claim is! Map) continue;
+        final uid = '${claim['uid'] ?? ''}'.trim();
+        if (uid.isEmpty ||
+            uid == trustedAdminUid ||
+            knownUids.contains(uid) ||
+            existingAgents.contains(uid)) {
+          continue;
+        }
+        kinds.putIfAbsent(uid, () => {}).add('${kindEntry.key}');
+        final at = claim['at'];
+        if (at is num) {
+          final ms = at.toInt();
+          final previous = firstAt[uid];
+          if (previous == null || ms < previous) firstAt[uid] = ms;
+        }
+      }
+    }
+    String kindName(String kind) => switch (kind) {
+      TrialGuardService.phonesKind => 'رقم هاتف',
+      TrialGuardService.sasKind => 'ساس',
+      _ => 'ساس FTTH',
+    };
+    final cards = [
+      for (final entry in kinds.entries)
+        SubscriptionRequestModel(
+          requestId: 'claims_${entry.key}',
+          uid: entry.key,
+          firstName: 'وكيل محذوف',
+          lastName: '',
+          phone: '',
+          email: '',
+          selectedPlan: '',
+          amount: '',
+          paymentMethod: '',
+          status: rejectedStatus,
+          createdAt: firstAt[entry.key] == null
+              ? null
+              : DateTime.fromMillisecondsSinceEpoch(firstAt[entry.key]!),
+          rejectionReason:
+              'حُذف قبل حفظ بياناته؛ بقيت بصماته: '
+              '${(entry.value.toList()..sort()).map(kindName).join('، ')}',
+          collectionPath: deletedClaimsPath,
+        ),
+    ];
+    cards.sort(
+      (a, b) => (b.createdAt?.millisecondsSinceEpoch ?? 0).compareTo(
+        a.createdAt?.millisecondsSinceEpoch ?? 0,
+      ),
+    );
+    return cards;
+  }
+
+  /// للمدير: بطاقات الوكلاء المحذوفين سابقاً من بصماتهم.
+  static Future<List<SubscriptionRequestModel>> loadDeletedAgentCards(
+    Set<String> knownUids,
+  ) async {
+    _requireTrustedAdmin();
+    final claims = (await _root.child(deletedClaimsPath).get()).value;
+    final candidates = deletedAgentCards(
+      claims: claims,
+      knownUids: knownUids,
+      existingAgents: const {},
+    );
+    final existing = <String>{};
+    await Future.wait(
+      candidates.map((card) async {
+        final role = await _root.child('agents/${card.uid}/profile').get();
+        if (role.exists) existing.add(card.uid);
+      }),
+    );
+    return deletedAgentCards(
+      claims: claims,
+      knownUids: knownUids,
+      existingAgents: existing,
     );
   }
 

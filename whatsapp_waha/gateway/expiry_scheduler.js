@@ -598,7 +598,8 @@ class ExpiryScheduler {
     const office = text(officeName);
     const fullName = [text(data.firstName), text(data.lastName)].filter(Boolean).join(' ');
     return {
-      agentName: text(data.name) || fullName || office,
+      // توقيع رسائل المشتركين اسم المكتب كما في التطبيق؛ اسم المدير احتياط فقط.
+      agentName: office || text(data.name) || fullName,
       officeName: office,
       officePhone: data.phone !== undefined && data.phone !== null ? text(data.phone) : text(officePhone),
       expiredTemplate: typeof expiredTemplate === 'string' ? expiredTemplate : '',

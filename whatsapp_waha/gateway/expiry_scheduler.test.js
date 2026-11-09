@@ -254,6 +254,14 @@ test('a disabled notice type is not sent and a saved message is used', async () 
   assert.equal(custom.sent[0].text, 'تنبيه مشترك 1 ينتهي 03/11/2026\n🏢 وكيل الاختبار • 07701234567');
 });
 
+test('the office name signs the notice, not the manager name', async () => {
+  const env = setup({ subscribers: [subscriber(1, localEnd(10))] });
+  await env.makeScheduler().run();
+  assert.equal(env.sent.length, 1);
+  assert.match(env.sent[0].text, /🏢 مكتب\n/);
+  assert.doesNotMatch(env.sent[0].text, /وكيل الاختبار/);
+});
+
 test('the default text matches the app template with the agent number', () => {
   const [event] = dueEvents([subscriber(1, '2026-11-05T14:00:00.000')], Date.UTC(2026, 10, 3, 12) * 1000, 180);
   const text = renderNotice(

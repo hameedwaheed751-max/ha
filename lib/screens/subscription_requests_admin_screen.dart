@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models.dart';
+import 'agents_broadcast_screen.dart';
 import '../services/payment_request_service.dart';
 import '../services/subscription_request_service.dart';
 import '../services/trial_guard_service.dart';
@@ -32,6 +33,9 @@ class _SubscriptionRequestsAdminScreenState
   final Map<String, Future<AgentSubscriberCounts>> _subscriberCounts = {};
   String _searchQuery = '';
   bool _busy = false;
+
+  /// وكلاء حُذفوا قبل حفظ طلباتهم، من بصماتهم؛ يُقرأ مرة.
+  Future<List<SubscriptionRequestModel>>? _deletedFromClaims;
 
   @override
   void dispose() {
@@ -412,6 +416,15 @@ class _SubscriptionRequestsAdminScreenState
     SubscriptionRequestModel request,
     bool canReview,
   ) {
+    if (request.isDeleted) {
+      return [
+        if (request.uid.isNotEmpty)
+          const PopupMenuItem(
+            value: _AdminAction.trialClaims,
+            child: Text('بصمات الباقة المجانية'),
+          ),
+      ];
+    }
     final approved =
         request.status == SubscriptionRequestService.approvedStatus;
     final hasAgent = request.uid.isNotEmpty;
@@ -641,7 +654,7 @@ class _SubscriptionRequestsAdminScreenState
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    _statusLabel(status),
+                    request.isDeleted ? 'محذوف' : _statusLabel(status),
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ),
@@ -663,8 +676,22 @@ class _SubscriptionRequestsAdminScreenState
               ],
             ),
             const SizedBox(height: 8),
-            if (request.uid.isNotEmpty) _subscriptionEnd(request.uid),
-            if (request.uid.isNotEmpty) _subscriberCount(request.uid),
+            if (request.uid.isNotEmpty && !request.isDeleted)
+              _subscriptionEnd(request.uid),
+            if (request.uid.isNotEmpty && !request.isDeleted)
+              _subscriberCount(request.uid),
+            if (request.isDeleted)
+              Text(
+                request.deletedAt == null
+                    ? 'وكيل محذوف'
+                    : 'حُذف الوكيل: ${_dateText(request.deletedAt)}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFFC62828),
+                ),
+              ),
+            if (request.deletedSas.isNotEmpty)
+              Text('الساس: ${request.deletedSas}'),
             Text(
               'الباقة: ${SubscriptionRequestService.planLabelFor(request.selectedPlan)}',
             ),
@@ -754,6 +781,18 @@ class _SubscriptionRequestsAdminScreenState
           appBar: AppBar(
             title: const Text('طلبات الاشتراك'),
             centerTitle: true,
+            actions: [
+              IconButton(
+                key: const ValueKey('open-agents-broadcast'),
+                tooltip: 'رسالة عامة للوكلاء',
+                icon: const Icon(Icons.campaign_outlined),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const AgentsBroadcastScreen(),
+                  ),
+                ),
+              ),
+            ],
           ),
           body: StreamBuilder<List<SubscriptionRequestModel>>(
             stream: _requests,
@@ -783,6 +822,13 @@ class _SubscriptionRequestsAdminScreenState
                         SubscriptionRequestService.rejectedStatus,
                   )
                   .toList();
+              final knownUids = <String>{
+                for (final request
+                    in snapshot.data ?? const <SubscriptionRequestModel>[])
+                  if (request.uid.isNotEmpty) request.uid,
+              };
+              _deletedFromClaims ??=
+                  SubscriptionRequestService.loadDeletedAgentCards(knownUids);
 
               return Column(
                 children: [
@@ -822,7 +868,22 @@ class _SubscriptionRequestsAdminScreenState
                       children: [
                         _requestList(open, 'لا توجد طلبات معلقة'),
                         _requestList(approved, 'لا توجد طلبات مقبولة'),
-                        _requestList(rejected, 'لا توجد طلبات مرفوضة'),
+                        FutureBuilder<List<SubscriptionRequestModel>>(
+                          future: _deletedFromClaims,
+                          builder: (context, deleted) {
+                            final restored = [
+                              for (final card
+                                  in deleted.data ??
+                                      const <SubscriptionRequestModel>[])
+                                if (!knownUids.contains(card.uid))
+                                  AgentRequests(current: card, older: const []),
+                            ].where(_matchesSearch);
+                            return _requestList([
+                              ...rejected,
+                              ...restored,
+                            ], 'لا توجد طلبات مرفوضة');
+                          },
+                        ),
                       ],
                     ),
                   ),
