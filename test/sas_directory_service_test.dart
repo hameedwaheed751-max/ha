@@ -118,4 +118,55 @@ void main() {
       expect(dups, hasLength(1));
     });
   });
+
+  group('publishable (backfill filter)', () {
+    test('keeps named accounts and drops those with no company', () {
+      final out = SasDirectoryService.publishable(const [
+        DirectoryCompany(
+          host: 'a.example.com',
+          company: 'آسيا سيل',
+          serverUrl: 'https://a.example.com',
+        ),
+        DirectoryCompany(
+          host: 'noname.example.com',
+          company: '   ',
+          serverUrl: 'https://noname.example.com',
+        ),
+      ]);
+      expect(out.map((c) => c.host), ['a.example.com']);
+    });
+
+    test('drops seed hosts and blank server urls', () {
+      final seedUrl = SasDirectoryService.seed.first.serverUrl;
+      final out = SasDirectoryService.publishable([
+        DirectoryCompany(
+          host: '',
+          company: 'سبيد نت',
+          serverUrl: seedUrl,
+        ),
+        const DirectoryCompany(
+          host: '',
+          company: 'بلا رابط',
+          serverUrl: '',
+        ),
+      ]);
+      expect(out, isEmpty);
+    });
+
+    test('deduplicates by host regardless of scheme or www', () {
+      final out = SasDirectoryService.publishable(const [
+        DirectoryCompany(
+          host: '',
+          company: 'شركة',
+          serverUrl: 'https://www.dup.example.com/admin',
+        ),
+        DirectoryCompany(
+          host: '',
+          company: 'شركة مكررة',
+          serverUrl: 'http://dup.example.com',
+        ),
+      ]);
+      expect(out, hasLength(1));
+    });
+  });
 }

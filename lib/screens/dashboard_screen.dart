@@ -13,6 +13,7 @@ import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
 import '../services/app_notifications.dart';
 import '../services/render_whatsapp_service.dart';
+import '../services/sas_directory_service.dart';
 import '../services/sas_wallets.dart';
 import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
@@ -138,6 +139,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _loadSasWallet();
+      unawaited(_backfillSasDirectory());
       unawaited(_loadNotificationsSeenAt());
       _handleSubscriptionGuardTick();
       _handleMonthlyRollover();
@@ -216,6 +218,26 @@ class _DashboardScreenState extends State<DashboardScreen>
       );
     } finally {
       _handlingExpiredLockout = false;
+    }
+  }
+
+  /// ينشر ساسات هذا الجهاز المحفوظة مسبقاً في دليل الشركات مرة واحدة، كي
+  /// تظهر الشركات الموجودة قبل هذه الميزة دون انتظار ربط جديد (اسم + رابط
+  /// فقط، بلا كلمة مرور أو اسم مستخدم). فشله لا يؤثّر على الداشبورد.
+  Future<void> _backfillSasDirectory() async {
+    try {
+      final accounts = await SasSettings.loadAll();
+      await SasDirectoryService.backfill(
+        accounts.map(
+          (a) => DirectoryCompany(
+            host: SasDirectoryService.normalizeHost(a.serverUrl),
+            company: a.company,
+            serverUrl: a.serverUrl,
+          ),
+        ),
+      );
+    } catch (_) {
+      // تعبئة اختيارية؛ نتجاهل أي خطأ.
     }
   }
 

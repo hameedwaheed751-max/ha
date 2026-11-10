@@ -139,6 +139,44 @@ class SasDirectoryService {
 
   /// يسجّل ساساً نجح ربطه في الدليل المشترك (اسم + رابط فقط). بلا حجب،
   /// ولا يكتب شيئاً إن كان اسم الشركة فارغاً أو المستخدم غير مسجّل.
+  /// يرشّح الحسابات الصالحة للنشر الرجعي: اسم ومضيف غير فارغين، وليست من
+  /// المدخلات الجاهزة، والمضيف الواحد مرة واحدة. دالة نقيّة قابلة للاختبار.
+  static List<DirectoryCompany> publishable(
+    Iterable<DirectoryCompany> accounts,
+  ) {
+    final seedHosts = seed.map((c) => c.host).toSet();
+    final seen = <String>{};
+    final out = <DirectoryCompany>[];
+    for (final c in accounts) {
+      final host = normalizeHost(c.serverUrl);
+      if (host.isEmpty || c.company.trim().isEmpty) continue;
+      if (seedHosts.contains(host)) continue;
+      if (!seen.add(host)) continue;
+      out.add(c);
+    }
+    return out;
+  }
+
+  static bool _backfilled = false;
+
+  @visibleForTesting
+  static void resetBackfillForTest() => _backfilled = false;
+
+  /// نشر رجعي لمرة واحدة لكل تشغيل: يسجّل ساسات الوكيل المحفوظة مسبقاً في
+  /// الدليل (اسم + رابط فقط) كي تظهر دون انتظار ربط جديد. يُستدعى عند فتح
+  /// التطبيق؛ آمن للنداء المتكرر لأنه يكتب نفس المفتاح.
+  static Future<void> backfill(Iterable<DirectoryCompany> accounts) async {
+    if (_backfilled) return;
+    _backfilled = true;
+    for (final c in publishable(accounts)) {
+      await publish(
+        company: c.company,
+        serverUrl: c.serverUrl,
+        logoUrl: c.logoUrl,
+      );
+    }
+  }
+
   static Future<void> publish({
     required String company,
     required String serverUrl,
