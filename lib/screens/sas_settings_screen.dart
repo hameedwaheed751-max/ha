@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
+import '../services/sas_directory_service.dart';
 import '../services/trial_guard_service.dart';
 
 const _defaultProxyUrl =
@@ -710,6 +713,23 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
   bool _saving = false;
   bool _hide = true;
   String? _error;
+  Future<List<DirectoryCompany>>? _directory;
+
+  @override
+  void initState() {
+    super.initState();
+    // دليل الشركات للاختيار السريع؛ فشله لا يمنع الإدخال اليدوي.
+    _directory = SasDirectoryService.load();
+  }
+
+  /// يملأ اسم الشركة والرابط من مدخل مختار، ويترك اليوزر وكلمة المرور للوكيل.
+  void _pickCompany(DirectoryCompany company) {
+    setState(() {
+      _company.text = company.company;
+      _server.text = company.serverUrl;
+      _error = null;
+    });
+  }
 
   @override
   void dispose() {
@@ -772,6 +792,13 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
       } else {
         await account.saveExtra();
       }
+      // يُضاف الساس للدليل المشترك ليظهر لبقية الوكلاء (اسم ورابط فقط).
+      unawaited(
+        SasDirectoryService.publish(
+          company: account.company,
+          serverUrl: account.serverUrl,
+        ),
+      );
       if (mounted) Navigator.pop(context, account);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -799,6 +826,11 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              _CompanyPickerButton(
+                directory: _directory,
+                onPicked: _pickCompany,
+              ),
+              const SizedBox(height: 10),
               TextField(
                 controller: _company,
                 decoration: _dec('اسم الشركة', Icons.business_outlined),
@@ -858,6 +890,156 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
             label: const Text('اتصال وحفظ'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// زر «اختر من دليل الشركات» يفتح قائمة بحث بالشعارات. يظهر فقط حين يتوفّر
+/// الدليل؛ فشله يُخفيه ويبقى الإدخال اليدوي.
+class _CompanyPickerButton extends StatelessWidget {
+  const _CompanyPickerButton({required this.directory, required this.onPicked});
+
+  final Future<List<DirectoryCompany>>? directory;
+  final ValueChanged<DirectoryCompany> onPicked;
+
+  Future<void> _open(BuildContext context, List<DirectoryCompany> all) async {
+    final picked = await showModalBottomSheet<DirectoryCompany>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _CompanyPickerSheet(companies: all),
+    );
+    if (picked != null) onPicked(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<DirectoryCompany>>(
+      future: directory,
+      builder: (context, snapshot) {
+        final all = snapshot.data ?? const <DirectoryCompany>[];
+        if (all.isEmpty) return const SizedBox.shrink();
+        return SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            key: const ValueKey('pick-company-directory'),
+            onPressed: () => _open(context, all),
+            icon: const Icon(Icons.apartment_outlined),
+            label: Text('اختر من دليل الشركات (${all.length})'),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// قائمة بحث عن شركة في الدليل مع شعارها، لتعبئة الاسم والرابط.
+class _CompanyPickerSheet extends StatefulWidget {
+  const _CompanyPickerSheet({required this.companies});
+
+  final List<DirectoryCompany> companies;
+
+  @override
+  State<_CompanyPickerSheet> createState() => _CompanyPickerSheetState();
+}
+
+class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  List<DirectoryCompany> get _filtered {
+    final q = _search.text.trim().toLowerCase();
+    if (q.isEmpty) return widget.companies;
+    return widget.companies
+        .where(
+          (c) =>
+              c.company.toLowerCase().contains(q) ||
+              c.host.toLowerCase().contains(q),
+        )
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _filtered;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.7,
+          maxChildSize: 0.95,
+          builder: (context, controller) => Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Column(
+                  children: [
+                    const Text(
+                      'دليل الشركات',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _search,
+                      autofocus: true,
+                      onChanged: (_) => setState(() {}),
+                      decoration: const InputDecoration(
+                        hintText: 'ابحث باسم الشركة أو الرابط',
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: filtered.isEmpty
+                    ? const Center(child: Text('لا توجد شركة مطابقة'))
+                    : ListView.builder(
+                        controller: controller,
+                        itemCount: filtered.length,
+                        itemBuilder: (context, i) {
+                          final c = filtered[i];
+                          return ListTile(
+                            key: ValueKey('directory-${c.host}'),
+                            leading: ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: Image.network(
+                                c.logo,
+                                width: 32,
+                                height: 32,
+                                errorBuilder: (_, _, _) =>
+                                    const Icon(Icons.dns_rounded),
+                              ),
+                            ),
+                            title: Text(c.company),
+                            subtitle: Text(
+                              c.host,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: c.seed
+                                ? const Icon(Icons.verified, size: 18)
+                                : null,
+                            onTap: () => Navigator.pop(context, c),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

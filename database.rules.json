@@ -155,6 +155,34 @@
         }
       }
     },
+    "sasDirectory": {
+      ".read": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent')",
+      "$host": {
+        ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent' && newData.exists() && newData.child('seed').val() === false && (!data.exists() || data.child('seed').val() !== true)))",
+        ".validate": "$host.matches(/^[0-9a-f]{64}$/) && newData.hasChildren(['company', 'serverUrl', 'host'])",
+        "company": {
+          ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80"
+        },
+        "serverUrl": {
+          ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 200"
+        },
+        "host": {
+          ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 200"
+        },
+        "logoUrl": {
+          ".validate": "newData.isString() && newData.val().length <= 500"
+        },
+        "seed": {
+          ".validate": "newData.isBoolean() && (newData.val() === false || auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2')"
+        },
+        "updatedAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
     "global_chat": {
       "chat": {
         ".read": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent')",
