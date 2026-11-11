@@ -5,11 +5,20 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
+import '../sas_project_national_service.dart';
 import '../services/sas_directory_service.dart';
 import '../services/trial_guard_service.dart';
 
 const _defaultProxyUrl =
     'https://netagent-sas-proxy.wakeel-net-hamwdy.workers.dev';
+
+/// قيمة تُرجعها قائمة الدليل حين يختار الوكيل «المشروع الوطني»، فله شاشة
+/// ربط خاصة بدل تعبئة الرابط العادي.
+class _NationalProjectPick {
+  const _NationalProjectPick();
+}
+
+const _nationalProjectPick = _NationalProjectPick();
 
 /// ربط SAS Radius: كل الساسات، الأساسي والإضافية، بطاقات بنفس الخيارات.
 class SasSettingsScreen extends StatefulWidget {
@@ -715,6 +724,16 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
   String? _error;
   Future<List<DirectoryCompany>>? _directory;
 
+  /// شركة اختِيرت من الدليل: رابطها محفوظ، فنطلب اسم المستخدم وكلمة المرور
+  /// فقط ونخفي حقول الشركة والرابط والاسم.
+  bool _picked = false;
+
+  /// المشروع الوطني: نفس الواجهة لكن محرّك ربط FTTH خاص بدل ساس radius.
+  bool _national = false;
+
+  /// اسم مضيف الشركة المختارة، يظهر في ترويسة «رابط محفوظ».
+  String _pickedHost = '';
+
   @override
   void initState() {
     super.initState();
@@ -722,11 +741,52 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
     _directory = SasDirectoryService.load();
   }
 
-  /// يملأ اسم الشركة والرابط من مدخل مختار، ويترك اليوزر وكلمة المرور للوكيل.
+  /// شركة من الدليل: رابطها محفوظ، فنُبقي اسم المستخدم وكلمة المرور فقط.
+  /// اسم الساس يُملأ تلقائياً باسم الشركة.
   void _pickCompany(DirectoryCompany company) {
     setState(() {
       _company.text = company.company;
       _server.text = company.serverUrl;
+      _label.text = company.company;
+      _pickedHost = company.host;
+      _picked = true;
+      _national = false;
+      _error = null;
+    });
+  }
+
+  /// «المشروع الوطني» شركة في الدليل لكن بمحرّك ربط FTTH خاص. نفتح نفس
+  /// الواجهة (اسم مستخدم + كلمة مرور) ونملأ اليوزر المحفوظ إن وُجد.
+  Future<void> _pickNationalProject() async {
+    setState(() {
+      _company.text = 'المشروع الوطني';
+      _server.text = 'https://admin.ftth.iq';
+      _label.text = 'المشروع الوطني';
+      _pickedHost = 'admin.ftth.iq';
+      _national = true;
+      _picked = true;
+      _error = null;
+    });
+    try {
+      final saved = await SasProjectNationalSettings.load();
+      if (!mounted || !_national) return;
+      if (saved.username.trim().isNotEmpty && _user.text.trim().isEmpty) {
+        setState(() => _user.text = saved.username.trim());
+      }
+    } catch (_) {
+      // تعذّر تحميل الإعدادات المحفوظة لا يمنع الإدخال اليدوي.
+    }
+  }
+
+  /// العودة من وضع الاختيار إلى الإدخال اليدوي واختيار شركة أخرى.
+  void _resetPick() {
+    setState(() {
+      _picked = false;
+      _national = false;
+      _pickedHost = '';
+      _company.clear();
+      _server.clear();
+      _label.clear();
       _error = null;
     });
   }
@@ -745,7 +805,41 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
       '${server.trim().toLowerCase().replaceAll(RegExp(r'/+$'), '')}|'
       '${user.trim().toLowerCase()}';
 
+  /// ربط المشروع الوطني بمحرّكه الخاص: يتحقق من الدخول ويحفظ الإعدادات.
+  /// لا يُنشئ كارت ساس؛ مشتركوه يُزامَنون تلقائياً عند الدخول.
+  Future<void> _saveNational() async {
+    if (_user.text.trim().isEmpty || _pass.text.isEmpty) {
+      setState(() => _error = 'أدخل اسم المستخدم وكلمة المرور');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final settings = SasProjectNationalSettings(
+      username: _user.text.trim(),
+      password: _pass.text,
+    );
+    final service = SasProjectNationalService(settings);
+    try {
+      await service.login().timeout(const Duration(seconds: 45));
+      await settings.save();
+      // مزامنة أولى في الخلفية لتظهر مشتركوه دون انتظار إعادة الدخول.
+      unawaited(SasProjectNationalService.syncSaved());
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      service.dispose();
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _save() async {
+    if (_national) {
+      await _saveNational();
+      return;
+    }
     if (_label.text.trim().isEmpty ||
         _server.text.trim().isEmpty ||
         _user.text.trim().isEmpty ||
@@ -826,30 +920,41 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _CompanyPickerButton(
-                directory: _directory,
-                onPicked: _pickCompany,
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _company,
-                decoration: _dec('اسم الشركة', Icons.business_outlined),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _label,
-                decoration: _dec(
-                  'اسم الساس (مثلاً: ساس الكرادة)',
-                  Icons.label_outline,
+              if (_picked) ...[
+                _PickedCompanyHeader(
+                  company: _company.text,
+                  host: _pickedHost,
+                  national: _national,
+                  onChange: _saving ? null : _resetPick,
                 ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _server,
-                keyboardType: TextInputType.url,
-                decoration: _dec('رابط SAS', Icons.dns_outlined),
-              ),
-              const SizedBox(height: 10),
+                const SizedBox(height: 10),
+              ] else ...[
+                _CompanyPickerButton(
+                  directory: _directory,
+                  onPicked: _pickCompany,
+                  onNationalProject: _pickNationalProject,
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _company,
+                  decoration: _dec('اسم الشركة', Icons.business_outlined),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _label,
+                  decoration: _dec(
+                    'اسم الساس (مثلاً: ساس الكرادة)',
+                    Icons.label_outline,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _server,
+                  keyboardType: TextInputType.url,
+                  decoration: _dec('رابط SAS', Icons.dns_outlined),
+                ),
+                const SizedBox(height: 10),
+              ],
               TextField(
                 controller: _user,
                 decoration: _dec('اسم المستخدم', Icons.person_outline),
@@ -895,37 +1000,115 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
   }
 }
 
+/// ترويسة الشركة المختارة من الدليل: اسمها ورابطها المحفوظ، مع زر لتغييرها.
+/// بعدها يُدخل الوكيل اسم المستخدم وكلمة المرور فقط.
+class _PickedCompanyHeader extends StatelessWidget {
+  const _PickedCompanyHeader({
+    required this.company,
+    required this.host,
+    required this.national,
+    required this.onChange,
+  });
+
+  final String company;
+  final String host;
+  final bool national;
+  final VoidCallback? onChange;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      margin: EdgeInsets.zero,
+      color: colors.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        child: Row(
+          children: [
+            Icon(
+              national ? Icons.account_tree_outlined : Icons.verified_outlined,
+              color: colors.onSecondaryContainer,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    company,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: colors.onSecondaryContainer,
+                    ),
+                  ),
+                  Text(
+                    national ? 'المشروع الوطني — ربط خاص' : 'رابط محفوظ: $host',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colors.onSecondaryContainer.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (onChange != null)
+              TextButton(
+                key: const ValueKey('change-company'),
+                onPressed: onChange,
+                child: const Text('تغيير'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// زر «اختر من دليل الشركات» يفتح قائمة بحث بالشعارات. يظهر فقط حين يتوفّر
 /// الدليل؛ فشله يُخفيه ويبقى الإدخال اليدوي.
 class _CompanyPickerButton extends StatelessWidget {
-  const _CompanyPickerButton({required this.directory, required this.onPicked});
+  const _CompanyPickerButton({
+    required this.directory,
+    required this.onPicked,
+    required this.onNationalProject,
+  });
 
   final Future<List<DirectoryCompany>>? directory;
   final ValueChanged<DirectoryCompany> onPicked;
 
+  /// عند اختيار «المشروع الوطني» من القائمة (شاشة ربط خاصة).
+  final VoidCallback onNationalProject;
+
   Future<void> _open(BuildContext context, List<DirectoryCompany> all) async {
-    final picked = await showModalBottomSheet<DirectoryCompany>(
+    final picked = await showModalBottomSheet<Object>(
       context: context,
       isScrollControlled: true,
       builder: (_) => _CompanyPickerSheet(companies: all),
     );
-    if (picked != null) onPicked(picked);
+    if (picked is _NationalProjectPick) {
+      onNationalProject();
+    } else if (picked is DirectoryCompany) {
+      onPicked(picked);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // القائمة تتضمّن دائماً «المشروع الوطني»، فالزر يظهر دوماً حتى أثناء
+    // تحميل الدليل البعيد.
     return FutureBuilder<List<DirectoryCompany>>(
       future: directory,
       builder: (context, snapshot) {
         final all = snapshot.data ?? const <DirectoryCompany>[];
-        if (all.isEmpty) return const SizedBox.shrink();
         return SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
             key: const ValueKey('pick-company-directory'),
             onPressed: () => _open(context, all),
             icon: const Icon(Icons.apartment_outlined),
-            label: Text('اختر من دليل الشركات (${all.length})'),
+            label: const Text('اختر من دليل الشركات'),
           ),
         );
       },
@@ -964,9 +1147,19 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
         .toList();
   }
 
+  /// «المشروع الوطني» مثبّت أعلى القائمة؛ يظهر ما لم يستبعده البحث.
+  bool get _showNational {
+    final q = _search.text.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return 'المشروع الوطني'.contains(q) ||
+        'وطني'.contains(q) ||
+        'national'.contains(q);
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = _filtered;
+    final showNational = _showNational;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -1004,13 +1197,35 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
                 ),
               ),
               Expanded(
-                child: filtered.isEmpty
+                child: (filtered.isEmpty && !showNational)
                     ? const Center(child: Text('لا توجد شركة مطابقة'))
                     : ListView.builder(
                         controller: controller,
-                        itemCount: filtered.length,
+                        itemCount: filtered.length + (showNational ? 1 : 0),
                         itemBuilder: (context, i) {
-                          final c = filtered[i];
+                          if (showNational && i == 0) {
+                            return ListTile(
+                              key: const ValueKey(
+                                'directory-national-project',
+                              ),
+                              leading: CircleAvatar(
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.primaryContainer,
+                                child: const Icon(Icons.account_tree_outlined),
+                              ),
+                              title: const Text('المشروع الوطني'),
+                              subtitle: const Text(
+                                'admin.ftth.iq — شاشة ربط خاصة',
+                              ),
+                              trailing: const Icon(Icons.verified, size: 18),
+                              onTap: () => Navigator.pop(
+                                context,
+                                _nationalProjectPick,
+                              ),
+                            );
+                          }
+                          final c = filtered[i - (showNational ? 1 : 0)];
                           return ListTile(
                             key: ValueKey('directory-${c.host}'),
                             leading: ClipRRect(

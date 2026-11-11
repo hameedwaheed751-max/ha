@@ -269,6 +269,55 @@ void main() {
     expect(find.text('اسم الشركة'), findsOneWidget);
   });
 
+  testWidgets('the National Project links inside the unified SAS dialog', (
+    tester,
+  ) async {
+    await pumpScreen(tester, paid: true);
+    await tester.tap(find.text('إضافة ساس آخر'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('pick-company-directory')));
+    await tester.pumpAndSettle();
+
+    final national = find.byKey(const ValueKey('directory-national-project'));
+    expect(national, findsOneWidget);
+
+    // اختياره يبقى في نفس النافذة، ويطلب اسم المستخدم وكلمة المرور فقط.
+    await tester.tap(national);
+    await tester.pumpAndSettle();
+    expect(find.byType(SasAccountDialog), findsOneWidget);
+    expect(find.byKey(const ValueKey('change-company')), findsOneWidget);
+    expect(find.text('اسم المستخدم'), findsOneWidget);
+    expect(find.text('كلمة المرور'), findsOneWidget);
+    // حقول الشركة والرابط مخفية لأن الرابط محفوظ.
+    expect(find.widgetWithText(TextField, 'رابط SAS'), findsNothing);
+    expect(find.widgetWithText(TextField, 'اسم الشركة'), findsNothing);
+  });
+
+  testWidgets('picking a directory company hides the URL and asks credentials', (
+    tester,
+  ) async {
+    await pumpScreen(tester, paid: true);
+    await tester.tap(find.text('إضافة ساس آخر'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('pick-company-directory')));
+    await tester.pumpAndSettle();
+
+    // المدخل الجاهز «سبيد نت» في الدليل.
+    await tester.tap(
+      find.byKey(const ValueKey('directory-sas.speednet-iq.com')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(SasAccountDialog), findsOneWidget);
+    expect(find.byKey(const ValueKey('change-company')), findsOneWidget);
+    expect(find.text('اسم المستخدم'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'رابط SAS'), findsNothing);
+
+    // «تغيير» يعيد الحقول اليدوية.
+    await tester.tap(find.byKey(const ValueKey('change-company')));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'رابط SAS'), findsOneWidget);
+  });
+
   testWidgets('deleting a SAS shows its company and notes', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

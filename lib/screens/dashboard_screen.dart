@@ -25,7 +25,6 @@ import 'subscriber_details_screen.dart';
 import 'packages_screen.dart';
 import 'sas_settings_screen.dart';
 import 'sas_wallet_breakdown.dart';
-import 'sas_project_national_screen.dart';
 import 'receipt_screen.dart';
 import 'quick_reports_screen.dart';
 import 'today_tasks_screen.dart';
@@ -1631,19 +1630,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                       context,
                       MaterialPageRoute(
                         builder: (_) => const SasSettingsScreen(),
-                      ),
-                    );
-                  },
-                ),
-                _drawerTile(
-                  icon: Icons.account_tree_outlined,
-                  title: 'ساس المشروع الوطني',
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const SasProjectNationalScreen(),
                       ),
                     );
                   },
