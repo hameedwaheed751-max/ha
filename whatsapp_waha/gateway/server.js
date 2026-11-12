@@ -40,6 +40,61 @@ function normalizePhone(value) {
   return phone;
 }
 
+// Accepted product-image types, keyed by their declared MIME. `sniff` checks
+// the leading bytes so a forged Content-Type cannot smuggle a non-image.
+const IMAGE_TYPES = {
+  'image/jpeg': {
+    ext: 'jpg',
+    sniff: (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  },
+  'image/png': {
+    ext: 'png',
+    sniff: (b) =>
+      b.length >= 8 &&
+      b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 &&
+      b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a,
+  },
+  'image/webp': {
+    ext: 'webp',
+    sniff: (b) =>
+      b.length >= 12 &&
+      b.toString('ascii', 0, 4) === 'RIFF' &&
+      b.toString('ascii', 8, 12) === 'WEBP',
+  },
+};
+
+// Returns the detected image MIME from the leading bytes, or null.
+function detectImageType(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) return null;
+  for (const [type, spec] of Object.entries(IMAGE_TYPES)) {
+    if (spec.sniff(buffer)) return type;
+  }
+  return null;
+}
+
+// Simple in-memory sliding-window limiter keyed by uid. Single-instance only,
+// which matches the one-container deployment; it resets on restart.
+function createRateLimiter({ max, windowMs }, now = Date.now) {
+  const hits = new Map();
+  return function rateLimit(req, res, next) {
+    const key = req.agentUid || 'anonymous';
+    const t = now();
+    const recent = (hits.get(key) || []).filter((ts) => t - ts < windowMs);
+    if (recent.length >= max) {
+      hits.set(key, recent);
+      return res.status(429).json({ success: false, error: 'rate_limited' });
+    }
+    recent.push(t);
+    hits.set(key, recent);
+    if (hits.size > 5000) {
+      for (const [k, v] of hits) {
+        if (!v.some((ts) => t - ts < windowMs)) hits.delete(k);
+      }
+    }
+    return next();
+  };
+}
+
 function isAuthorizedAccount(authUser, uid) {
   if (
     !authUser ||
@@ -88,14 +143,45 @@ function loadConfig(env = process.env) {
     }
   }
 
+  const idempotencyFile = path.resolve(
+    env.WAHA_IDEMPOTENCY_FILE || path.join(__dirname, 'data', 'idempotency.json'),
+  );
+  // Product images live beside the idempotency store, inside the same durable
+  // /app/data mount, so they survive a container replacement unchanged.
+  const uploadsDir = path.resolve(
+    env.UPLOADS_DIR || path.join(path.dirname(idempotencyFile), 'uploads'),
+  );
+  let publicBaseUrl = String(
+    env.PUBLIC_BASE_URL || 'https://netagentiraq.duckdns.org',
+  ).replace(/\/+$/, '');
+  try {
+    if (new URL(publicBaseUrl).protocol !== 'https:') throw new Error('not https');
+  } catch (_) {
+    throw new Error('PUBLIC_BASE_URL must be an https URL.');
+  }
+  const maxImageBytes = Math.min(
+    Math.max(Number(env.MAX_IMAGE_BYTES || 4 * 1024 * 1024), 1024),
+    20 * 1024 * 1024,
+  );
+  const imageRateLimit = {
+    max: Math.max(Number(env.RATE_LIMIT_MAX || 30), 1),
+    windowMs: Math.max(Number(env.RATE_LIMIT_WINDOW_MS || 600000), 1000),
+  };
+  const adminUid = String(
+    env.NETAGENT_ADMIN_UID || 'wE10WciDVudIOJziBurjhBxpDfO2',
+  ).trim();
+
   return {
     port: Number(env.PORT || 3001),
     wahaBaseUrl,
     wahaApiKey,
     timeoutMs: Math.min(Math.max(Number(env.WAHA_TIMEOUT_MS || 15000), 1000), 60000),
-    idempotencyFile: path.resolve(
-      env.WAHA_IDEMPOTENCY_FILE || path.join(__dirname, 'data', 'idempotency.json'),
-    ),
+    idempotencyFile,
+    uploadsDir,
+    publicBaseUrl,
+    maxImageBytes,
+    imageRateLimit,
+    adminUid,
     allowedOrigins: new Set(allowedOrigins),
     expiryScheduler: {
       enabled: String(env.EXPIRY_SCHEDULER_ENABLED || '').trim() === 'true',
@@ -352,7 +438,7 @@ function createApp({
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     }
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
@@ -361,7 +447,99 @@ function createApp({
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
-  app.use('/api/waha', async (req, res, next) => {
+  // --- Product image storage on the durable /app/data mount ---
+  try {
+    fs.mkdirSync(config.uploadsDir, { recursive: true });
+  } catch (_) {
+    // Only fails if the mount is missing; uploads then error per request.
+  }
+
+  // Public, read-only serving of stored images. express.static keeps every
+  // served path inside uploadsDir, so traversal above the root is refused.
+  app.use(
+    '/uploads',
+    express.static(config.uploadsDir, {
+      index: false,
+      dotfiles: 'deny',
+      fallthrough: false,
+      redirect: false,
+      maxAge: '7d',
+    }),
+  );
+
+  const acceptedImageTypes = Object.keys(IMAGE_TYPES);
+  const imageRateLimiter = createRateLimiter(config.imageRateLimit);
+
+  app.post(
+    '/api/images',
+    requireAgent,
+    imageRateLimiter,
+    express.raw({ type: acceptedImageTypes, limit: config.maxImageBytes }),
+    async (req, res) => {
+      const declared = String(req.headers['content-type'] || '')
+        .split(';')[0]
+        .trim()
+        .toLowerCase();
+      if (!acceptedImageTypes.includes(declared)) {
+        return res.status(415).json({ success: false, error: 'unsupported_type' });
+      }
+      const bytes = req.body;
+      if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
+        return res.status(400).json({ success: false, error: 'empty_body' });
+      }
+      const detected = detectImageType(bytes);
+      if (!detected || detected !== declared) {
+        return res.status(415).json({ success: false, error: 'content_mismatch' });
+      }
+      const ext = IMAGE_TYPES[detected].ext;
+      // The owner is the verified token uid; any client-supplied uid is ignored.
+      const name = `${crypto.randomBytes(16).toString('hex')}.${ext}`;
+      const dir = path.join(config.uploadsDir, req.agentUid);
+      try {
+        await fs.promises.mkdir(dir, { recursive: true });
+        await fs.promises.writeFile(path.join(dir, name), bytes, { mode: 0o644 });
+      } catch (_) {
+        return res.status(500).json({ success: false, error: 'store_failed' });
+      }
+      return res.status(200).json({
+        success: true,
+        url: `${config.publicBaseUrl}/uploads/${req.agentUid}/${name}`,
+      });
+    },
+  );
+
+  app.delete(
+    '/api/images/:uid/:file',
+    requireAgent,
+    imageRateLimiter,
+    async (req, res) => {
+      const { uid, file } = req.params;
+      if (
+        !/^[A-Za-z0-9_-]{1,128}$/.test(uid) ||
+        !/^[A-Za-z0-9._-]{1,120}$/.test(file) ||
+        file.includes('..')
+      ) {
+        return res.status(400).json({ success: false, error: 'invalid_path' });
+      }
+      // Only the owner (by verified uid) or the admin may delete.
+      if (uid !== req.agentUid && req.agentUid !== config.adminUid) {
+        return res.status(403).json({ success: false, error: 'forbidden' });
+      }
+      const root = path.resolve(config.uploadsDir);
+      const target = path.resolve(path.join(root, uid, file));
+      if (target !== path.join(root, uid, file)) {
+        return res.status(400).json({ success: false, error: 'invalid_path' });
+      }
+      try {
+        await fs.promises.unlink(target);
+      } catch (_) {
+        // Best effort: a missing file still counts as deleted.
+      }
+      return res.status(200).json({ success: true });
+    },
+  );
+
+  async function requireAgent(req, res, next) {
     const authorization = String(req.headers.authorization || '');
     const match = /^Bearer\s+(.+)$/i.exec(authorization);
     if (!match) return res.status(401).json({ success: false, error: 'unauthorized' });
@@ -395,12 +573,15 @@ function createApp({
     }
     if (!authorized) return res.status(403).json({ success: false, error: 'forbidden' });
 
+    req.agentUid = identity.uid;
     req.wahaIdentity = {
       uid: identity.uid,
       session: sessionNameForUid(identity.uid),
     };
     next();
-  });
+  }
+
+  app.use('/api/waha', requireAgent);
 
   const callWaha = (_req, method, route, body) => sender.callWaha(method, route, body);
   const getWahaSession = (req) => sender.getSession(req.wahaIdentity.session);
@@ -542,6 +723,18 @@ function createApp({
     return res.status(result.status).json(result.body);
   });
 
+  // Translate body-parser limit errors (e.g. an oversize image) to JSON.
+  app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    const status = err && (err.status || err.statusCode);
+    if (status === 413 || (err && err.type === 'entity.too.large')) {
+      return res.status(413).json({ success: false, error: 'image_too_large' });
+    }
+    // Let Express's default handler keep the original status (e.g. a static
+    // 404/403) rather than masking every error as a 400.
+    return next(err);
+  });
+
   return app;
 }
 
@@ -625,6 +818,8 @@ if (require.main === module) {
 module.exports = {
   createApp,
   createWahaSender,
+  createRateLimiter,
+  detectImageType,
   isAuthorizedAccount,
   isAllowedEventType,
   loadConfig,
