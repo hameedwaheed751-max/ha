@@ -411,6 +411,12 @@ class DevicePostCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
+              subtitle: product.updatedAt > 0
+                  ? Text(
+                      ProductService.relativeTime(product.updatedAt),
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    )
+                  : null,
             ),
             // الصورة المنشورة.
             AspectRatio(
@@ -760,9 +766,14 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     final key = widget.existing?.key ?? _service.newKey();
     try {
       final uploaded = <String>[];
+      var rateLimited = false;
       for (final f in _picked) {
-        final url = await _service.uploadImage(f, productKey: key);
-        if (url != null && url.isNotEmpty) uploaded.add(url);
+        final r = await _service.uploadImage(f, productKey: key);
+        if (r.ok) {
+          uploaded.add(r.url!);
+        } else if (r.rateLimited) {
+          rateLimited = true;
+        }
       }
       // إن فشل رفع صورة أو أكثر، لا نحفظ إعلاناً بصور ناقصة؛ نحذف ما رُفع للتوّ
       // أفضل‑جهد (تفادي ملفات يتيمة) ونعرض خطأ.
@@ -773,7 +784,9 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
         if (!mounted) return;
         setState(() {
           _saving = false;
-          _error = 'تعذّر رفع بعض الصور، حاول مجدداً';
+          _error = rateLimited
+              ? 'تجاوزت حدّ رفع الصور — انتظر بضع دقائق وحاول مجدداً'
+              : 'تعذّر رفع بعض الصور، حاول مجدداً';
         });
         return;
       }

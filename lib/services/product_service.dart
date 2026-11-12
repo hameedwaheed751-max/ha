@@ -112,10 +112,19 @@ class ProductSubmission {
   final String whatsapp;
 }
 
+/// نتيجة رفع صورة: الرابط عند النجاح، و`rateLimited` عند تجاوز حدّ الرفع (429).
+@immutable
+class ImageUploadResult {
+  const ImageUploadResult(this.url, {this.rateLimited = false});
+  final String? url;
+  final bool rateLimited;
+  bool get ok => url != null && url!.isNotEmpty;
+}
+
 /// واجهة رفع/حذف صور الأجهزة. قابلة للحقن كي تُختبر الخدمة بلا شبكة/Firebase.
 abstract class ProductImageUploader {
-  /// يرفع البايتات ويعيد الرابط العام، أو null عند الفشل.
-  Future<String?> upload(Uint8List bytes, {required String contentType});
+  /// يرفع البايتات ويعيد نتيجة فيها الرابط أو إشارة تجاوز الحد.
+  Future<ImageUploadResult> upload(Uint8List bytes, {required String contentType});
 
   /// حذف أفضل جهد لصورة برابطها. يتجاهل بصمت أي رابط لا يخصّ الـ gateway.
   Future<void> delete(String url);
@@ -163,9 +172,12 @@ class GatewayProductImageUploader implements ProductImageUploader {
   }
 
   @override
-  Future<String?> upload(Uint8List bytes, {required String contentType}) async {
+  Future<ImageUploadResult> upload(
+    Uint8List bytes, {
+    required String contentType,
+  }) async {
     final token = await _token();
-    if (token == null) return null;
+    if (token == null) return const ImageUploadResult(null);
     try {
       final resp = await _client
           .post(
@@ -177,16 +189,19 @@ class GatewayProductImageUploader implements ProductImageUploader {
             body: bytes,
           )
           .timeout(timeout);
+      if (resp.statusCode == 429) {
+        return const ImageUploadResult(null, rateLimited: true);
+      }
       if (resp.statusCode != 200) {
         debugPrint('image upload failed: ${resp.statusCode}');
-        return null;
+        return const ImageUploadResult(null);
       }
       final data = jsonDecode(resp.body);
       final url = data is Map ? data['url'] : null;
-      return (url is String && url.isNotEmpty) ? url : null;
+      return ImageUploadResult((url is String && url.isNotEmpty) ? url : null);
     } catch (e) {
       debugPrint('image upload error: $e');
-      return null;
+      return const ImageUploadResult(null);
     }
   }
 
@@ -330,13 +345,41 @@ class ProductService {
     }
   }
 
-  /// يرفع صورة إلى خادم الـ VPS (الـ gateway) ويعيد الرابط العام، أو null عند
-  /// الفشل. نوع المحتوى يُشتَق من البايتات ليطابق تحقّق الخادم. يعمل جوالاً وويباً.
-  Future<String?> uploadImage(XFile file, {String? productKey}) async {
+  /// يرفع صورة إلى خادم الـ VPS (الـ gateway). نوع المحتوى يُشتَق من البايتات
+  /// ليطابق تحقّق الخادم. يعمل جوالاً وويباً. يعيد النتيجة (رابط أو تجاوز حد).
+  Future<ImageUploadResult> uploadImage(XFile file, {String? productKey}) async {
     final bytes = await file.readAsBytes();
-    if (bytes.isEmpty) return null;
+    if (bytes.isEmpty) return const ImageUploadResult(null);
     final contentType = contentTypeFor(bytes);
     return _uploader.upload(bytes, contentType: contentType);
+  }
+
+  /// يرشّح أجهزة بالبحث (الاسم/الوصف) و/أو بمالك واحد. نقيّة.
+  static List<Product> filter(
+    List<Product> all, {
+    String query = '',
+    String? ownerUid,
+  }) {
+    final q = query.trim();
+    return all.where((p) {
+      if (ownerUid != null && p.ownerUid != ownerUid) return false;
+      if (q.isEmpty) return true;
+      return p.title.contains(q) || p.description.contains(q);
+    }).toList();
+  }
+
+  /// وقت نسبي عربي مختصر من طابع زمني بالمللي ثانية. نقيّة (now قابل للحقن).
+  static String relativeTime(int ms, {DateTime? now}) {
+    if (ms <= 0) return '';
+    final then = DateTime.fromMillisecondsSinceEpoch(ms);
+    final diff = (now ?? DateTime.now()).difference(then);
+    if (diff.isNegative || diff.inSeconds < 60) return 'الآن';
+    if (diff.inMinutes < 60) return 'منذ ${diff.inMinutes} دقيقة';
+    if (diff.inHours < 24) return 'منذ ${diff.inHours} ساعة';
+    if (diff.inDays < 30) return 'منذ ${diff.inDays} يوم';
+    final months = diff.inDays ~/ 30;
+    if (months < 12) return 'منذ $months شهر';
+    return 'منذ ${diff.inDays ~/ 365} سنة';
   }
 
   /// حذف أفضل جهد لصورة برابطها (يتجاهل روابط غير الـ gateway).

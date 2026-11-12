@@ -150,6 +150,12 @@ class _StoresScreenState extends State<StoresScreen> {
   }
 
   void _open(Store store) {
+    if (!store.approved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('المتجر قيد مراجعة الإدارة')),
+      );
+      return;
+    }
     // المتجر دليل رابط خارجي — يُفتح الرابط (داخل التطبيق على الجوال/إطار على الويب).
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => StoreWebViewScreen(store: store)),
@@ -270,7 +276,7 @@ class StoreCard extends StatelessWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: store.approved ? onOpen : null,
+        onTap: onOpen,
         child: Padding(
           padding: const EdgeInsets.all(6),
           child: Column(
@@ -296,14 +302,6 @@ class StoreCard extends StatelessWidget {
                   fontSize: 12,
                 ),
               ),
-              if (store.ownerName.isNotEmpty)
-                Text(
-                  store.ownerName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 11, color: Colors.grey),
-                ),
               if (!store.approved)
                 const Text(
                   'قيد المراجعة',

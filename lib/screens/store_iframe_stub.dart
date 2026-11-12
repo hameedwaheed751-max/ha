@@ -15,10 +15,19 @@ Widget buildStoreLogo(String imageUrl, double size) => Image.network(
           Icon(Icons.storefront_rounded, size: size * 0.9),
     );
 
-/// صورة تملأ حيّزها (للمعارض والبطاقات) على الجوال.
+/// صورة تملأ حيّزها (للمعارض والبطاقات) على الجوال، مع مؤشّر تحميل أثناء الجلب.
 Widget buildStoreImageFill(String imageUrl) => Image.network(
       imageUrl,
       fit: BoxFit.contain,
+      loadingBuilder: (_, child, progress) => progress == null
+          ? child
+          : const Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
       errorBuilder: (_, _, _) =>
           const Center(child: Icon(Icons.broken_image_outlined, size: 48)),
     );

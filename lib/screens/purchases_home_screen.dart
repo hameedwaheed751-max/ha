@@ -39,6 +39,8 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
   List<Store> _stores = const [];
   List<Product> _products = const [];
   bool _loading = true;
+  String _deviceQuery = '';
+  bool _onlyMine = false;
 
   String get _uid =>
       widget.currentUidOverride ??
@@ -137,6 +139,16 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
   }
 
   void _openStore(Store store) {
+    if (!store.approved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(store.ownerUid == _uid
+              ? 'متجرك قيد مراجعة الإدارة'
+              : 'المتجر قيد مراجعة الإدارة'),
+        ),
+      );
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => StoreWebViewScreen(store: store)),
     );
@@ -208,24 +220,63 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
   }
 
   Widget _devicesTab() {
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: _products.isEmpty
-          ? ListView(
-              children: const [
-                Padding(
-                  padding: EdgeInsets.only(top: 80),
-                  child: _EmptyHint('لا توجد أجهزة معروضة بعد'),
+    final filtered = ProductService.filter(
+      _products,
+      query: _deviceQuery,
+      ownerUid: _onlyMine ? _uid : null,
+    );
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('devices-search'),
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    hintText: 'ابحث عن جهاز',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (v) => setState(() => _deviceQuery = v),
                 ),
-              ],
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
-              children: [
-                for (final p in _products)
-                  DevicePostCard(product: p, onTap: () => _openDevice(p)),
-              ],
-            ),
+              ),
+              const SizedBox(width: 8),
+              FilterChip(
+                key: const Key('devices-mine'),
+                label: const Text('أجهزتي'),
+                selected: _onlyMine,
+                onSelected: (v) => setState(() => _onlyMine = v),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: filtered.isEmpty
+                ? ListView(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 60),
+                        child: _products.isEmpty
+                            ? _EmptyDevices(onAdd: _addDevice)
+                            : const _EmptyHint('لا نتائج مطابقة'),
+                      ),
+                    ],
+                  )
+                : ListView(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
+                    children: [
+                      for (final p in filtered)
+                        DevicePostCard(product: p, onTap: () => _openDevice(p)),
+                    ],
+                  ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -355,6 +406,28 @@ class _SectionTitle extends StatelessWidget {
         child: Text(text,
             style:
                 const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      );
+}
+
+class _EmptyDevices extends StatelessWidget {
+  const _EmptyDevices({required this.onAdd});
+  final VoidCallback onAdd;
+  @override
+  Widget build(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.devices_other_rounded, size: 56, color: Colors.grey),
+          const SizedBox(height: 12),
+          const Text('لا توجد أجهزة معروضة بعد',
+              style: TextStyle(color: Colors.grey)),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            key: const Key('devices-empty-add'),
+            onPressed: onAdd,
+            icon: const Icon(Icons.add_photo_alternate_rounded),
+            label: const Text('أضف أول جهاز'),
+          ),
+        ],
       );
 }
 

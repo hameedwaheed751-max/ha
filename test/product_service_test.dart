@@ -6,15 +6,17 @@ import 'package:untitled/services/product_service.dart';
 
 /// رافع وهمي يسجّل الاستدعاءات بلا شبكة/Firebase.
 class _FakeUploader implements ProductImageUploader {
-  _FakeUploader({this.returnUrl});
+  _FakeUploader({this.returnUrl, this.rateLimited = false});
   String? returnUrl;
+  bool rateLimited;
   final List<({Uint8List bytes, String contentType})> uploads = [];
   final List<String> deletes = [];
 
   @override
-  Future<String?> upload(Uint8List bytes, {required String contentType}) async {
+  Future<ImageUploadResult> upload(Uint8List bytes,
+      {required String contentType}) async {
     uploads.add((bytes: bytes, contentType: contentType));
-    return returnUrl;
+    return ImageUploadResult(returnUrl, rateLimited: rateLimited);
   }
 
   @override
@@ -135,23 +137,28 @@ void main() {
         returnUrl: 'https://netagentiraq.duckdns.org/uploads/u1/abc.jpg',
       );
       final svc = ProductService(uploader: up);
-      final url = await svc.uploadImage(XFile.fromData(jpeg, name: 'x.jpg'));
-      expect(url, up.returnUrl);
+      final r = await svc.uploadImage(XFile.fromData(jpeg, name: 'x.jpg'));
+      expect(r.ok, isTrue);
+      expect(r.url, up.returnUrl);
       expect(up.uploads.length, 1);
       expect(up.uploads.single.contentType, 'image/jpeg');
     });
 
-    test('returns null (without uploading) for empty bytes', () async {
+    test('returns a not-ok result (without uploading) for empty bytes', () async {
       final up = _FakeUploader(returnUrl: 'https://x/u/a.jpg');
       final svc = ProductService(uploader: up);
-      final url = await svc.uploadImage(XFile.fromData(Uint8List(0)));
-      expect(url, isNull);
+      final r = await svc.uploadImage(XFile.fromData(Uint8List(0)));
+      expect(r.ok, isFalse);
       expect(up.uploads, isEmpty);
     });
 
-    test('returns null when the uploader fails', () async {
-      final svc = ProductService(uploader: _FakeUploader(returnUrl: null));
-      expect(await svc.uploadImage(XFile.fromData(jpeg, name: 'x.jpg')), isNull);
+    test('propagates a rate-limited result', () async {
+      final svc = ProductService(
+        uploader: _FakeUploader(returnUrl: null, rateLimited: true),
+      );
+      final r = await svc.uploadImage(XFile.fromData(jpeg, name: 'x.jpg'));
+      expect(r.ok, isFalse);
+      expect(r.rateLimited, isTrue);
     });
 
     test('deleteImage delegates to the uploader', () async {
@@ -237,6 +244,65 @@ void main() {
         GatewayProductImageUploader.parseDeletePath('$gw/api/waha/xyz', gw),
         isNull,
       );
+    });
+  });
+
+  group('filter', () {
+    Product dev(String key, String owner, String title, String desc) => Product(
+          key: key,
+          storeKey: owner,
+          ownerUid: owner,
+          ownerName: 'o',
+          description: desc,
+          images: const ['https://x/a.jpg'],
+          title: title,
+        );
+    final all = [
+      dev('1', 'me', 'راوتر TP-Link', 'جهاز ممتاز'),
+      dev('2', 'other', 'سويتش', 'منفذ 8'),
+      dev('3', 'me', 'أنتينا', 'خارجية'),
+    ];
+
+    test('query matches title or description', () {
+      expect(ProductService.filter(all, query: 'راوتر').map((p) => p.key),
+          ['1']);
+      expect(ProductService.filter(all, query: 'منفذ').map((p) => p.key),
+          ['2']);
+    });
+    test('ownerUid limits to one owner', () {
+      expect(ProductService.filter(all, ownerUid: 'me').map((p) => p.key),
+          ['1', '3']);
+    });
+    test('query + owner combined', () {
+      expect(
+        ProductService.filter(all, query: 'أنتينا', ownerUid: 'me')
+            .map((p) => p.key),
+        ['3'],
+      );
+    });
+    test('empty query returns all', () {
+      expect(ProductService.filter(all).length, 3);
+    });
+  });
+
+  group('relativeTime', () {
+    final now = DateTime(2026, 11, 13, 12, 0, 0);
+    int ago(Duration d) => now.subtract(d).millisecondsSinceEpoch;
+
+    test('within a minute → الآن', () {
+      expect(ProductService.relativeTime(ago(const Duration(seconds: 10)),
+          now: now), 'الآن');
+    });
+    test('minutes/hours/days', () {
+      expect(ProductService.relativeTime(ago(const Duration(minutes: 5)),
+          now: now), 'منذ 5 دقيقة');
+      expect(ProductService.relativeTime(ago(const Duration(hours: 3)),
+          now: now), 'منذ 3 ساعة');
+      expect(ProductService.relativeTime(ago(const Duration(days: 2)),
+          now: now), 'منذ 2 يوم');
+    });
+    test('zero timestamp → empty', () {
+      expect(ProductService.relativeTime(0, now: now), '');
     });
   });
 }
