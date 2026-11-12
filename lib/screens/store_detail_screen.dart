@@ -515,7 +515,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
 
   Future<void> _pick() async {
     try {
-      final files = await ImagePicker().pickMultiImage();
+      // تصغير الصور قبل الرفع لتوفير مساحة الخادم وسرعة النقل.
+      final files = await ImagePicker().pickMultiImage(
+        maxWidth: 1600,
+        imageQuality: 80,
+      );
       if (files.isEmpty) return;
       setState(() {
         for (final f in files) {
@@ -559,6 +563,19 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
       for (final f in _picked) {
         final url = await _service.uploadImage(f, productKey: key);
         if (url != null && url.isNotEmpty) uploaded.add(url);
+      }
+      // إن فشل رفع صورة أو أكثر، لا نحفظ إعلاناً بصور ناقصة؛ نحذف ما رُفع للتوّ
+      // أفضل‑جهد (تفادي ملفات يتيمة) ونعرض خطأ.
+      if (uploaded.length != _picked.length) {
+        for (final url in uploaded) {
+          await _service.deleteImage(url);
+        }
+        if (!mounted) return;
+        setState(() {
+          _saving = false;
+          _error = 'تعذّر رفع بعض الصور، حاول مجدداً';
+        });
+        return;
       }
       final allImages = [..._keptUrls, ...uploaded];
       final submission = ProductSubmission(

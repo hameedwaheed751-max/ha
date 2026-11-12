@@ -1,8 +1,10 @@
+import 'dart:convert';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 /// جهاز معروض للبيع داخل متجر وكيل في «المشتريات»: صورة (أو عدة صور) ووصف،
@@ -110,17 +112,157 @@ class ProductSubmission {
   final String whatsapp;
 }
 
-/// خدمة أجهزة المتجر. المصدر في Firebase تحت `products`، والصور في Firebase
-/// Storage تحت `product_images/{uid}/...`. لا اعتماد لكل جهاز — يَرِث اعتماد
+/// واجهة رفع/حذف صور الأجهزة. قابلة للحقن كي تُختبر الخدمة بلا شبكة/Firebase.
+abstract class ProductImageUploader {
+  /// يرفع البايتات ويعيد الرابط العام، أو null عند الفشل.
+  Future<String?> upload(Uint8List bytes, {required String contentType});
+
+  /// حذف أفضل جهد لصورة برابطها. يتجاهل بصمت أي رابط لا يخصّ الـ gateway.
+  Future<void> delete(String url);
+}
+
+/// التطبيق الفعلي: يرفع صور الأجهزة إلى الـ gateway على الـ VPS عبر `/api/images`
+/// بتوكن Firebase، ويقدّمها عبر `/uploads/...`. على نمط `WahaNotificationService`.
+class GatewayProductImageUploader implements ProductImageUploader {
+  GatewayProductImageUploader({
+    String? gatewayUrl,
+    http.Client? client,
+    this.timeout = const Duration(seconds: 30),
+  })  : _gatewayUrl = (gatewayUrl ?? _configuredGatewayUrl).replaceAll(
+          RegExp(r'/+$'),
+          '',
+        ),
+        _client = client ?? http.Client();
+
+  static const String _configuredGatewayUrl = String.fromEnvironment(
+    'WAHA_GATEWAY_URL',
+    defaultValue: 'https://netagentiraq.duckdns.org',
+  );
+
+  final String _gatewayUrl;
+  final http.Client _client;
+  final Duration timeout;
+
+  /// يحوّل رابط صورة الـ gateway إلى مسار الحذف `/api/images/<uid>/<file>`،
+  /// أو null إن كان الرابط لمضيف آخر (روابط Firebase قديمة) أو غير صالح. نقيّة.
+  static String? parseDeletePath(String url, String gatewayUrl) {
+    final u = Uri.tryParse(url);
+    final g = Uri.tryParse(gatewayUrl);
+    if (u == null || g == null || u.host.isEmpty || u.host != g.host) return null;
+    final segs = u.pathSegments;
+    if (segs.length != 3 || segs[0] != 'uploads') return null;
+    if (segs[1].isEmpty || segs[2].isEmpty) return null;
+    return '/api/images/${segs[1]}/${segs[2]}';
+  }
+
+  Future<String?> _token() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return null;
+    final token = await user.getIdToken();
+    return (token == null || token.isEmpty) ? null : token;
+  }
+
+  @override
+  Future<String?> upload(Uint8List bytes, {required String contentType}) async {
+    final token = await _token();
+    if (token == null) return null;
+    try {
+      final resp = await _client
+          .post(
+            Uri.parse('$_gatewayUrl/api/images'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': contentType,
+            },
+            body: bytes,
+          )
+          .timeout(timeout);
+      if (resp.statusCode != 200) {
+        debugPrint('image upload failed: ${resp.statusCode}');
+        return null;
+      }
+      final data = jsonDecode(resp.body);
+      final url = data is Map ? data['url'] : null;
+      return (url is String && url.isNotEmpty) ? url : null;
+    } catch (e) {
+      debugPrint('image upload error: $e');
+      return null;
+    }
+  }
+
+  @override
+  Future<void> delete(String url) async {
+    final pathPart = parseDeletePath(url, _gatewayUrl);
+    if (pathPart == null) return; // رابط أجنبي (مثل Firebase قديم) — يُتجاهَل.
+    final token = await _token();
+    if (token == null) return;
+    try {
+      await _client
+          .delete(
+            Uri.parse('$_gatewayUrl$pathPart'),
+            headers: {'Authorization': 'Bearer $token'},
+          )
+          .timeout(timeout);
+    } catch (e) {
+      debugPrint('image delete error: $e');
+    }
+  }
+}
+
+/// خدمة أجهزة المتجر. المصدر في Firebase تحت `products`، والصور على خادم الـ
+/// VPS (الـ gateway) تحت `/uploads/{uid}/...`. لا اعتماد لكل جهاز — يَرِث اعتماد
 /// المتجر؛ الكتابة مقفلة على المالك.
 class ProductService {
+  ProductService({ProductImageUploader? uploader})
+      : _uploader = uploader ?? GatewayProductImageUploader();
+
   static const _node = 'products';
   static const maxImages = 5;
+
+  final ProductImageUploader _uploader;
 
   static bool get _ready => Firebase.apps.isNotEmpty;
 
   /// معرّف جديد لجهاز، كي تُرفع صوره تحت مساره قبل حفظه.
   String newKey() => FirebaseDatabase.instance.ref(_node).push().key ?? '';
+
+  /// الروابط القديمة التي لم تعُد مُشار إليها بعد تعديل (قديمة ناقص الجديدة). نقيّة.
+  static List<String> imagesToDelete(
+    List<String> oldUrls,
+    List<String> newUrls,
+  ) {
+    final keep = newUrls.toSet();
+    return oldUrls.where((u) => u.isNotEmpty && !keep.contains(u)).toList();
+  }
+
+  /// نوع المحتوى من البايتات الأولى (ليطابق تحقّق الخادم بالـ magic bytes).
+  static String contentTypeFor(Uint8List bytes, {String fallback = 'image/jpeg'}) {
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xFF &&
+        bytes[1] == 0xD8 &&
+        bytes[2] == 0xFF) {
+      return 'image/jpeg';
+    }
+    if (bytes.length >= 8 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return 'image/png';
+    }
+    if (bytes.length >= 12 &&
+        bytes[0] == 0x52 && // R
+        bytes[1] == 0x49 && // I
+        bytes[2] == 0x46 && // F
+        bytes[3] == 0x46 && // F
+        bytes[8] == 0x57 && // W
+        bytes[9] == 0x45 && // E
+        bytes[10] == 0x42 && // B
+        bytes[11] == 0x50) {
+      return 'image/webp';
+    }
+    return fallback;
+  }
 
   /// يتحقق من بيانات الجهاز قبل الرفع/الكتابة. رسالة عربية أو null إن صحّت.
   static String? validateSubmission(ProductSubmission s) {
@@ -164,30 +306,17 @@ class ProductService {
     }
   }
 
-  /// يرفع صورة إلى Storage ويعيد رابط تنزيلها. يعمل على الجوال والويب
-  /// (putData ببايتات الملف)، على نمط رفع الوصولات الموجود.
-  Future<String?> uploadImage(XFile file, {required String productKey}) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return null;
-    final ext = file.name.contains('.')
-        ? file.name.split('.').last.toLowerCase()
-        : 'jpg';
-    final contentType = switch (ext) {
-      'png' => 'image/png',
-      'webp' => 'image/webp',
-      'gif' => 'image/gif',
-      _ => 'image/jpeg',
-    };
-    final stamp = DateTime.now().microsecondsSinceEpoch;
-    final ref = FirebaseStorage.instance.ref(
-      'product_images/${user.uid}/$productKey/$stamp-${file.name}',
-    );
-    final task = await ref.putData(
-      await file.readAsBytes(),
-      SettableMetadata(contentType: contentType),
-    );
-    return task.ref.getDownloadURL();
+  /// يرفع صورة إلى خادم الـ VPS (الـ gateway) ويعيد الرابط العام، أو null عند
+  /// الفشل. نوع المحتوى يُشتَق من البايتات ليطابق تحقّق الخادم. يعمل جوالاً وويباً.
+  Future<String?> uploadImage(XFile file, {String? productKey}) async {
+    final bytes = await file.readAsBytes();
+    if (bytes.isEmpty) return null;
+    final contentType = contentTypeFor(bytes);
+    return _uploader.upload(bytes, contentType: contentType);
   }
+
+  /// حذف أفضل جهد لصورة برابطها (يتجاهل روابط غير الـ gateway).
+  Future<void> deleteImage(String url) => _uploader.delete(url);
 
   Map<String, Object> _payload(
     ProductSubmission s, {
@@ -234,6 +363,16 @@ class ProductService {
   }) async {
     if (!_ready || FirebaseAuth.instance.currentUser == null) return;
     if (validateSubmission(s) != null) return;
+    // اقرأ صور السجل الحالية قبل الكتابة، لحذف ما لم يعُد مُشاراً إليه لاحقاً.
+    List<String> oldImages = const [];
+    try {
+      final snap = await FirebaseDatabase.instance
+          .ref('$_node/$key')
+          .get()
+          .timeout(const Duration(seconds: 8));
+      final v = snap.value;
+      if (v is Map) oldImages = Product._parseImages(v['images']);
+    } catch (_) {}
     try {
       await FirebaseDatabase.instance
           .ref('$_node/$key')
@@ -241,6 +380,11 @@ class ProductService {
           .timeout(const Duration(seconds: 8));
     } catch (e) {
       debugPrint('product update failed: $e');
+      return; // الكتابة فشلت — لا تلمس الصور كي لا تُفقَد بيانات الإعلان.
+    }
+    // السجل كُتب بالصور الجديدة — احذف القديمة غير المُشار إليها أفضل‑جهد.
+    for (final url in imagesToDelete(oldImages, s.imageUrls)) {
+      await deleteImage(url);
     }
   }
 
@@ -250,6 +394,16 @@ class ProductService {
 
   Future<void> _remove(String key) async {
     if (!_ready || FirebaseAuth.instance.currentUser == null) return;
+    // اجمع روابط الصور قبل الحذف.
+    List<String> images = const [];
+    try {
+      final snap = await FirebaseDatabase.instance
+          .ref('$_node/$key')
+          .get()
+          .timeout(const Duration(seconds: 8));
+      final v = snap.value;
+      if (v is Map) images = Product._parseImages(v['images']);
+    } catch (_) {}
     try {
       await FirebaseDatabase.instance
           .ref('$_node/$key')
@@ -257,6 +411,11 @@ class ProductService {
           .timeout(const Duration(seconds: 8));
     } catch (e) {
       debugPrint('product remove failed: $e');
+      return; // السجل لم يُحذف — أبقِ صوره.
+    }
+    // السجل (مصدر الحقيقة) حُذف — احذف صوره أفضل‑جهد؛ الفشل يترك ملفاً يتيماً فقط.
+    for (final url in images) {
+      await deleteImage(url);
     }
   }
 }
