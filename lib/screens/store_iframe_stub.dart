@@ -1,5 +1,16 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 /// غير الويب: لا إطار مضمّن — تُستخدم WebView الأصلية (webview_flutter) بدلاً
 /// منه. هذا البديل يضمن أن ملف الشاشة يُترجم على الجوال دون أي رمز ويب.
 Widget buildStoreIframe(String url) => const SizedBox.shrink();
+
+/// شعار المتجر على الجوال: Image.network عادية (لا مشكلة CORS على الجوال)،
+/// مع أيقونة بديلة إن فشل التحميل.
+Widget buildStoreLogo(String imageUrl, double size) => Image.network(
+      imageUrl,
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+      errorBuilder: (_, _, _) =>
+          Icon(Icons.storefront_rounded, size: size * 0.9),
+    );

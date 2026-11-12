@@ -266,13 +266,10 @@ class _StoreTile extends StatelessWidget {
         onTap: store.approved ? onOpen : null,
         leading: ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: Image.network(
-            store.logo,
+          child: SizedBox(
             width: 44,
             height: 44,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) =>
-                const Icon(Icons.storefront_rounded, size: 40),
+            child: buildStoreLogo(store.logo, 44),
           ),
         ),
         title: Text(store.name),

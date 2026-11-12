@@ -5,6 +5,7 @@ import 'package:web/web.dart' as web;
 
 /// أنواع العرض المسجّلة، كي لا نسجّل النوع نفسه مرتين (تسجيل مكرر يرمي خطأ).
 final Set<String> _registered = <String>{};
+final Set<String> _registeredLogos = <String>{};
 
 /// الويب: يضمّن رابط المتجر داخل التطبيق عبر عنصر <iframe>، فيُفتح المتجر
 /// داخل «المشتريات» بدل تبويب خارجي. قد يرفض بعض المواقع التضمين
@@ -33,4 +34,32 @@ Widget buildStoreIframe(String url) {
     );
   }
   return HtmlElementView(viewType: viewType);
+}
+
+/// شعار المتجر على الويب: عنصر <img> مضمّن بدل Image.network، كي لا تفشل
+/// صور الأيقونات عبر النطاقات بسبب CORS على محرّك CanvasKit.
+Widget buildStoreLogo(String imageUrl, double size) {
+  final viewType = 'store-logo:$imageUrl';
+  if (_registeredLogos.add(viewType)) {
+    ui_web.platformViewRegistry.registerViewFactory(
+      viewType,
+      (int viewId) {
+        final img =
+            web.document.createElement('img') as web.HTMLImageElement;
+        img.src = imageUrl;
+        img.setAttribute('referrerpolicy', 'no-referrer');
+        img.setAttribute('alt', '');
+        img.style
+          ..setProperty('width', '100%')
+          ..setProperty('height', '100%')
+          ..setProperty('object-fit', 'contain');
+        return img;
+      },
+    );
+  }
+  return SizedBox(
+    width: size,
+    height: size,
+    child: HtmlElementView(viewType: viewType),
+  );
 }
