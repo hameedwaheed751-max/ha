@@ -36,12 +36,12 @@ void main() {
     expect(find.text('أضف صورة واحدة للجهاز على الأقل'), findsOneWidget);
   });
 
-  test('a store with an empty url is now valid', () {
+  test('a store with an empty url is rejected (url required)', () {
     expect(
       StoreDirectoryService.validateSubmission(
         StoreSubmission(name: 'متجري', url: ''),
       ),
-      isNull,
+      isNotNull,
     );
   });
 }

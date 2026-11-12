@@ -19,7 +19,7 @@ import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
 import 'subscribers_screen.dart';
 import 'settings_screen.dart';
-import 'stores_screen.dart';
+import 'purchases_home_screen.dart';
 import 'whatsapp_linking_screen.dart';
 import 'app_notifications_screen.dart';
 import 'subscriber_details_screen.dart';
@@ -2111,7 +2111,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       case 2:
         _pushDashboard(const AddSubscriberScreen());
       case 3:
-        _pushDashboard(const StoresScreen());
+        _pushDashboard(const PurchasesHomeScreen());
       case 4:
         _pushDashboard(const SettingsScreen());
     }

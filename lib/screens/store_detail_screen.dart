@@ -154,6 +154,127 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
   }
 }
 
+/// سوق الأجهزة: كل الأجهزة المعروضة للبيع من كل الوكلاء. أي وكيل يضيف أجهزته
+/// (صور + وصف + سعر + واتساب)؛ المالك/الأدمن يعدّل/يحذف أجهزته.
+class DevicesScreen extends StatefulWidget {
+  const DevicesScreen({
+    super.key,
+    this.initialProducts,
+    this.currentUidOverride,
+    this.isAdminOverride,
+  });
+
+  final List<Product>? initialProducts;
+  final String? currentUidOverride;
+  final bool? isAdminOverride;
+
+  @override
+  State<DevicesScreen> createState() => _DevicesScreenState();
+}
+
+class _DevicesScreenState extends State<DevicesScreen> {
+  final _service = ProductService();
+  List<Product> _products = const [];
+  bool _loading = true;
+
+  String get _uid => widget.currentUidOverride ?? _currentUid();
+  bool get _isAdmin => widget.isAdminOverride ?? TrialGuardService.isAdmin;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialProducts != null) {
+      _products = widget.initialProducts!;
+      _loading = false;
+    } else {
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final items = await _service.loadAll();
+    if (!mounted) return;
+    setState(() {
+      _products = items;
+      _loading = false;
+    });
+  }
+
+  Future<void> _addOrEdit({Product? existing}) async {
+    // جهاز جديد يُنسَب لمتجر الوكيل الضمني (مفتاحه = uid الوكيل).
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ProductFormScreen(
+          storeKey: existing?.storeKey ?? _uid,
+          existing: existing,
+        ),
+      ),
+    );
+    if (changed == true) await _load();
+  }
+
+  void _openProduct(Product p) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProductDetailScreen(
+          product: p,
+          canManage: _isAdmin || p.ownerUid == _uid,
+          onEdit: () => _addOrEdit(existing: p),
+          onChanged: _load,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('أجهزة للبيع'), centerTitle: true),
+        floatingActionButton: FloatingActionButton.extended(
+          key: const Key('devices-add'),
+          onPressed: () => _addOrEdit(),
+          icon: const Icon(Icons.add_photo_alternate_rounded),
+          label: const Text('أضف جهازاً'),
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : RefreshIndicator(
+                onRefresh: _load,
+                child: _products.isEmpty
+                    ? ListView(
+                        children: const [
+                          Padding(
+                            padding: EdgeInsets.only(top: 80),
+                            child: Center(
+                              child: Text('لا توجد أجهزة معروضة بعد'),
+                            ),
+                          ),
+                        ],
+                      )
+                    : GridView.builder(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+                        gridDelegate:
+                            const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 200,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 0.72,
+                        ),
+                        itemCount: _products.length,
+                        itemBuilder: (context, i) => _ProductCard(
+                          product: _products[i],
+                          onTap: () => _openProduct(_products[i]),
+                        ),
+                      ),
+              ),
+      ),
+    );
+  }
+}
+
 class _StoreHeader extends StatelessWidget {
   const _StoreHeader({required this.store});
   final Store store;

@@ -280,6 +280,30 @@ class ProductService {
     return null;
   }
 
+  /// يقرأ كل الأجهزة المعروضة (سوق مشترك) مرتّبةً بالأحدث. أي خطأ يُرجع قائمة فارغة.
+  Future<List<Product>> loadAll() async {
+    if (!_ready) return const [];
+    try {
+      final snapshot = await FirebaseDatabase.instance
+          .ref(_node)
+          .get()
+          .timeout(const Duration(seconds: 8));
+      final value = snapshot.value;
+      final out = <Product>[];
+      if (value is Map) {
+        value.forEach((key, entry) {
+          final p = Product.fromSnapshot('$key', entry);
+          if (p != null) out.add(p);
+        });
+      }
+      out.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      return out;
+    } catch (e) {
+      debugPrint('products loadAll failed: $e');
+      return const [];
+    }
+  }
+
   /// يقرأ أجهزة متجر واحد مرتّبةً بالأحدث. أي خطأ يُرجع قائمة فارغة.
   Future<List<Product>> loadForStore(String storeKey) async {
     if (!_ready) return const [];
