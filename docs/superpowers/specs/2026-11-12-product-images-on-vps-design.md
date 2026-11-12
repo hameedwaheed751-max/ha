@@ -1,7 +1,7 @@
 # تخزين صور الأجهزة على خادم الـ VPS — مواصفة التصميم
 
 **التاريخ:** 2026-11-12
-**الحالة:** مُوافَق على التصميم (بانتظار مراجعة المواصفة)
+**الحالة:** مُوافَق على اعتماد الـ VPS؛ نسخة مُحدَّثة بطلبات المستخدم العشرة (بانتظار إعادة المراجعة)
 
 ## الهدف
 
@@ -15,161 +15,212 @@
 تسمح بذلك دون أي تغيير عليها:
 
 - **Caddy** (`Caddyfile.production`) يمرّر *كل* المسارات إلى `gateway:3001`
-  عبر `reverse_proxy` شامل، و**بلا حدٍّ افتراضي لحجم جسم الطلب** — فرفع صور
-  بعدة ميغابايت يمرّ دون إعداد.
+  عبر `reverse_proxy` شامل، و**بلا حدٍّ افتراضي لحجم جسم الطلب**.
 - `./gateway/data:/app/data` مُركَّب bind دائم (نفس مجلد `idempotency.json`).
   `replace-gateway.sh` ينسخ كل المجلدات عند الاستبدال، فالصور تبقى بعد النشر.
   جذر الحاوية `read_only` لكن `/app/data` قابل للكتابة.
 - المصادقة (Firebase Bearer + فحص دور الوكيل) وCORS للويب جاهزة ونعيد استخدامها.
 
-**النتيجة:** لا تغيير على Caddy، ولا مجلد جديد، ولا متغيّر بيئة إلزامي جديد.
 النشر = إعادة بناء صورة الـ gateway محلياً ← TAR ← المستخدم يرفع بـ scp ويشغّل
 `replace-gateway.sh` (المسار المعتاد).
 
 ## القيود العامة (Global Constraints)
 
-- الصور تُخزَّن تحت `/app/data/uploads/<uid>/<عشوائي>.<ext>` فقط (المجلد الوحيد
-  الدائم والقابل للكتابة مع جذر `read_only`).
-- الرابط العام يُبنى من `PUBLIC_BASE_URL`، افتراضه `https://netagentiraq.duckdns.org`
-  (قابل للتجاوز بمتغيّر بيئة، لكن **غير إلزامي** كي يبقى مسار النشر الناسخ للبيئة سليماً).
-- **لا تبعيّة جديدة** في الـ gateway: الرفع عبر `express.raw` (لا multer).
-- أنواع الصور المقبولة: `image/jpeg`، `image/png`، `image/webp` فقط، ويُتحقَّق
-  منها بالبايتات الأولى (magic bytes)، لا بترويسة العميل وحدها.
-- الحد الأقصى لحجم الصورة: `MAX_IMAGE_BYTES`، افتراضه 4 ميغابايت.
-- أقصى عدد صور للجهاز يبقى 5 (`ProductService.maxImages`).
-- الصور تُصغَّر في العميل قبل الرفع: `image_picker` بعرض 1600px وجودة 80.
-- أسماء الملفات عشوائية؛ الامتداد يُشتَق من النوع المُتحقَّق منه، لا من اسم العميل.
-- لا تُطبع أسرار/توكنات. لا يُنفَّذ شيء على الـ VPS من هنا.
+- **المصادقة إلزامية في كل رفع وحذف**: يُتحقَّق من Firebase ID Token عبر
+  `verifyIdToken` **ثم** `authorizeAccount` (دور الوكيل). لا عملية بلا توكن صالح. [طلب 1]
+- **الهوية من التوكن لا من العميل**: عند الرفع يُستعمل `uid` المستخرَج من التوكن
+  المُتحقَّق حصراً؛ أي `uid` أو مسار يرسله التطبيق يُتجاهَل. [طلب 1]
+- **فحص الصلاحيات من جهة الخادم**: الحذف مسموح فقط إذا كان صاحب الطلب هو مالك
+  الصورة (`:uid === tokenUid`) أو المدير (`kAdminUid`)، ويُفرَض في الخادم. [طلب 2]
+- **التحقق الفعلي من المحتوى**: نوع الصورة يُحدَّد من البايتات الأولى (magic
+  bytes) ويجب أن يطابق `Content-Type`؛ غير المطابق أو غير المدعوم يُرفَض. [طلب 3]
+  الأنواع المقبولة: `image/jpeg`، `image/png`، `image/webp` فقط.
+- **تحديد المعدّل (Rate Limiting)** على `/api/images` (POST وDELETE) لكل `uid`. [طلب 4]
+- **منع Path Traversal**: التخزين محصور تحت `uploadsDir`؛ أسماء الملفات عشوائية
+  يولّدها الخادم؛ معامل `:file` عند الحذف يُعقَّم بنمط صارم ويُرفَض أي `..`/فاصل مسار. [طلب 8]
+- **دوام مجلد التخزين**: الصور تحت `/app/data/uploads` — مجلد فرعي داخل المُركَّب
+  الدائم `/app/data` نفسه، ويجب **التحقق فعلياً** قبل النشر من أنّ الحاوية الحيّة
+  تملك هذا المُركَّب (انظر «متطلّبات النشر»). [طلب 6]
+- **عدم التعارض**: المسارات الجديدة لا تصطدم بمسارات الـ gateway الحالية ولا
+  بـ Caddy ولا بـ WAHA (انظر «عدم التعارض»). [طلب 7]
+- **لا تبعيّة جديدة** في الـ gateway: الرفع عبر `express.raw`، وتحديد المعدّل
+  بمخزن ذاكرة داخلي بسيط — لا multer ولا express-rate-limit.
+- الرابط العام من `PUBLIC_BASE_URL`، افتراضه `https://netagentiraq.duckdns.org`
+  (قابل للتجاوز بمتغيّر بيئة، **غير إلزامي** كي يبقى مسار النشر الناسخ للبيئة سليماً).
+- الحد الأقصى لحجم الصورة: `MAX_IMAGE_BYTES`، افتراضه 4 ميغابايت. أقصى عدد صور
+  للجهاز 5. الصور تُصغَّر في العميل قبل الرفع (`image_picker` 1600px/جودة 80).
+- لا تُطبع أسرار/توكنات. لا يُنفَّذ شيء على الـ VPS من هنا. قواعد Firebase Storage لا تُلمَس.
 
 ## المعمار
 
 ### 1) الـ gateway (`whatsapp_waha/gateway/server.js`)
 
-يُعاد استخدام `verifyIdToken` + `authorizeAccount` (الموجودان) في دالة مصادقة
-مشتركة `requireAgent(req,res,next)` تضع `req.agentUid`.
+**مصادقة مشتركة** — تُستخرَج دالة `requireAgent(req,res,next)` من منطق
+`/api/waha` الحالي: تتحقق من `Bearer` → `verifyIdToken` → `authorizeAccount`،
+وتضع `req.agentUid = identity.uid`. تُستعمل في `/api/waha/*` وفي `/api/images/*`.
+[طلبات 1، 2]
 
-**نقاط جديدة (قبل/بجانب كتلة `/api/waha`):**
+**محدِّد المعدّل** — `rateLimit(key)` بمخزن `Map` داخلي: نافذة منزلقة
+`RATE_LIMIT_WINDOW_MS` (افتراض 10 دقائق) بحدّ `RATE_LIMIT_MAX` (افتراض 30)
+لكل `uid`؛ يُشذَّب دورياً؛ يعيد 429 `{success:false,error:'rate_limited'}` عند
+التجاوز. يُطبَّق على POST وDELETE لـ `/api/images`. [طلب 4]
+
+**نقاط جديدة:**
 
 - `POST /api/images`
-  - مصادَقة عبر `requireAgent`.
-  - جسم الطلب: بايتات الصورة الخام، `Content-Type` من الأنواع المقبولة،
-    بحدّ `MAX_IMAGE_BYTES` عبر `express.raw({ type: [...accepted], limit })`.
-  - يتحقق من الـ magic bytes ويطابقها مع `Content-Type`؛ يرفض غير ذلك بـ 415.
-  - يكتب الملف إلى `<uploadsDir>/<agentUid>/<token>.<ext>` حيث `<token>`
-    عشوائي (`crypto.randomBytes(16).hex`)، و`<ext>` من النوع المُتحقَّق.
-  - يعيد `200 { success:true, url: "<PUBLIC_BASE_URL>/uploads/<agentUid>/<token>.<ext>" }`.
-  - أخطاء: 400 جسم فارغ، 413 تجاوز الحجم، 415 نوع غير مقبول، 401/403 مصادقة،
-    500 فشل كتابة.
+  - `requireAgent` ← `rateLimit(req.agentUid)`.
+  - الجسم: بايتات الصورة الخام عبر
+    `express.raw({ type:[...accepted], limit: maxImageBytes })`؛ `Content-Type`
+    من الأنواع المقبولة وإلا 415 (قبل القراءة).
+  - يتحقق من الـ magic bytes ويطابقها مع `Content-Type`؛ عدم التطابق → 415. [طلب 3]
+  - يكتب إلى `<uploadsDir>/<req.agentUid>/<token>.<ext>`، `<token>` =
+    `crypto.randomBytes(16).hex`، و`<ext>` من النوع المُتحقَّق (لا من العميل). [طلبات 1، 8]
+  - يعيد `200 { success:true, url:"<publicBaseUrl>/uploads/<agentUid>/<token>.<ext>" }`.
+  - أخطاء: 400 جسم فارغ، 413 تجاوز الحجم، 415 نوع، 401/403 مصادقة، 429 معدّل، 500 كتابة.
 
 - `DELETE /api/images/:uid/:file`
-  - مصادَقة عبر `requireAgent`.
-  - يسمح فقط إذا `:uid === req.agentUid` أو كان المستخدم المدير (`kAdminUid`).
-  - `:file` يُتحقَّق بـ `^[A-Za-z0-9._-]{1,120}$` وبلا `..`؛ وإلا 400.
-  - حذف أفضل جهد: يحذف الملف إن وُجد؛ يعيد `200 { success:true }` حتى لو كان
-    مفقوداً؛ لا يكشف وجود/عدم وجود الملف.
+  - `requireAgent` ← `rateLimit(req.agentUid)`.
+  - مسموح فقط إذا `:uid === req.agentUid` أو `req.agentUid === kAdminUid`، وإلا 403. [طلبات 2، 10]
+  - `:uid` يطابق `^[A-Za-z0-9]{1,128}$`، و`:file` يطابق `^[A-Za-z0-9._-]{1,120}$`
+    وبلا `..`؛ وإلا 400. المسار النهائي يُحَلّ ويُتحقَّق أنه داخل `uploadsDir`
+    (دفاع ثانٍ ضد التجاوز). [طلب 8]
+  - حذف أفضل جهد: يعيد `200 {success:true}` حتى لو كان الملف مفقوداً؛ لا يكشف الوجود.
 
-- خدمة ثابتة عامة `GET /uploads/*`
-  - `express.static(uploadsDir, { index:false, dotfiles:'deny', fallthrough:false,
-    maxAge:'7d', setHeaders: ضبط Cache-Control })`.
-  - `express.static` يمنع الخروج فوق الجذر (path traversal).
-  - عامة بلا مصادقة (صور أجهزة غير حساسة).
+- `GET /uploads/*` — خدمة ثابتة عامة:
+  `express.static(uploadsDir,{index:false,dotfiles:'deny',fallthrough:false,
+  maxAge:'7d'})`. `express.static` يمنع الخروج فوق الجذر. بلا مصادقة (صور غير حساسة). [طلب 8]
 
 **التهيئة (`loadConfig`):**
-- `uploadsDir`: `UPLOADS_DIR` أو `path.join(dirname(idempotencyFile), 'uploads')`
-  → `/app/data/uploads`.
-- `publicBaseUrl`: `PUBLIC_BASE_URL` أو `https://netagentiraq.duckdns.org`؛
-  يجب أن يبدأ `https://` وبلا `/` زائدة.
+- `uploadsDir`: `UPLOADS_DIR` أو `path.join(dirname(idempotencyFile),'uploads')` → `/app/data/uploads`.
+- `publicBaseUrl`: `PUBLIC_BASE_URL` أو `https://netagentiraq.duckdns.org`؛ يبدأ `https://`، بلا `/` زائدة.
 - `maxImageBytes`: `MAX_IMAGE_BYTES` أو `4*1024*1024` (ضمن حدّ معقول).
-- `adminUid`: `NETAGENT_ADMIN_UID` أو الثابت `wE10WciDVudIOJziBurjhBxpDfO2`.
-- عند البدء: `fs.mkdirSync(uploadsDir, { recursive:true })` (تحت `/app/data` القابل للكتابة).
+- `rateLimit`: `RATE_LIMIT_MAX` (افتراض 30)، `RATE_LIMIT_WINDOW_MS` (افتراض 600000).
+- `adminUid`: `NETAGENT_ADMIN_UID` أو `wE10WciDVudIOJziBurjhBxpDfO2`.
+- عند البدء: `fs.mkdirSync(uploadsDir,{recursive:true})` تحت `/app/data` القابل للكتابة.
 
-**CORS:** إضافة `DELETE` إلى `Access-Control-Allow-Methods` في الوسيط الحالي
-(الترويسات `Authorization, Content-Type` مسموحة أصلاً). الرفع من الويب: الأصل
-موجود في `CORS_ALLOWED_ORIGINS`. عرض الصور عبر `<img>` لا يحتاج CORS.
+**CORS:** إضافة `DELETE` إلى `Access-Control-Allow-Methods` (الترويسات `Authorization,
+Content-Type` مسموحة أصلاً). عرض الصور عبر `<img>` لا يحتاج CORS.
 
-### 2) التطبيق (`lib/services/product_service.dart`)
+### 2) عدم التعارض مع الخدمات الحالية [طلب 7]
 
-- `uploadImage` يتحوّل من `FirebaseStorage` إلى POST للـ gateway:
-  - يجلب توكن Firebase الحالي، يرسل `http.post('<gateway>/api/images',
-    headers:{Authorization:'Bearer <idToken>', 'Content-Type':<contentType>},
-    body: await file.readAsBytes())`، ويقرأ `url` من الرد.
-  - لإبقاء الخدمة قابلة للاختبار: حقن `ProductImageUploader`
-    (دالة `Future<String?> uploadBytes(Uint8List bytes, {required String contentType})`)
-    عبر المُنشئ بقيمة افتراضية مدعومة بالـ gateway (رابط افتراضي
-    `https://netagentiraq.duckdns.org`، توكن من `FirebaseAuth`، نمط `WahaNotificationService`).
-  - دالة حذف جديدة `deleteImage(String url)` (أفضل جهد) تُحلّل مسار
-    `/uploads/<uid>/<file>` من الرابط وتستدعي `DELETE /api/images/<uid>/<file>`؛
-    تُستدعى عند حذف الجهاز وعند إزالة صورة من النموذج. أي رابط ليس من مضيف الـ
-    gateway (روابط Firebase قديمة) يُتجاهَل بصمت.
-  - إزالة `import firebase_storage` إن لم يبقَ مستعمَلاً.
+- المسارات الجديدة `/api/images` و`/uploads` لا تتقاطع مع `/healthz` أو `/api/waha/*`
+  الحالية (بادئات مختلفة). تُسجَّل بعد الوسيط العام (CORS + express.json) وقبل/بجانب
+  كتلة `/api/waha` دون تغيير سلوكها.
+- `express.json({limit:'12kb'})` العام لا يمسّ `/api/images` (نوعه `image/*` لا `application/json`).
+- **WAHA**: الـ gateway يتصل بـ WAHA صعوداً (`WAHA_BASE_URL`) فقط لإرسال الرسائل؛
+  لا علاقة له بالتخزين. التغيير لا يمسّ أي مسار WAHA.
+- **Caddy**: `reverse_proxy` شامل يمرّر `/api/images` و`/uploads` تلقائياً؛ لا تعديل
+  على `Caddyfile.production`. لا منفذ جديد ولا شبكة جديدة.
+- اختبار تحقّق: مجموعة اختبارات `/api/waha` الحالية تبقى خضراء بعد الإضافة.
 
-- `_remove`/`deleteOwn`/`deleteAny`: قبل حذف سجل الجهاز من RTDB، تُجمع روابط
-  صوره وتُستدعى `deleteImage` لكل منها (أفضل جهد، لا يُعطّل الحذف).
+### 3) التطبيق (`lib/services/product_service.dart`)
 
-### 3) الواجهة (`lib/screens/store_detail_screen.dart`)
+- `uploadImage` يتحوّل إلى POST للـ gateway:
+  يجلب توكن Firebase، يرسل `http.post('<gateway>/api/images',
+  headers:{Authorization:'Bearer <idToken>','Content-Type':<contentType>},
+  body: await file.readAsBytes())`، ويقرأ `url`. يُحقَن `ProductImageUploader`
+  (دالة `Future<String?> uploadBytes(Uint8List bytes,{required String contentType})`)
+  عبر المُنشئ بقيمة افتراضية مدعومة بالـ gateway (نمط `WahaNotificationService`؛
+  رابط افتراضي `https://netagentiraq.duckdns.org`، توكن من `FirebaseAuth`). فشل
+  الرفع → `null`.
+- `deleteImage(String url)` (أفضل جهد): يُحلّل `/uploads/<uid>/<file>` من رابط يخصّ
+  مضيف الـ gateway، ويستدعي `DELETE /api/images/<uid>/<file>`؛ أي رابط من مضيف آخر
+  (روابط Firebase قديمة) يُتجاهَل بصمت ويعيد نجاحاً.
+- إزالة `import firebase_storage` إن لم يبقَ مستعمَلاً.
 
-- `ProductFormScreen._pick`: تمرير `maxWidth:1600, imageQuality:80` إلى
-  `pickMultiImage` لتصغير الصور قبل الرفع.
-- عند إزالة صورة محفوظة من النموذج (ضمن `_keptUrls`): تُستدعى
-  `ProductService.deleteImage` (أفضل جهد) للرابط المُزال عند الحفظ فقط إن لم
-  يعُد ضمن الصور النهائية.
+### 4) اتّساق الحذف ومعالجة الصور اليتيمة [طلبات 5، 9]
 
-### 4) الإعداد المرجعي (توثيق فقط، لا يغيّر الحيّ)
+مبدأ: **سجلّ الإعلان في RTDB هو مصدر الحقيقة؛ بيانات الإعلان لا تُفقَد أبداً بسبب
+فشل حذف صورة.** الترتيب مصمَّم ليُبقي الأسوأ حالةً = ملف يتيم غير مؤذٍ، لا إعلان مكسور:
+
+- **حذف الإعلان** (`_remove`): تُجمَع روابط صوره، ثم يُحذف **سجلّ RTDB أولاً**
+  (يختفي الإعلان فوراً)، ثم تُحذف الصور عبر `deleteImage` أفضل‑جهد. فشل حذف صورة →
+  ملف يتيم (هدر مساحة بسيط)، لا فقدان بيانات.
+- **تعديل/استبدال صورة** (`updateOwn`): الصور الجديدة تُرفَع أولاً، ثم يُكتب سجلّ
+  الإعلان بالصور النهائية، ثم تُحذف أفضل‑جهد الصورُ القديمة التي لم تعُد مُشار إليها
+  (`oldImages − newImages`). إن فشل الحذف تبقى صور يتيمة؛ الإعلان سليم وبصوره الصحيحة. [طلب 5]
+- **الصور اليتيمة**: ملفات متبقّية بلا سجلّ يشير إليها — غير مؤذية (لا تظهر في أي
+  إعلان لأن العرض يعتمد روابط `images[]` فقط). تُقبَل كأثر جانبي نادر لفشل الحذف؛
+  لا تُفقَد بيانات. (كنسّاح دوري اختياري مستقبلي؛ خارج النطاق الآن.) [طلب 9]
+- الواجهة (`store_detail_screen.dart`): عند حفظ تعديل، الروابط المُزالة من `_keptUrls`
+  تُمرَّر للحذف أفضل‑جهد بعد نجاح كتابة السجل.
+
+### 5) الواجهة — تصغير الصور
+
+`ProductFormScreen._pick`: تمرير `maxWidth:1600, imageQuality:80` إلى
+`pickMultiImage` لتصغير الصور قبل الرفع (توفير مساحة الخادم والنقل).
+
+### 6) الإعداد المرجعي (توثيق فقط، لا يغيّر الحيّ)
 
 تحديث `whatsapp_waha/compose.production.yaml` و`.env.example` بإضافة
-`PUBLIC_BASE_URL` و`MAX_IMAGE_BYTES` كمتغيّرات اختيارية موثّقة، مع ملاحظة أنّ
-القيم الافتراضية في الكود تكفي للنشر الحالي.
+`PUBLIC_BASE_URL`، `MAX_IMAGE_BYTES`، `RATE_LIMIT_MAX`، `RATE_LIMIT_WINDOW_MS`
+كمتغيّرات اختيارية موثّقة، مع ملاحظة أنّ القيم الافتراضية في الكود تكفي للنشر الحالي.
+
+## متطلّبات النشر (تحقّق قبل الاعتماد) [طلب 6]
+
+قبل النشر، يتأكّد المستخدم (أمر قراءة فقط على الـ VPS، لا يُنفّذه Claude) من أنّ
+الحاوية الحيّة تملك مُركَّباً دائماً عند `/app/data`:
+
+```
+docker inspect -f '{{range .Mounts}}{{.Type}} {{.Source}} -> {{.Destination}} (RW={{.RW}}){{println}}{{end}}' netagent-gateway
+```
+
+يجب أن يظهر سطر وجهته `/app/data` (bind أو volume، `RW=true`). وجوده يضمن أنّ
+`/app/data/uploads` يرث الدوام ويبقى بعد `replace-gateway.sh` (الذي ينسخ كل
+المُركَّبات). **إن لم يظهر** هذا المُركَّب فالصور ستُفقَد عند إعادة النشر — يُوقَف
+حينها ويُضاف المُركَّب أولاً (خطوة VPS منفصلة بموافقة). هذه بوابة ما قبل النشر.
 
 ## تدفّق البيانات
 
-1. الوكيل يختار صورة (مصغّرة) ← التطبيق POST بايتاتها إلى `/api/images` بتوكنه.
-2. الـ gateway يصادق، يتحقق، يكتب الملف، يعيد الرابط العام.
-3. التطبيق يجمع الروابط في `images[]` ويكتب سجل الجهاز في RTDB (بالقواعد الحالية
-   التي تقبل أي `https://`).
-4. العرض: `buildStoreImageFill` يعرض الرابط عبر `<img>` (ويب) أو `Image.network` (جوال).
-5. الحذف: حذف سجل الجهاز/إزالة صورة ← التطبيق `DELETE /api/images/...` (أفضل جهد).
+1. الوكيل يختار صورة مصغّرة ← التطبيق POST بايتاتها إلى `/api/images` بتوكنه.
+2. الـ gateway يصادق، يحدّ المعدّل، يتحقق من المحتوى، يكتب الملف، يعيد الرابط العام.
+3. التطبيق يجمع الروابط في `images[]` ويكتب سجلّ الجهاز في RTDB (القواعد الحالية تقبل أي `https://`).
+4. العرض: `buildStoreImageFill` عبر `<img>` (ويب) أو `Image.network` (جوال).
+5. الحذف/التعديل: كتابة السجل أولاً، ثم `DELETE /api/images/...` أفضل‑جهد.
 
-## الأمان
+## الأمان (ملخّص) [طلبات 1، 2، 3، 8، 10]
 
-- الرفع والحذف للوكلاء المصادَقين فقط؛ الحذف مقيَّد بمالك الـ `uid` أو المدير.
-- `uid` عند الرفع من التوكن المُتحقَّق، لا من إدخال العميل.
-- `:file` عند الحذف يُعقَّم (نمط صارم، لا `..`/`/`).
-- التحقق من نوع الصورة بالـ magic bytes.
-- حدّ الحجم عبر `express.raw` وبفحص صريح.
-- أسماء ملفات عشوائية تقلّل التخمين/التعداد.
-- الكتابة محصورة في `/app/data` (الوحيد القابل للكتابة مع `read_only`).
+- رفع/حذف للوكلاء المصادَقين فقط؛ الهوية من التوكن؛ الحذف مقيَّد بالمالك أو المدير خادمياً.
+- التحقق من الصورة بالـ magic bytes؛ حدّ الحجم؛ تحديد معدّل؛ أسماء عشوائية.
+- الكتابة محصورة في `uploadsDir` تحت `/app/data`؛ تعقيم `:file` + تحقّق المسار ضد التجاوز.
 
 ## الاختبار
 
-**الـ gateway (`node --test`, على نمط `server.test.js` بحقن `verifyIdToken`/`authorizeAccount` ومجلد مؤقت):**
-- POST صورة JPEG صحيحة (وكيل) → 200 + `url` + الملف مكتوب على القرص.
-- POST بترويسة `Content-Type` لا تطابق البايتات → 415، لا ملف.
-- POST أكبر من الحد → 413.
-- POST بلا توكن → 401؛ بتوكن غير وكيل → 403.
-- GET `/uploads/<file>` لملف موجود → 200 بنفس البايتات والنوع الصحيح.
-- GET `/uploads/<file>` مفقود → 404.
-- DELETE صورة المالك → 200 + الملف محذوف.
-- DELETE بـ `:uid` لوكيل آخر (غير مدير) → 403، الملف باقٍ.
-- DELETE باسم ملف فيه `..` → 400.
-- المدير يحذف صورة أي وكيل → 200.
+**الـ gateway (`node --test`, بحقن `verifyIdToken`/`authorizeAccount` ومجلد مؤقت):**
+- POST صورة JPEG صحيحة (وكيل) → 200 + `url` + الملف مكتوب.
+- POST بـ `Content-Type` لا يطابق البايتات → 415، لا ملف. [طلب 3]
+- POST أكبر من الحد → 413؛ POST بلا جسم → 400.
+- POST بلا توكن → 401؛ بتوكن غير وكيل → 403. [طلب 1]
+- **POST يتجاهل أي `uid`/مسار من العميل ويخزّن تحت uid التوكن** (لا يستطيع وكيل
+  الرفع باسم آخر). [طلبات 1، 10]
+- POST يتجاوز `RATE_LIMIT_MAX` خلال النافذة → 429. [طلب 4]
+- GET `/uploads/<file>` موجود → 200 بنفس البايتات والنوع؛ مفقود → 404.
+- GET `/uploads/../server.js` (تجاوز) → لا يُخدَم (404/403). [طلب 8]
+- DELETE صورة المالك → 200 + الملف محذوف. [طلب 5]
+- **DELETE بـ `:uid` لوكيل آخر (غير مدير) → 403، الملف باقٍ.** [طلبات 2، 10]
+- DELETE باسم ملف فيه `..` → 400. [طلب 8]
+- المدير يحذف صورة أي وكيل → 200. [طلب 2]
+- مجموعة اختبارات `/api/waha` الحالية تبقى خضراء (عدم تعارض). [طلب 7]
 
 **التطبيق (`flutter test`):**
-- `ProductService.uploadImage` يستدعي الـ uploader المحقون ويعيد رابطه.
-- `deleteImage` يستدعي الـ uploader/الحذف لرابط من مضيف الـ gateway، ويتجاهل رابطاً أجنبياً.
+- `uploadImage` يستدعي الـ uploader المحقون ويعيد رابطه؛ فشل → `null`.
+- `deleteImage` يستدعي الحذف لرابط من مضيف الـ gateway، ويتجاهل رابطاً أجنبياً (Firebase قديم).
+- `updateOwn` باستبدال صورة: يكتب السجل بالصور الجديدة **ثم** يطلب حذف القديمة
+  غير المُشار إليها؛ وفشل الحذف لا يُفقد/يُفسد السجل. [طلبات 5، 9]
+- `_remove`: يحذف السجل ثم يطلب حذف الصور (أفضل جهد). [طلب 9]
 - اختبارات `product_service_test`/`product_form_test`/الواجهة الحالية تبقى خضراء.
 
 ## مجال التركيز للمراجعة (Review Focus)
 
-- **صورة بامتداد مخادع** (مثلاً `.jpg` لكن بايتات PNG): يُعتمد النوع من الـ
-  magic bytes، والامتداد منه — اختبار عدم تطابق النوع يغطّيه.
-- **محاولة حذف ملف وكيل آخر/خارج المجلد**: فحص `:uid` والنمط الصارم — مغطّى.
-- **رفع بلا جسم أو جسم ضخم**: 400/413 — مغطّى.
-- **رابط Firebase قديم عند الحذف**: `deleteImage` يتجاهل أي مضيف غير الـ gateway — مغطّى.
-- **فشل الرفع (شبكة/خادم)**: `uploadImage` يعيد `null`، والنموذج يُبقي الصورة
-  غير مرفوعة ويعرض خطأ بدل حفظ جهاز بصورة ناقصة — يُغطّى باختبار الواجهة/الخدمة.
+- صورة بامتداد مخادع (بايتات PNG باسم `.jpg`): النوع من الـ magic bytes — مغطّى.
+- حذف/رفع يخصّ وكيلاً آخر: الهوية من التوكن + فحص `:uid` — مغطّى باختبارات صريحة.
+- تجاوز المسار في اسم الملف: تعقيم + تحقّق جذر — مغطّى.
+- رابط Firebase قديم عند الحذف: `deleteImage` يتجاهل مضيفاً غير الـ gateway — مغطّى.
+- فشل الرفع/الحذف: الرفع يعيد `null` فلا يُحفَظ جهاز بصورة ناقصة؛ الحذف أفضل‑جهد
+  فلا يُفقَد سجل، وأسوأ أثر = ملف يتيم — مغطّى.
 
 ## خارج النطاق
 
 - لا هجرة لصور قديمة (الميزة شُحنت اليوم؛ الروابط القديمة تبقى تعمل).
-- لا تنظيف دوري/حصص قرص (يُضاف لاحقاً إن لزم).
+- لا كنسّاح دوري للصور اليتيمة ولا حصص قرص (يُضاف لاحقاً إن لزم).
 - قواعد Firebase Storage لا تُلمَس.
