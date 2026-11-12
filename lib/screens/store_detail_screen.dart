@@ -381,6 +381,85 @@ class ProductCard extends StatelessWidget {
   }
 }
 
+/// منشور جهاز بنمط التواصل الاجتماعي: اسم الوكيل الناشر أعلى، ثم الصورة، ثم
+/// العنوان والسعر والوصف. ضمن خلاصة عمودية في قسم «أجهزة للبيع».
+class DevicePostCard extends StatelessWidget {
+  const DevicePostCard({super.key, required this.product, required this.onTap});
+  final Product product;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final owner = product.ownerName.isNotEmpty ? product.ownerName : 'وكيل';
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      margin: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ترويسة الناشر (اسم الوكيل) — كمنشور تواصل اجتماعي.
+            ListTile(
+              dense: true,
+              leading: CircleAvatar(
+                child: Text(owner.substring(0, 1)),
+              ),
+              title: Text(
+                owner,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            // الصورة المنشورة.
+            AspectRatio(
+              aspectRatio: 1.1,
+              child: Container(
+                color: const Color(0x11000000),
+                child: buildStoreImageFill(product.firstImage),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (product.title.isNotEmpty)
+                    Text(
+                      product.title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  if (product.price != null)
+                    Text(
+                      '${_fmtPrice(product.price!)} ${product.currency}',
+                      style: const TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  if (product.description.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        product.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 String _fmtPrice(double v) {
   final n = v == v.roundToDouble() ? v.toInt().toString() : v.toString();
   // فواصل آلاف بسيطة.

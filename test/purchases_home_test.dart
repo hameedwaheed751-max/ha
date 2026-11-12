@@ -18,7 +18,7 @@ Product _device() => Product(
       key: 'p1',
       storeKey: 'u1',
       ownerUid: 'u1',
-      ownerName: 'مكتب',
+      ownerName: 'مكتب النور',
       description: 'جهاز ممتاز',
       images: const ['https://netagentiraq.duckdns.org/uploads/u1/a.jpg'],
       title: 'راوتر AX1500',
@@ -26,51 +26,52 @@ Product _device() => Product(
       currency: 'د.ع',
     );
 
-void main() {
-  testWidgets('purchases page shows devices and stores directly, plus add buttons',
-      (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: PurchasesHomeScreen(
-          initialStores: [_store()],
-          initialProducts: [_device()],
-          currentUidOverride: 'me',
-          isAdminOverride: false,
-        ),
+Widget _app({int tab = 0}) => MaterialApp(
+      home: PurchasesHomeScreen(
+        initialStores: [_store()],
+        initialProducts: [_device()],
+        currentUidOverride: 'me',
+        isAdminOverride: false,
+        initialTab: tab,
       ),
     );
+
+void main() {
+  testWidgets('two tabs; stores tab shows only stores + add-store FAB',
+      (tester) async {
+    await tester.pumpWidget(_app(tab: 0));
     await tester.pumpAndSettle();
 
-    // Both add-actions and the device marketplace are on the same page.
-    expect(find.byKey(const Key('purchases-add-device')), findsOneWidget);
-    expect(find.byKey(const Key('purchases-add-store')), findsOneWidget);
-    expect(find.text('أجهزة للبيع'), findsOneWidget);
-    expect(find.text('راوتر AX1500'), findsOneWidget); // device post, no tap needed
-
-    // The stores section is content on the same page (scroll to reach it).
-    await tester.dragUntilVisible(
-      find.text('متجر ألف'),
-      find.byType(ListView),
-      const Offset(0, -250),
-    );
-    expect(find.text('متجر ألف'), findsOneWidget); // store link
     expect(find.text('المتاجر'), findsOneWidget);
+    expect(find.text('أجهزة للبيع'), findsOneWidget);
+
+    // Stores tab content only.
+    expect(find.text('متجر ألف'), findsOneWidget);
+    expect(find.text('راوتر AX1500'), findsNothing);
+    expect(find.byKey(const Key('purchases-add-store')), findsOneWidget);
+    expect(find.byKey(const Key('purchases-add-device')), findsNothing);
   });
 
-  testWidgets('purchases page shows empty hints with no content', (tester) async {
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: PurchasesHomeScreen(
-          initialStores: [],
-          initialProducts: [],
-          currentUidOverride: 'me',
-          isAdminOverride: false,
-        ),
-      ),
-    );
+  testWidgets('devices tab shows device posts with the publisher name on top',
+      (tester) async {
+    await tester.pumpWidget(_app(tab: 1));
     await tester.pumpAndSettle();
 
-    expect(find.text('لا توجد أجهزة معروضة بعد'), findsOneWidget);
-    expect(find.text('لا توجد متاجر بعد'), findsOneWidget);
+    // Devices tab content only — a social-style post: publisher + image + title.
+    expect(find.text('راوتر AX1500'), findsOneWidget);
+    expect(find.text('مكتب النور'), findsOneWidget); // publisher (agent) name
+    expect(find.text('متجر ألف'), findsNothing);
+    expect(find.byKey(const Key('purchases-add-device')), findsOneWidget);
+    expect(find.byKey(const Key('purchases-add-store')), findsNothing);
+  });
+
+  testWidgets('tapping a tab switches which content is shown', (tester) async {
+    await tester.pumpWidget(_app(tab: 0));
+    await tester.pumpAndSettle();
+    expect(find.text('راوتر AX1500'), findsNothing);
+
+    await tester.tap(find.text('أجهزة للبيع'));
+    await tester.pumpAndSettle();
+    expect(find.text('راوتر AX1500'), findsOneWidget);
   });
 }

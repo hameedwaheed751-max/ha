@@ -8,8 +8,10 @@ import '../services/trial_guard_service.dart';
 import 'store_detail_screen.dart';
 import 'stores_screen.dart';
 
-/// صفحة «المشتريات»: تعرض المحتوى مباشرةً — سوق الأجهزة للبيع ثم روابط المتاجر —
-/// وزرّا «انشاء متجر» (أضف جهازاً) و«أضف متجري» (أضف رابط متجر) للإضافة فقط.
+/// صفحة «المشتريات»: تبويبان منفصلان —
+///  • «المتاجر»: دليل روابط متاجر الوكلاء الخارجية (تُفتح كما هي).
+///  • «أجهزة للبيع»: خلاصة منشورات أجهزة الوكلاء (اسم الناشر أعلى ثم الصورة).
+/// كل تبويب يعرض محتواه فقط، وزر الإضافة يتبع التبويب الظاهر.
 class PurchasesHomeScreen extends StatefulWidget {
   const PurchasesHomeScreen({
     super.key,
@@ -17,20 +19,24 @@ class PurchasesHomeScreen extends StatefulWidget {
     this.initialProducts,
     this.currentUidOverride,
     this.isAdminOverride,
+    this.initialTab = 0,
   });
 
   final List<Store>? initialStores;
   final List<Product>? initialProducts;
   final String? currentUidOverride;
   final bool? isAdminOverride;
+  final int initialTab;
 
   @override
   State<PurchasesHomeScreen> createState() => _PurchasesHomeScreenState();
 }
 
-class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
+class _PurchasesHomeScreenState extends State<PurchasesHomeScreen>
+    with SingleTickerProviderStateMixin {
   final _storeService = StoreDirectoryService();
   final _productService = ProductService();
+  late final TabController _tab;
   List<Store> _stores = const [];
   List<Product> _products = const [];
   bool _loading = true;
@@ -44,6 +50,8 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
   @override
   void initState() {
     super.initState();
+    _tab = TabController(length: 2, vsync: this, initialIndex: widget.initialTab)
+      ..addListener(() => setState(() {})); // تحديث زر الإضافة مع التبويب
     if (widget.initialStores != null || widget.initialProducts != null) {
       _stores = widget.initialStores ?? const [];
       _products = widget.initialProducts ?? const [];
@@ -51,6 +59,12 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
     } else {
       _load();
     }
+  }
+
+  @override
+  void dispose() {
+    _tab.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -136,7 +150,7 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
     );
   }
 
-  // ---- devices (marketplace) ----
+  // ---- devices (marketplace feed) ----
   Future<void> _addDevice() async {
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => ProductFormScreen(storeKey: _uid)),
@@ -166,6 +180,63 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
     if (changed == true) await _load();
   }
 
+  Widget _storesTab() {
+    final visible = _visibleStores;
+    final pending =
+        _isAdmin ? visible.where((s) => !s.approved).toList() : const <Store>[];
+    final listed =
+        _isAdmin ? visible.where((s) => s.approved).toList() : visible;
+    StoreCard card(Store s) => StoreCard(
+          store: s,
+          onOpen: () => _openStore(s),
+          onEdit: s.ownerUid == _uid ? () => _addStore(existing: s) : null,
+          onDelete: (s.ownerUid == _uid || _isAdmin)
+              ? () => _confirmDeleteStore(s)
+              : null,
+          onApprove: (_isAdmin && !s.approved) ? () => _approveStore(s) : null,
+        );
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+        children: [
+          if (pending.isNotEmpty) ...[
+            const _SectionTitle('متاجر قيد المراجعة'),
+            const SizedBox(height: 8),
+            _grid([for (final s in pending) card(s)], 0.82),
+            const SizedBox(height: 20),
+          ],
+          if (listed.isEmpty && pending.isEmpty)
+            const _EmptyHint('لا توجد متاجر بعد')
+          else if (listed.isNotEmpty)
+            _grid([for (final s in listed) card(s)], 0.82),
+        ],
+      ),
+    );
+  }
+
+  Widget _devicesTab() {
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: _products.isEmpty
+          ? ListView(
+              children: const [
+                Padding(
+                  padding: EdgeInsets.only(top: 80),
+                  child: _EmptyHint('لا توجد أجهزة معروضة بعد'),
+                ),
+              ],
+            )
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+              children: [
+                for (final p in _products)
+                  DevicePostCard(product: p, onTap: () => _openDevice(p)),
+              ],
+            ),
+    );
+  }
+
   Widget _grid(List<Widget> cards, double aspect) => GridView.count(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
@@ -179,98 +250,41 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final visible = _visibleStores;
-    final pending =
-        _isAdmin ? visible.where((s) => !s.approved).toList() : const <Store>[];
-    final listedStores =
-        _isAdmin ? visible.where((s) => s.approved).toList() : visible;
-
+    final onStores = _tab.index == 0;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: const Text('المشتريات'), centerTitle: true),
+        appBar: AppBar(
+          title: const Text('المشتريات'),
+          centerTitle: true,
+          bottom: TabBar(
+            controller: _tab,
+            tabs: const [
+              Tab(text: 'المتاجر'),
+              Tab(text: 'أجهزة للبيع'),
+            ],
+          ),
+        ),
+        floatingActionButton: _loading
+            ? null
+            : (onStores
+                ? FloatingActionButton.extended(
+                    key: const Key('purchases-add-store'),
+                    onPressed: () => _addStore(),
+                    icon: const Icon(Icons.add_business_rounded),
+                    label: const Text('أضف متجري'),
+                  )
+                : FloatingActionButton.extended(
+                    key: const Key('purchases-add-device'),
+                    onPressed: _addDevice,
+                    icon: const Icon(Icons.add_photo_alternate_rounded),
+                    label: const Text('أضف جهازاً'),
+                  )),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
-            : RefreshIndicator(
-                onRefresh: _load,
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            key: const Key('purchases-add-device'),
-                            onPressed: _addDevice,
-                            icon: const Icon(Icons.add_photo_alternate_rounded),
-                            label: const Text('انشاء متجر'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            key: const Key('purchases-add-store'),
-                            onPressed: () => _addStore(),
-                            icon: const Icon(Icons.add_business_rounded),
-                            label: const Text('أضف متجري'),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ---- devices marketplace (posts) ----
-                    const _SectionTitle('أجهزة للبيع'),
-                    const SizedBox(height: 8),
-                    if (_products.isEmpty)
-                      const _EmptyHint('لا توجد أجهزة معروضة بعد')
-                    else
-                      _grid([
-                        for (final p in _products)
-                          ProductCard(product: p, onTap: () => _openDevice(p)),
-                      ], 0.72),
-                    const SizedBox(height: 20),
-
-                    // ---- stores (external links) ----
-                    if (pending.isNotEmpty) ...[
-                      const _SectionTitle('متاجر قيد المراجعة'),
-                      const SizedBox(height: 8),
-                      _grid([
-                        for (final s in pending)
-                          StoreCard(
-                            store: s,
-                            onOpen: () => _openStore(s),
-                            onEdit: s.ownerUid == _uid
-                                ? () => _addStore(existing: s)
-                                : null,
-                            onDelete: () => _confirmDeleteStore(s),
-                            onApprove: () => _approveStore(s),
-                          ),
-                      ], 0.82),
-                      const SizedBox(height: 20),
-                    ],
-                    const _SectionTitle('المتاجر'),
-                    const SizedBox(height: 8),
-                    if (listedStores.isEmpty)
-                      const _EmptyHint('لا توجد متاجر بعد')
-                    else
-                      _grid([
-                        for (final s in listedStores)
-                          StoreCard(
-                            store: s,
-                            onOpen: () => _openStore(s),
-                            onEdit: s.ownerUid == _uid
-                                ? () => _addStore(existing: s)
-                                : null,
-                            onDelete: (s.ownerUid == _uid || _isAdmin)
-                                ? () => _confirmDeleteStore(s)
-                                : null,
-                            onApprove:
-                                (_isAdmin && !s.approved) ? () => _approveStore(s) : null,
-                          ),
-                      ], 0.82),
-                  ],
-                ),
+            : TabBarView(
+                controller: _tab,
+                children: [_storesTab(), _devicesTab()],
               ),
       ),
     );
