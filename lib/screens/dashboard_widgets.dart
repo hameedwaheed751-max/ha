@@ -408,7 +408,7 @@ class DashboardBottomBar extends StatelessWidget {
     (Icons.home_rounded, 'الرئيسية'),
     (Icons.groups_rounded, 'المشتركين'),
     (Icons.add_rounded, 'إضافة'),
-    (Icons.bar_chart_rounded, 'التقارير'),
+    (Icons.storefront_rounded, 'المشتريات'),
     (Icons.settings_rounded, 'الإعدادات'),
   ];
 

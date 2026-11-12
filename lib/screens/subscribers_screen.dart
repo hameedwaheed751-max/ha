@@ -16,7 +16,7 @@ import 'ftth_activation_dialog.dart';
 import 'ftth_payment_screen.dart';
 import 'dashboard_widgets.dart';
 import 'partial_payment_flow.dart';
-import 'quick_reports_screen.dart';
+import 'stores_screen.dart';
 import 'receipt_screen.dart';
 import 'settings_screen.dart';
 import 'subscriber_details_screen.dart';
@@ -3038,7 +3038,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       case 3:
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const QuickReportsScreen()),
+          MaterialPageRoute(builder: (_) => const StoresScreen()),
         );
       case 4:
         Navigator.push(
