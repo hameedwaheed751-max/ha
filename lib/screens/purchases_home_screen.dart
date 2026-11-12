@@ -8,7 +8,7 @@ import '../services/trial_guard_service.dart';
 import 'store_detail_screen.dart';
 import 'stores_screen.dart';
 
-/// صفحة «المشتريات»: مستطيلان واضحان بالأعلى للتبديل —
+/// صفحة «المتجر»: مستطيلان واضحان بالأعلى للتبديل —
 ///  • «المتاجر»: دليل روابط متاجر الوكلاء الخارجية (تُفتح كما هي).
 ///  • «أجهزة للبيع»: خلاصة منشورات أجهزة الوكلاء (اسم الناشر أعلى ثم الصورة).
 /// كل قسم يعرض محتواه فقط، وزر الإضافة يتبع القسم الظاهر.
@@ -247,7 +247,7 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: const Text('المشتريات'), centerTitle: true),
+        appBar: AppBar(title: const Text('المتجر'), centerTitle: true),
         floatingActionButton: _loading
             ? null
             : (onStores
