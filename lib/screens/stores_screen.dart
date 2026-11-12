@@ -199,18 +199,7 @@ class _StoresScreenState extends State<StoresScreen> {
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 6),
-                      for (final s in pending)
-                        _StoreTile(
-                          store: s,
-                          isOwner: s.ownerUid == _uid,
-                          isAdmin: _isAdmin,
-                          onOpen: () => _open(s),
-                          onEdit: s.ownerUid == _uid
-                              ? () => _openForm(existing: s)
-                              : null,
-                          onDelete: () => _confirmDelete(s),
-                          onApprove: () => _approve(s),
-                        ),
+                      _grid(pending),
                       const Divider(height: 24),
                     ],
                     if (listed.isEmpty && pending.isEmpty)
@@ -218,33 +207,48 @@ class _StoresScreenState extends State<StoresScreen> {
                         padding: EdgeInsets.only(top: 48),
                         child: Center(child: Text('لا توجد متاجر بعد')),
                       ),
-                    for (final s in listed)
-                      _StoreTile(
-                        store: s,
-                        isOwner: s.ownerUid == _uid,
-                        isAdmin: _isAdmin,
-                        onOpen: () => _open(s),
-                        onEdit: s.ownerUid == _uid
-                            ? () => _openForm(existing: s)
-                            : null,
-                        onDelete: (s.ownerUid == _uid || _isAdmin)
-                            ? () => _confirmDelete(s)
-                            : null,
-                        onApprove: null,
-                      ),
+                    if (listed.isNotEmpty) _grid(listed),
                   ],
                 ),
               ),
       ),
     );
   }
+
+  /// شبكة بطاقات مربّعة للمتاجر، متجاوبة مع عرض الشاشة.
+  Widget _grid(List<Store> items) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 200,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 0.82,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, i) {
+        final s = items[i];
+        return _StoreCard(
+          store: s,
+          onOpen: () => _open(s),
+          onEdit: s.ownerUid == _uid ? () => _openForm(existing: s) : null,
+          onDelete: (s.ownerUid == _uid || _isAdmin)
+              ? () => _confirmDelete(s)
+              : null,
+          onApprove: (_isAdmin && !s.approved) ? () => _approve(s) : null,
+        );
+      },
+    );
+  }
 }
 
-class _StoreTile extends StatelessWidget {
-  const _StoreTile({
+/// بطاقة متجر مربّعة: الشعار كبيراً في الأعلى، ثم الاسم والمكتب، ووسم «قيد
+/// المراجعة» عند الحاجة، وأزرار الإجراءات (اعتماد/تعديل/حذف) أسفلها.
+class _StoreCard extends StatelessWidget {
+  const _StoreCard({
     required this.store,
-    required this.isOwner,
-    required this.isAdmin,
     required this.onOpen,
     this.onEdit,
     this.onDelete,
@@ -252,8 +256,6 @@ class _StoreTile extends StatelessWidget {
   });
 
   final Store store;
-  final bool isOwner;
-  final bool isAdmin;
   final VoidCallback onOpen;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
@@ -261,64 +263,87 @@ class _StoreTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasActions =
+        onApprove != null || onEdit != null || onDelete != null;
     return Card(
-      child: ListTile(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
         onTap: store.approved ? onOpen : null,
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: SizedBox(
-            width: 44,
-            height: 44,
-            child: buildStoreLogo(store.logo, 44),
-          ),
-        ),
-        title: Text(store.name),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (store.ownerName.isNotEmpty) Text(store.ownerName),
-            if (store.description.isNotEmpty)
-              Text(
-                store.description,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Center(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: 64,
+                      height: 64,
+                      child: buildStoreLogo(store.logo, 64),
+                    ),
+                  ),
+                ),
               ),
-            if (!store.approved)
-              const Padding(
-                padding: EdgeInsets.only(top: 4),
-                child: Text(
+              const SizedBox(height: 4),
+              Text(
+                store.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              if (store.ownerName.isNotEmpty)
+                Text(
+                  store.ownerName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              if (!store.approved)
+                const Text(
                   'قيد المراجعة',
                   style: TextStyle(
                     color: Colors.orange,
                     fontWeight: FontWeight.bold,
-                    fontSize: 12,
+                    fontSize: 11,
                   ),
                 ),
-              ),
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (onApprove != null)
-              IconButton(
-                tooltip: 'اعتماد',
-                icon: const Icon(Icons.check_circle, color: Colors.green),
-                onPressed: onApprove,
-              ),
-            if (onEdit != null)
-              IconButton(
-                tooltip: 'تعديل',
-                icon: const Icon(Icons.edit),
-                onPressed: onEdit,
-              ),
-            if (onDelete != null)
-              IconButton(
-                tooltip: 'حذف',
-                icon: const Icon(Icons.delete_outline),
-                onPressed: onDelete,
-              ),
-          ],
+              if (hasActions)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (onApprove != null)
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        tooltip: 'اعتماد',
+                        icon: const Icon(
+                          Icons.check_circle,
+                          color: Colors.green,
+                          size: 20,
+                        ),
+                        onPressed: onApprove,
+                      ),
+                    if (onEdit != null)
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        tooltip: 'تعديل',
+                        icon: const Icon(Icons.edit, size: 18),
+                        onPressed: onEdit,
+                      ),
+                    if (onDelete != null)
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        tooltip: 'حذف',
+                        icon: const Icon(Icons.delete_outline, size: 18),
+                        onPressed: onDelete,
+                      ),
+                  ],
+                ),
+            ],
+          ),
         ),
       ),
     );
