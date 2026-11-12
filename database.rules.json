@@ -187,7 +187,7 @@
       ".read": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent')",
       "$key": {
         ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent' && (!data.exists() || data.child('ownerUid').val() === auth.uid) && (!newData.exists() || newData.child('ownerUid').val() === auth.uid)))",
-        ".validate": "!newData.exists() || newData.hasChildren(['name', 'url', 'ownerUid', 'ownerName', 'approved'])",
+        ".validate": "!newData.exists() || newData.hasChildren(['name', 'ownerUid', 'ownerName', 'approved'])",
         "name": {
           ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80"
         },
@@ -211,6 +211,49 @@
         },
         "approved": {
           ".validate": "newData.isBoolean() && (newData.val() === false || auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2')"
+        },
+        "updatedAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "products": {
+      ".read": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent')",
+      "$key": {
+        ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent' && (!data.exists() || data.child('ownerUid').val() === auth.uid) && (!newData.exists() || newData.child('ownerUid').val() === auth.uid)))",
+        ".validate": "!newData.exists() || newData.hasChildren(['storeKey', 'ownerUid', 'ownerName', 'description', 'images'])",
+        "storeKey": {
+          ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 128"
+        },
+        "ownerUid": {
+          ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 128"
+        },
+        "ownerName": {
+          ".validate": "newData.isString() && newData.val().length <= 80"
+        },
+        "description": {
+          ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 500"
+        },
+        "title": {
+          ".validate": "newData.isString() && newData.val().length <= 80"
+        },
+        "price": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "currency": {
+          ".validate": "newData.isString() && newData.val().length <= 8"
+        },
+        "whatsapp": {
+          ".validate": "newData.isString() && newData.val().length <= 30"
+        },
+        "images": {
+          ".validate": "newData.hasChildren(['0'])",
+          "$i": {
+            ".validate": "$i.matches(/^[0-4]$/) && newData.isString() && newData.val().length <= 500 && newData.val().matches(/^https:[/][/].*/)"
+          }
         },
         "updatedAt": {
           ".validate": "newData.isNumber()"
