@@ -231,7 +231,7 @@ class _StoresScreenState extends State<StoresScreen> {
       itemCount: items.length,
       itemBuilder: (context, i) {
         final s = items[i];
-        return _StoreCard(
+        return StoreCard(
           store: s,
           onOpen: () => _open(s),
           onEdit: s.ownerUid == _uid ? () => _openForm(existing: s) : null,
@@ -247,8 +247,9 @@ class _StoresScreenState extends State<StoresScreen> {
 
 /// بطاقة متجر مربّعة: الشعار كبيراً في الأعلى، ثم الاسم والمكتب، ووسم «قيد
 /// المراجعة» عند الحاجة، وأزرار الإجراءات (اعتماد/تعديل/حذف) أسفلها.
-class _StoreCard extends StatelessWidget {
-  const _StoreCard({
+class StoreCard extends StatelessWidget {
+  const StoreCard({
+    super.key,
     required this.store,
     required this.onOpen,
     this.onEdit,

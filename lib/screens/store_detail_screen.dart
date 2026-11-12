@@ -141,7 +141,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                           childAspectRatio: 0.72,
                         ),
                         itemCount: _products.length,
-                        itemBuilder: (context, i) => _ProductCard(
+                        itemBuilder: (context, i) => ProductCard(
                           product: _products[i],
                           onTap: () => _openProduct(_products[i]),
                         ),
@@ -264,7 +264,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
                           childAspectRatio: 0.72,
                         ),
                         itemCount: _products.length,
-                        itemBuilder: (context, i) => _ProductCard(
+                        itemBuilder: (context, i) => ProductCard(
                           product: _products[i],
                           onTap: () => _openProduct(_products[i]),
                         ),
@@ -331,8 +331,8 @@ class _StoreHeader extends StatelessWidget {
   }
 }
 
-class _ProductCard extends StatelessWidget {
-  const _ProductCard({required this.product, required this.onTap});
+class ProductCard extends StatelessWidget {
+  const ProductCard({super.key, required this.product, required this.onTap});
   final Product product;
   final VoidCallback onTap;
 
