@@ -119,6 +119,9 @@ class ProductService {
 
   static bool get _ready => Firebase.apps.isNotEmpty;
 
+  /// معرّف جديد لجهاز، كي تُرفع صوره تحت مساره قبل حفظه.
+  String newKey() => FirebaseDatabase.instance.ref(_node).push().key ?? '';
+
   /// يتحقق من بيانات الجهاز قبل الرفع/الكتابة. رسالة عربية أو null إن صحّت.
   static String? validateSubmission(ProductSubmission s) {
     if (s.description.isEmpty) return 'اكتب وصف الجهاز';

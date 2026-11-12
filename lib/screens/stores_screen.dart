@@ -7,6 +7,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../services/store_directory_service.dart';
 import '../services/trial_guard_service.dart';
+import 'store_detail_screen.dart';
 import 'store_iframe_stub.dart'
     if (dart.library.js_interop) 'store_iframe_web.dart';
 
@@ -151,7 +152,7 @@ class _StoresScreenState extends State<StoresScreen> {
 
   void _open(Store store) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => StoreWebViewScreen(store: store)),
+      MaterialPageRoute(builder: (_) => StoreDetailScreen(store: store)),
     );
   }
 
@@ -426,7 +427,7 @@ class _StoreFormDialogState extends State<StoreFormDialog> {
                 controller: _url,
                 keyboardType: TextInputType.url,
                 decoration: const InputDecoration(
-                  labelText: 'رابط المتجر (https)',
+                  labelText: 'رابط الموقع (اختياري)',
                 ),
               ),
               TextField(

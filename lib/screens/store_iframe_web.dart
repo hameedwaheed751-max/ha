@@ -36,30 +36,39 @@ Widget buildStoreIframe(String url) {
   return HtmlElementView(viewType: viewType);
 }
 
+web.HTMLImageElement _imgElement(String imageUrl) {
+  final img = web.document.createElement('img') as web.HTMLImageElement;
+  img.src = imageUrl;
+  img.setAttribute('referrerpolicy', 'no-referrer');
+  img.setAttribute('alt', '');
+  img.style
+    ..setProperty('width', '100%')
+    ..setProperty('height', '100%')
+    ..setProperty('object-fit', 'contain');
+  return img;
+}
+
 /// شعار المتجر على الويب: عنصر <img> مضمّن بدل Image.network، كي لا تفشل
 /// صور الأيقونات عبر النطاقات بسبب CORS على محرّك CanvasKit.
 Widget buildStoreLogo(String imageUrl, double size) {
   final viewType = 'store-logo:$imageUrl';
   if (_registeredLogos.add(viewType)) {
-    ui_web.platformViewRegistry.registerViewFactory(
-      viewType,
-      (int viewId) {
-        final img =
-            web.document.createElement('img') as web.HTMLImageElement;
-        img.src = imageUrl;
-        img.setAttribute('referrerpolicy', 'no-referrer');
-        img.setAttribute('alt', '');
-        img.style
-          ..setProperty('width', '100%')
-          ..setProperty('height', '100%')
-          ..setProperty('object-fit', 'contain');
-        return img;
-      },
-    );
+    ui_web.platformViewRegistry
+        .registerViewFactory(viewType, (int viewId) => _imgElement(imageUrl));
   }
   return SizedBox(
     width: size,
     height: size,
     child: HtmlElementView(viewType: viewType),
   );
+}
+
+/// صورة تملأ حيّزها (للمعارض والبطاقات) على الويب، عبر <img> مضمّن.
+Widget buildStoreImageFill(String imageUrl) {
+  final viewType = 'store-img:$imageUrl';
+  if (_registeredLogos.add(viewType)) {
+    ui_web.platformViewRegistry
+        .registerViewFactory(viewType, (int viewId) => _imgElement(imageUrl));
+  }
+  return HtmlElementView(viewType: viewType);
 }

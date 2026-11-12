@@ -14,3 +14,11 @@ Widget buildStoreLogo(String imageUrl, double size) => Image.network(
       errorBuilder: (_, _, _) =>
           Icon(Icons.storefront_rounded, size: size * 0.9),
     );
+
+/// صورة تملأ حيّزها (للمعارض والبطاقات) على الجوال.
+Widget buildStoreImageFill(String imageUrl) => Image.network(
+      imageUrl,
+      fit: BoxFit.contain,
+      errorBuilder: (_, _, _) =>
+          const Center(child: Icon(Icons.broken_image_outlined, size: 48)),
+    );

@@ -80,10 +80,10 @@ void main() {
         isNotNull,
       );
     });
-    test('rejects blank url', () {
+    test('accepts a blank url (store = device container, url optional)', () {
       expect(
         StoreDirectoryService.validateSubmission(sub(url: '  ')),
-        isNotNull,
+        isNull,
       );
     });
     test('rejects non-https url', () {

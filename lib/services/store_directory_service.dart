@@ -110,13 +110,15 @@ class StoreDirectoryService {
   static String? validateSubmission(StoreSubmission s) {
     if (s.name.isEmpty) return 'اكتب اسم المتجر';
     if (s.name.length > 80) return 'اسم المتجر طويل (80 حرفاً كحدٍّ أقصى)';
-    if (s.url.isEmpty) return 'اكتب رابط المتجر';
-    if (!s.url.startsWith('https://')) {
-      return 'يجب أن يبدأ الرابط بـ https://';
+    // الرابط اختياري الآن (المتجر حاوية أجهزة). يُتحقّق منه فقط إن وُجد.
+    if (s.url.isNotEmpty) {
+      if (!s.url.startsWith('https://')) {
+        return 'يجب أن يبدأ الرابط بـ https://';
+      }
+      final host = Uri.tryParse(s.url)?.host ?? '';
+      if (host.isEmpty) return 'رابط المتجر غير صحيح';
+      if (s.url.length > 300) return 'رابط المتجر طويل جداً';
     }
-    final host = Uri.tryParse(s.url)?.host ?? '';
-    if (host.isEmpty) return 'رابط المتجر غير صحيح';
-    if (s.url.length > 300) return 'رابط المتجر طويل جداً';
     if (s.logoUrl.length > 500) return 'رابط الشعار طويل جداً';
     if (s.whatsapp.length > 30) return 'رقم الواتساب طويل جداً';
     if (s.description.length > 200) {
@@ -174,7 +176,7 @@ class StoreDirectoryService {
     try {
       await FirebaseDatabase.instance.ref(_node).push().set({
         'name': s.name,
-        'url': s.url,
+        if (s.url.isNotEmpty) 'url': s.url,
         if (s.logoUrl.isNotEmpty) 'logoUrl': s.logoUrl,
         if (s.whatsapp.isNotEmpty) 'whatsapp': s.whatsapp,
         if (s.description.isNotEmpty) 'description': s.description,
@@ -200,7 +202,7 @@ class StoreDirectoryService {
     try {
       await FirebaseDatabase.instance.ref('$_node/$key').set({
         'name': s.name,
-        'url': s.url,
+        if (s.url.isNotEmpty) 'url': s.url,
         if (s.logoUrl.isNotEmpty) 'logoUrl': s.logoUrl,
         if (s.whatsapp.isNotEmpty) 'whatsapp': s.whatsapp,
         if (s.description.isNotEmpty) 'description': s.description,
