@@ -187,7 +187,7 @@
       ".read": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent')",
       "$key": {
         ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (root.child('agents').child(auth.uid).child('profile').child('role').val() === 'agent' && (!data.exists() || data.child('ownerUid').val() === auth.uid) && (!newData.exists() || newData.child('ownerUid').val() === auth.uid)))",
-        ".validate": "!newData.exists() || newData.hasChildren(['name', 'ownerUid', 'ownerName', 'approved'])",
+        ".validate": "!newData.exists() || newData.hasChildren(['name', 'url', 'ownerUid', 'ownerName', 'approved'])",
         "name": {
           ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 80"
         },

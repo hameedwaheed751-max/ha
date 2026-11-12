@@ -98,9 +98,11 @@ await check('owner deletes own product', true, req('DELETE', `${P}/p1`, 'a1'));
 // admin
 await check('admin deletes any product', true, req('DELETE', `${P}/existing`, ADMIN));
 
-// stores.url is now optional
-await check('agent adds a store WITHOUT url', true, req('PUT', `${S}/${'a'.repeat(20)}`, 'a1',
+// stores are external-link directory entries: url is required
+await check('agent adds a store WITHOUT url is rejected', false, req('PUT', `${S}/${'a'.repeat(20)}`, 'a1',
   { name: 'متجري', ownerUid: 'a1', ownerName: 'مكتب', approved: false, updatedAt: 1 }));
+await check('agent adds a store WITH https url', true, req('PUT', `${S}/${'a'.repeat(20)}`, 'a1',
+  { name: 'متجري', url: 'https://shop.example.com', ownerUid: 'a1', ownerName: 'مكتب', approved: false, updatedAt: 1 }));
 await check('store with non-https url still rejected', false, req('PUT', `${S}/${'b'.repeat(20)}`, 'a1',
   { name: 'متجري', url: 'http://x.com', ownerUid: 'a1', ownerName: 'مكتب', approved: false, updatedAt: 1 }));
 
