@@ -272,19 +272,16 @@ class StoreCard extends StatelessWidget {
       child: InkWell(
         onTap: store.approved ? onOpen : null,
         child: Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              // الشعار يملأ مساحة الكرت كاملاً مع contain — بلا قصّ ولا تشويه.
               Expanded(
-                child: Center(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: SizedBox(
-                      width: 64,
-                      height: 64,
-                      child: buildStoreLogo(store.logo, 64),
-                    ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: SizedBox.expand(
+                    child: buildStoreImageFill(store.logo),
                   ),
                 ),
               ),
@@ -294,7 +291,10 @@ class StoreCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
               ),
               if (store.ownerName.isNotEmpty)
                 Text(

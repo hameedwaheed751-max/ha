@@ -195,13 +195,13 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
           if (pending.isNotEmpty) ...[
             const _SectionTitle('متاجر قيد المراجعة'),
             const SizedBox(height: 8),
-            _grid([for (final s in pending) card(s)], 0.82),
+            _grid([for (final s in pending) card(s)], 0.70, columns: 3),
             const SizedBox(height: 20),
           ],
           if (listed.isEmpty && pending.isEmpty)
             const _EmptyHint('لا توجد متاجر بعد')
           else if (listed.isNotEmpty)
-            _grid([for (final s in listed) card(s)], 0.82),
+            _grid([for (final s in listed) card(s)], 0.70, columns: 3),
         ],
       ),
     );
@@ -229,13 +229,14 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
     );
   }
 
-  Widget _grid(List<Widget> cards, double aspect) => GridView.count(
+  Widget _grid(List<Widget> cards, double aspect, {int columns = 2}) =>
+      GridView.count(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
         padding: EdgeInsets.zero,
-        crossAxisCount: 2,
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
+        crossAxisCount: columns,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
         childAspectRatio: aspect,
         children: cards,
       );
