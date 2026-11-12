@@ -7,6 +7,8 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../services/store_directory_service.dart';
 import '../services/trial_guard_service.dart';
+import 'store_iframe_stub.dart'
+    if (dart.library.js_interop) 'store_iframe_web.dart';
 
 /// قسم «المشتريات»: دليل متاجر الوكلاء. يعرض المتاجر المعتمدة، ويتيح لكل
 /// وكيل إضافة متجره (بانتظار موافقة الأدمن)، وللأدمن اعتماد/حذف المتاجر.
@@ -528,25 +530,17 @@ class _StoreWebViewScreenState extends State<StoreWebViewScreen> {
           ],
         ),
         body: kIsWeb
-            ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'افتح المتجر في المتصفح',
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 12),
-                      FilledButton.icon(
-                        onPressed: _openExternal,
-                        icon: const Icon(Icons.open_in_browser),
-                        label: const Text('فتح المتجر'),
-                      ),
-                    ],
+            ? Column(
+                children: [
+                  // يُفتح المتجر مضمّناً داخل التطبيق. إن رفض الموقع التضمين
+                  // يبقى زر «فتح في المتصفح» في الأعلى بديلاً.
+                  Expanded(
+                    child: Directionality(
+                      textDirection: TextDirection.ltr,
+                      child: buildStoreIframe(widget.store.url),
+                    ),
                   ),
-                ),
+                ],
               )
             : Stack(
                 children: [

@@ -51,7 +51,7 @@ class Store {
   String get logo {
     if (logoUrl.trim().isNotEmpty) return logoUrl.trim();
     final host = Uri.tryParse(url)?.host ?? '';
-    return 'https://www.google.com/s2/favicons?domain=$host&sz=64';
+    return 'https://www.google.com/s2/favicons?domain=$host&sz=128';
   }
 
   static Store? fromSnapshot(String key, Object? value) {
