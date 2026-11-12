@@ -142,6 +142,11 @@ class StoreDirectoryService {
     return out;
   }
 
+  /// هل يمكن فتح المتجر لعرض/إدارة أجهزته؟ المعتمد يفتحه الجميع؛ وغير المعتمد
+  /// يفتحه مالكه أو الأدمن فقط (ليضيفوا أجهزته قبل الاعتماد). نقيّة.
+  static bool canOpen(Store s, {required String uid, required bool isAdmin}) =>
+      s.approved || isAdmin || s.ownerUid == uid;
+
   /// يقرأ كل المتاجر مرة. أي خطأ يُرجع قائمة فارغة.
   Future<List<Store>> load() async {
     if (!_ready) return const [];

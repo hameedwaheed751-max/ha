@@ -165,4 +165,59 @@ void main() {
       expect(v.first.name, 'ألف');
     });
   });
+
+  group('canOpen', () {
+    final approved = Store(
+      key: 'a',
+      name: 'ألف',
+      url: '',
+      ownerUid: 'u2',
+      ownerName: 'o2',
+      approved: true,
+      updatedAt: 1,
+    );
+    final myPending = Store(
+      key: 'b',
+      name: 'باء',
+      url: '',
+      ownerUid: 'me',
+      ownerName: 'me',
+      approved: false,
+      updatedAt: 1,
+    );
+    final otherPending = Store(
+      key: 'c',
+      name: 'جيم',
+      url: '',
+      ownerUid: 'u3',
+      ownerName: 'o3',
+      approved: false,
+      updatedAt: 1,
+    );
+
+    test('anyone can open an approved store', () {
+      expect(
+        StoreDirectoryService.canOpen(approved, uid: 'me', isAdmin: false),
+        isTrue,
+      );
+    });
+    test('owner can open their own pending store', () {
+      expect(
+        StoreDirectoryService.canOpen(myPending, uid: 'me', isAdmin: false),
+        isTrue,
+      );
+    });
+    test('a non-owner cannot open another agent pending store', () {
+      expect(
+        StoreDirectoryService.canOpen(otherPending, uid: 'me', isAdmin: false),
+        isFalse,
+      );
+    });
+    test('admin can open any pending store', () {
+      expect(
+        StoreDirectoryService.canOpen(otherPending, uid: 'admin', isAdmin: true),
+        isTrue,
+      );
+    });
+  });
 }

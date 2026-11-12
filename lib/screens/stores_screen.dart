@@ -232,8 +232,12 @@ class _StoresScreenState extends State<StoresScreen> {
       itemBuilder: (context, i) {
         final s = items[i];
         return _StoreCard(
+          // المتجر المعتمد يفتحه الجميع؛ وقيد المراجعة يفتحه مالكه/الأدمن فقط
+          // (ليضيفوا الأجهزة بداخله قبل الاعتماد).
+          onOpen: StoreDirectoryService.canOpen(s, uid: _uid, isAdmin: _isAdmin)
+              ? () => _open(s)
+              : null,
           store: s,
-          onOpen: () => _open(s),
           onEdit: s.ownerUid == _uid ? () => _openForm(existing: s) : null,
           onDelete: (s.ownerUid == _uid || _isAdmin)
               ? () => _confirmDelete(s)
@@ -257,7 +261,7 @@ class _StoreCard extends StatelessWidget {
   });
 
   final Store store;
-  final VoidCallback onOpen;
+  final VoidCallback? onOpen;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final VoidCallback? onApprove;
@@ -269,7 +273,7 @@ class _StoreCard extends StatelessWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: store.approved ? onOpen : null,
+        onTap: onOpen,
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: Column(
