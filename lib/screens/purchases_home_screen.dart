@@ -8,10 +8,10 @@ import '../services/trial_guard_service.dart';
 import 'store_detail_screen.dart';
 import 'stores_screen.dart';
 
-/// صفحة «المشتريات»: تبويبان منفصلان —
+/// صفحة «المشتريات»: مستطيلان واضحان بالأعلى للتبديل —
 ///  • «المتاجر»: دليل روابط متاجر الوكلاء الخارجية (تُفتح كما هي).
 ///  • «أجهزة للبيع»: خلاصة منشورات أجهزة الوكلاء (اسم الناشر أعلى ثم الصورة).
-/// كل تبويب يعرض محتواه فقط، وزر الإضافة يتبع التبويب الظاهر.
+/// كل قسم يعرض محتواه فقط، وزر الإضافة يتبع القسم الظاهر.
 class PurchasesHomeScreen extends StatefulWidget {
   const PurchasesHomeScreen({
     super.key,
@@ -32,11 +32,10 @@ class PurchasesHomeScreen extends StatefulWidget {
   State<PurchasesHomeScreen> createState() => _PurchasesHomeScreenState();
 }
 
-class _PurchasesHomeScreenState extends State<PurchasesHomeScreen>
-    with SingleTickerProviderStateMixin {
+class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
   final _storeService = StoreDirectoryService();
   final _productService = ProductService();
-  late final TabController _tab;
+  int _index = 0;
   List<Store> _stores = const [];
   List<Product> _products = const [];
   bool _loading = true;
@@ -50,8 +49,7 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 2, vsync: this, initialIndex: widget.initialTab)
-      ..addListener(() => setState(() {})); // تحديث زر الإضافة مع التبويب
+    _index = widget.initialTab;
     if (widget.initialStores != null || widget.initialProducts != null) {
       _stores = widget.initialStores ?? const [];
       _products = widget.initialProducts ?? const [];
@@ -59,12 +57,6 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen>
     } else {
       _load();
     }
-  }
-
-  @override
-  void dispose() {
-    _tab.dispose();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -250,21 +242,11 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen>
 
   @override
   Widget build(BuildContext context) {
-    final onStores = _tab.index == 0;
+    final onStores = _index == 0;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('المشتريات'),
-          centerTitle: true,
-          bottom: TabBar(
-            controller: _tab,
-            tabs: const [
-              Tab(text: 'المتاجر'),
-              Tab(text: 'أجهزة للبيع'),
-            ],
-          ),
-        ),
+        appBar: AppBar(title: const Text('المشتريات'), centerTitle: true),
         floatingActionButton: _loading
             ? null
             : (onStores
@@ -280,12 +262,84 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen>
                     icon: const Icon(Icons.add_photo_alternate_rounded),
                     label: const Text('أضف جهازاً'),
                   )),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : TabBarView(
-                controller: _tab,
-                children: [_storesTab(), _devicesTab()],
+        body: Column(
+          children: [
+            // مستطيلا التبديل بالأعلى — واضحان كما قبل التغيير.
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: _Segmented(
+                index: _index,
+                labels: const ['المتاجر', 'أجهزة للبيع'],
+                keys: const [Key('seg-stores'), Key('seg-devices')],
+                onChanged: (i) => setState(() => _index = i),
               ),
+            ),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : IndexedStack(
+                      index: _index,
+                      children: [_storesTab(), _devicesTab()],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// شريط تبديل من مستطيلين واضحين؛ المحدَّد مملوء واضح.
+class _Segmented extends StatelessWidget {
+  const _Segmented({
+    required this.index,
+    required this.labels,
+    required this.keys,
+    required this.onChanged,
+  });
+
+  final int index;
+  final List<String> labels;
+  final List<Key> keys;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: [
+          for (var i = 0; i < labels.length; i++)
+            Expanded(
+              child: GestureDetector(
+                key: keys[i],
+                onTap: () => onChanged(i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  height: 44,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: index == i ? scheme.primary : Colors.transparent,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Text(
+                    labels[i],
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: index == i ? scheme.onPrimary : scheme.onSurface,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
