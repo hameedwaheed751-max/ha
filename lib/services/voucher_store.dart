@@ -20,6 +20,10 @@ abstract class VoucherApi {
 
   /// كروت سلسلة معيّنة مع أرقام الـ PIN (admin API: POST index/card/{series}).
   Future<List<CardPin>> fetchSeriesCards(String series);
+
+  /// الكروت غير المستخدمة عبر السلاسل المتوفّرة — للتفعيل بالبطاقة.
+  /// كل كارت محمّل بقيمته وسلسلته لعرضها في القائمة.
+  Future<List<CardPin>> fetchUnusedCards({int maxCards});
 }
 
 int _toInt(dynamic v) {
@@ -88,13 +92,28 @@ class CardPin {
     required this.serialnumber,
     required this.pin,
     required this.usedAt,
+    this.value = 0,
+    this.series = '',
   });
 
   final String serialnumber;
   final String pin;
   final String usedAt;
 
+  /// قيمة الكارت وسلسلته — تُملأ من [CardSeries] الأمّ عند جمع غير المستخدمة.
+  final int value;
+  final String series;
+
   bool get isUsed => usedAt.trim().isNotEmpty;
+
+  /// نسخة محمّلة بقيمة السلسلة وسلسلتها لعرضها في قائمة الاختيار.
+  CardPin withSeriesInfo(CardSeries s) => CardPin(
+    serialnumber: serialnumber,
+    pin: pin,
+    usedAt: usedAt,
+    value: s.value,
+    series: s.series,
+  );
 
   static CardPin? fromMap(dynamic raw) {
     if (raw is! Map) return null;

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:untitled/models.dart';
 import 'package:untitled/screens/activation_payment_dialog.dart';
 import 'package:untitled/services/finance_ledger.dart';
+import 'package:untitled/services/voucher_store.dart';
 
 void main() {
   final subscriber = Subscriber(
@@ -22,6 +23,7 @@ void main() {
     double suggestedPrice = 35000,
     double recordedAmount = 0,
     bool cardActivationAvailable = false,
+    Future<List<CardPin>> Function()? loadUnusedCards,
   }) async {
     ActivationPayment? result;
     await tester.pumpWidget(
@@ -37,6 +39,7 @@ void main() {
                     suggestedPrice: suggestedPrice,
                     recordedAmount: recordedAmount,
                     cardActivationAvailable: cardActivationAvailable,
+                    loadUnusedCards: loadUnusedCards,
                   ),
                 );
               },
@@ -190,5 +193,76 @@ void main() {
 
     expect(find.text('أدخل رقم البطاقة'), findsOneWidget);
     expect(result(), isNull);
+  });
+
+  testWidgets('the pin box lists only unused cards and returns the chosen pin', (
+    tester,
+  ) async {
+    final result = await open(
+      tester,
+      cardActivationAvailable: true,
+      loadUnusedCards: () async => const [
+        CardPin(
+          serialnumber: 'a',
+          pin: '11112222333344',
+          usedAt: '',
+          value: 20000,
+          series: '2026-819119',
+        ),
+        CardPin(
+          serialnumber: 'b',
+          pin: '55556666777788',
+          usedAt: '',
+          value: 23000,
+          series: '2026-819119',
+        ),
+      ],
+    );
+
+    await tester.tap(find.byKey(const Key('activation-card-chip')));
+    await tester.pumpAndSettle();
+
+    // الضغط على الحقل يفتح قائمة الكروت غير المستخدمة.
+    await tester.ensureVisible(find.byKey(const Key('activation-card-pin')));
+    await tester.tap(find.byKey(const Key('activation-card-pin')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('اختر كارتاً غير مستخدم'), findsOneWidget);
+    expect(find.byKey(const Key('unused-card-11112222333344')), findsOneWidget);
+    expect(find.byKey(const Key('unused-card-55556666777788')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('unused-card-55556666777788')));
+    await tester.pumpAndSettle();
+    await confirm(tester);
+
+    expect(result()?.cardPin, '55556666777788');
+    expect(result()?.saleAmount, 35000);
+  });
+
+  testWidgets('an empty card store offers manual entry', (tester) async {
+    await open(
+      tester,
+      cardActivationAvailable: true,
+      loadUnusedCards: () async => const <CardPin>[],
+    );
+
+    await tester.tap(find.byKey(const Key('activation-card-chip')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('activation-card-pin')));
+    await tester.tap(find.byKey(const Key('activation-card-pin')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('لا توجد كروت غير مستخدمة. اشترِ كروتاً أولاً.'),
+        findsOneWidget);
+
+    // التحوّل إلى الإدخال اليدوي يجعل الحقل قابلاً للكتابة.
+    await tester.tap(find.text('إدخال رقم الكارت يدوياً'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('activation-card-pin')),
+      '99990000111122',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('99990000111122'), findsOneWidget);
   });
 }

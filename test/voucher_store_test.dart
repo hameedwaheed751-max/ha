@@ -146,6 +146,24 @@ void main() {
         isEmpty,
       );
     });
+
+    test('withSeriesInfo carries the series value and id for the picker', () {
+      const card = CardPin(serialnumber: 's', pin: '12345678', usedAt: '');
+      const series = CardSeries(
+        series: '2026-819119',
+        value: 23000,
+        qty: 2,
+        used: 0,
+        profileName: 'Standard',
+        seriesDate: '2026-11-12',
+        expiration: '2027-12-31',
+      );
+      final enriched = card.withSeriesInfo(series);
+      expect(enriched.pin, '12345678');
+      expect(enriched.value, 23000);
+      expect(enriched.series, '2026-819119');
+      expect(enriched.isUsed, isFalse);
+    });
   });
 
   group('query builders', () {

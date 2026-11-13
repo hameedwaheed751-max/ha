@@ -2592,6 +2592,23 @@ class SasApiService implements VoucherApi {
   Future<List<CardPin>> fetchSeriesCards(String series) async =>
       CardPin.parseList(await _post('index/card/$series', seriesCardsQuery()));
 
+  /// الكروت غير المستخدمة عبر السلاسل المتوفّرة (available>0)، الأحدث أولاً،
+  /// محمّلةً بقيمة الكارت وسلسلته. يتوقّف بعد جمع [maxCards] لتقييد كلفة الشبكة.
+  @override
+  Future<List<CardPin>> fetchUnusedCards({int maxCards = 200}) async {
+    final series = await fetchCardSeries();
+    final out = <CardPin>[];
+    for (final s in series) {
+      if (s.available <= 0) continue;
+      final cards = await fetchSeriesCards(s.series);
+      for (final c in cards) {
+        if (!c.isUsed) out.add(c.withSeriesInfo(s));
+      }
+      if (out.length >= maxCards) break;
+    }
+    return out;
+  }
+
   Future<dynamic> _get(String route) async {
     final uri = _uriFor(route);
     final headers = <String, String>{

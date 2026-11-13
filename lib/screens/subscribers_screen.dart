@@ -371,9 +371,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     subscriber.rolloverToMonth(DateTime.now());
     // التفعيل بالبطاقة متاح لشركة otto-isp فقط؛ نعرف المضيف من إعدادات SAS.
     var cardAvailable = false;
+    SasApiService? cardApi;
     try {
       final settings = await SasSettings.forSubscriber(subscriber);
       cardAvailable = SasApiService.supportsCardActivation(settings.serverUrl);
+      if (cardAvailable) cardApi = SasApiService(settings);
     } catch (_) {}
     if (!mounted) return null;
     return showDialog<ActivationPayment>(
@@ -383,6 +385,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         suggestedPrice: AppStore.suggestedActivationPrice(subscriber),
         recordedAmount: AppStore.recordedActivationAmount(subscriber),
         cardActivationAvailable: cardAvailable,
+        loadUnusedCards: cardApi?.fetchUnusedCards,
       ),
     );
   }

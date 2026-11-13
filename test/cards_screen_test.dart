@@ -30,6 +30,13 @@ class _FakeVoucherApi implements VoucherApi {
       cardsBySeries[s] ?? const [];
 
   @override
+  Future<List<CardPin>> fetchUnusedCards({int maxCards = 200}) async => [
+    for (final entry in cardsBySeries.entries)
+      for (final c in entry.value)
+        if (!c.isUsed) c,
+  ];
+
+  @override
   Future<double?> fetchVoucherBalance() async => balance;
 
   @override
