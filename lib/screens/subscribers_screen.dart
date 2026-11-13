@@ -367,14 +367,22 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     return n;
   }
 
-  Future<ActivationPayment?> _confirmActivation(Subscriber subscriber) {
+  Future<ActivationPayment?> _confirmActivation(Subscriber subscriber) async {
     subscriber.rolloverToMonth(DateTime.now());
+    // التفعيل بالبطاقة متاح لشركة otto-isp فقط؛ نعرف المضيف من إعدادات SAS.
+    var cardAvailable = false;
+    try {
+      final settings = await SasSettings.forSubscriber(subscriber);
+      cardAvailable = SasApiService.supportsCardActivation(settings.serverUrl);
+    } catch (_) {}
+    if (!mounted) return null;
     return showDialog<ActivationPayment>(
       context: context,
       builder: (_) => ActivationPaymentDialog(
         subscriber: subscriber,
         suggestedPrice: AppStore.suggestedActivationPrice(subscriber),
         recordedAmount: AppStore.recordedActivationAmount(subscriber),
+        cardActivationAvailable: cardAvailable,
       ),
     );
   }
@@ -1242,6 +1250,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
             userId,
             notifyPhone: s.phone,
             notifyMessage: activationMessage,
+            cardPin: activationPayment.cardPin,
           )
           .timeout(
             const Duration(seconds: 60),
@@ -2253,7 +2262,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           );
 
           final activationResponse = await api
-              .activateUser(userId)
+              .activateUser(userId, cardPin: activationPayment.cardPin)
               .timeout(const Duration(seconds: 30));
           s.active = true;
           s.disabled = false;

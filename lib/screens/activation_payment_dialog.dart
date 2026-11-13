@@ -7,6 +7,7 @@ typedef ActivationPayment = ({
   double collected,
   ActivationSettlement settlement,
   bool alreadyRecorded,
+  String? cardPin,
 });
 
 class ActivationPaymentDialog extends StatefulWidget {
@@ -15,6 +16,7 @@ class ActivationPaymentDialog extends StatefulWidget {
     required this.subscriber,
     required this.suggestedPrice,
     this.recordedAmount = 0,
+    this.cardActivationAvailable = false,
   });
 
   final Subscriber subscriber;
@@ -22,6 +24,9 @@ class ActivationPaymentDialog extends StatefulWidget {
 
   /// مبلغ الاشتراك المسجل وواصله كاملاً قبل التفعيل.
   final double recordedAmount;
+
+  /// عند توفّره يظهر اختيار طريقة التفعيل (رصيد / بطاقة) — otto-isp فقط.
+  final bool cardActivationAvailable;
 
   @override
   State<ActivationPaymentDialog> createState() =>
@@ -32,8 +37,12 @@ class _ActivationPaymentDialogState extends State<ActivationPaymentDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _priceController;
   final _partialController = TextEditingController();
+  final _cardController = TextEditingController();
   ActivationSettlement _settlement = ActivationSettlement.paidOnActivation;
   late bool _useRecorded;
+
+  /// طريقة التفعيل المختارة: false=رصيد، true=بطاقة.
+  bool _useCard = false;
 
   @override
   void initState() {
@@ -50,6 +59,7 @@ class _ActivationPaymentDialogState extends State<ActivationPaymentDialog> {
   void dispose() {
     _priceController.dispose();
     _partialController.dispose();
+    _cardController.dispose();
     super.dispose();
   }
 
@@ -80,6 +90,7 @@ class _ActivationPaymentDialogState extends State<ActivationPaymentDialog> {
           ? ActivationSettlement.paidOnActivation
           : _settlement,
       alreadyRecorded: _useRecorded,
+      cardPin: _useCard ? _cardController.text.trim() : null,
     );
     Navigator.pop(context, payment);
   }
@@ -192,6 +203,54 @@ class _ActivationPaymentDialogState extends State<ActivationPaymentDialog> {
                   Colors.green.shade700,
                 ),
                 _summaryRow('يُسجل في الديون', newDebt, Colors.red.shade700),
+              ],
+              if (widget.cardActivationAvailable) ...[
+                const SizedBox(height: 16),
+                const Divider(),
+                const Text(
+                  'طريقة التفعيل',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('رصيد'),
+                      selected: !_useCard,
+                      onSelected: (_) => setState(() => _useCard = false),
+                    ),
+                    ChoiceChip(
+                      key: const Key('activation-card-chip'),
+                      label: const Text('بطاقة'),
+                      selected: _useCard,
+                      onSelected: (_) => setState(() => _useCard = true),
+                    ),
+                  ],
+                ),
+                if (_useCard) ...[
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    key: const Key('activation-card-pin'),
+                    controller: _cardController,
+                    autofocus: true,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'رقم البطاقة (PIN)',
+                      border: OutlineInputBorder(),
+                      helperText: 'أدخل الرقم المطبوع على بطاقة الشحن',
+                    ),
+                    validator: (_) {
+                      if (!_useCard) return null;
+                      final v = _cardController.text.trim();
+                      if (v.isEmpty) return 'أدخل رقم البطاقة';
+                      if (!RegExp(r'^[0-9]{4,}$').hasMatch(v)) {
+                        return 'رقم البطاقة أرقام فقط';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
               ],
             ],
           ),

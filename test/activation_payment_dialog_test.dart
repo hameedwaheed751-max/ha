@@ -21,6 +21,7 @@ void main() {
     WidgetTester tester, {
     double suggestedPrice = 35000,
     double recordedAmount = 0,
+    bool cardActivationAvailable = false,
   }) async {
     ActivationPayment? result;
     await tester.pumpWidget(
@@ -35,6 +36,7 @@ void main() {
                     subscriber: subscriber,
                     suggestedPrice: suggestedPrice,
                     recordedAmount: recordedAmount,
+                    cardActivationAvailable: cardActivationAvailable,
                   ),
                 );
               },
@@ -132,6 +134,61 @@ void main() {
     await confirm(tester);
 
     expect(find.text('أدخل مبلغ الاشتراك'), findsOneWidget);
+    expect(result(), isNull);
+  });
+
+  testWidgets('no card option is shown unless card activation is available', (
+    tester,
+  ) async {
+    await open(tester);
+    expect(find.text('طريقة التفعيل'), findsNothing);
+    expect(find.byKey(const Key('activation-card-chip')), findsNothing);
+  });
+
+  testWidgets('the balance path still returns a null card pin', (tester) async {
+    final result = await open(tester, cardActivationAvailable: true);
+
+    // الخيار ظاهر، لكن الوكيل بقي على «رصيد».
+    expect(find.text('طريقة التفعيل'), findsOneWidget);
+    expect(find.byKey(const Key('activation-card-pin')), findsNothing);
+    await confirm(tester);
+
+    expect(result()?.cardPin, isNull);
+    expect(result()?.saleAmount, 35000);
+  });
+
+  testWidgets('choosing card reveals the pin box and returns the pin', (
+    tester,
+  ) async {
+    final result = await open(tester, cardActivationAvailable: true);
+
+    await tester.tap(find.byKey(const Key('activation-card-chip')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('activation-card-pin')), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('activation-card-pin')),
+      '58952087807522',
+    );
+    await tester.pumpAndSettle();
+    await confirm(tester);
+
+    expect(result()?.cardPin, '58952087807522');
+    // التسجيل المالي يبقى كما هو إلى جانب البطاقة.
+    expect(result()?.saleAmount, 35000);
+    expect(result()?.collected, 35000);
+  });
+
+  testWidgets('card activation requires a card number before it proceeds', (
+    tester,
+  ) async {
+    final result = await open(tester, cardActivationAvailable: true);
+
+    await tester.tap(find.byKey(const Key('activation-card-chip')));
+    await tester.pumpAndSettle();
+    await confirm(tester);
+
+    expect(find.text('أدخل رقم البطاقة'), findsOneWidget);
     expect(result(), isNull);
   });
 }

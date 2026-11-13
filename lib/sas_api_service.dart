@@ -1709,10 +1709,61 @@ class SasApiService {
     return num.tryParse((v ?? '').toString().replaceAll(',', '').trim());
   }
 
+  /// التفعيل بالبطاقة مدعوم لشركة otto-isp فقط (كما اتُّفق مع المستخدم).
+  /// نقية وقابلة للاختبار: تعتمد مضيف رابط SAS لا نص الرابط كاملاً.
+  static bool supportsCardActivation(String serverUrl) {
+    final value = serverUrl.trim();
+    if (value.isEmpty) return false;
+    final withScheme =
+        value.contains('://') ? value : 'https://$value';
+    final host = (Uri.tryParse(withScheme)?.host ?? '').toLowerCase();
+    if (host.isEmpty) return false;
+    return host == 'otto-isp.com' || host.endsWith('.otto-isp.com');
+  }
+
+  /// Payload تفعيل البطاقة في SAS4: نفس تفعيل الرصيد لكن method=card و pin=رقم
+  /// البطاقة. البنية مطابقة لما التُقط (وفُكّ تشفيره) من لوحة otto-isp.
+  static Map<String, dynamic> buildCardActivatePayload({
+    required int userId,
+    required String pin,
+    required String transactionId,
+    num? price,
+    num? units,
+    dynamic issueInvoice,
+  }) {
+    return <String, dynamic>{
+      'method': 'card',
+      'pin': pin,
+      'user_id': userId,
+      'money_collected': 1,
+      'comments': null,
+      'user_price': price ?? 1,
+      'issue_invoice': issueInvoice ?? 0,
+      'transaction_id': transactionId,
+      'activation_units': units ?? 1,
+    };
+  }
+
+  /// ترجمة رموز أخطاء SAS المعروفة إلى العربية؛ غير المعروف يبقى كما هو.
+  static String translateSasError(String raw) {
+    final c = raw.trim().toLowerCase();
+    if (c.contains('invalid_card') || c.contains('card_invalid')) {
+      return 'البطاقة غير صالحة أو مُستعملة';
+    }
+    if (c.contains('card_used') || c.contains('used_card')) {
+      return 'البطاقة مستعملة مسبقاً';
+    }
+    if (c.contains('card_expired') || c.contains('expired_card')) {
+      return 'البطاقة منتهية الصلاحية';
+    }
+    return raw;
+  }
+
   Future<dynamic> activateUser(
     int userId, {
     String? notifyPhone,
     String? notifyMessage,
+    String? cardPin,
   }) async {
     if (_token == null) await login();
 
@@ -1812,27 +1863,41 @@ class SasApiService {
 
     // Payload مرن: الحقول الأساسية + حقول SAS الحديثة.
     // السيرفر المتصل هو الذي يقرر القيم من activationData.
-    final payload = <String, dynamic>{
-      'method': method,
-      'user_id': userId,
-      'issue_invoice': issueInvoice,
-      'transaction_id': tx,
-    };
-
-    if (method == 'credit') {
-      payload['pin'] = '';
-      payload['money_collected'] =
-          _asNum(_firstDeep(activation, ['money_collected'])) ?? 1;
-      if (price != null) payload['user_price'] = price;
-      if (requiredAmount != null) payload['required_amount'] = requiredAmount;
-      payload['activation_units'] = units;
+    final trimmedCard = cardPin?.trim() ?? '';
+    final Map<String, dynamic> payload;
+    if (trimmedCard.isNotEmpty) {
+      // تفعيل بالبطاقة: method=card و pin=رقم البطاقة؛ قيمة البطاقة تحدد الباقة
+      // في SAS، والتسجيل المالي للوكيل لا يتغير.
+      payload = buildCardActivatePayload(
+        userId: userId,
+        pin: trimmedCard,
+        transactionId: tx,
+        price: price,
+        units: units,
+        issueInvoice: issueInvoice,
+      );
     } else {
-      // بعض نسخ SAS تتطلب حقولاً إضافية مع reward_points.
-      payload['units'] = units;
-      if (rewardPoints != null) payload['points'] = rewardPoints;
-      if (requiredPoints != null) payload['points_required'] = requiredPoints;
-      if (price != null) payload['price'] = price;
-      if (requiredAmount != null) payload['required_amount'] = requiredAmount;
+      payload = <String, dynamic>{
+        'method': method,
+        'user_id': userId,
+        'issue_invoice': issueInvoice,
+        'transaction_id': tx,
+      };
+      if (method == 'credit') {
+        payload['pin'] = '';
+        payload['money_collected'] =
+            _asNum(_firstDeep(activation, ['money_collected'])) ?? 1;
+        if (price != null) payload['user_price'] = price;
+        if (requiredAmount != null) payload['required_amount'] = requiredAmount;
+        payload['activation_units'] = units;
+      } else {
+        // بعض نسخ SAS تتطلب حقولاً إضافية مع reward_points.
+        payload['units'] = units;
+        if (rewardPoints != null) payload['points'] = rewardPoints;
+        if (requiredPoints != null) payload['points_required'] = requiredPoints;
+        if (price != null) payload['price'] = price;
+        if (requiredAmount != null) payload['required_amount'] = requiredAmount;
+      }
     }
 
     final response = await _post('user/activate', payload);
@@ -1862,7 +1927,9 @@ class SasApiService {
 
       if (explicitFailure) {
         throw SasApiException(
-          message.trim().isEmpty ? 'رفض SAS عملية التفعيل' : message,
+          message.trim().isEmpty
+              ? 'رفض SAS عملية التفعيل'
+              : translateSasError(message),
         );
       }
 
