@@ -1569,9 +1569,16 @@ String remainingTimeText(DateTime end, [DateTime? now]) {
   return '${_dayCountText(days)} و${_hourCountText(hours)}';
 }
 
+/// استثناء يحمل رسالة عربية جاهزة لعرضها للمستخدم مباشرةً، فلا تُطمَس خلف
+/// رسالة «حدث خطأ غير متوقع» العامّة في [errorText].
+abstract class UserFacingException implements Exception {
+  String get userMessage;
+}
+
 /// رسالة تُعرض للمستخدم بدل نص الخطأ الخام.
 String errorText(Object error) {
   if (error is StateError) return error.message;
+  if (error is UserFacingException) return error.userMessage;
   if (error is FirebaseException) {
     return error.code == 'permission-denied'
         ? 'ليس لهذا الحساب صلاحية تنفيذ العملية'

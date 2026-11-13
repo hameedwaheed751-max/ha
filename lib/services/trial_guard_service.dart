@@ -11,10 +11,13 @@ import '../models.dart';
 import 'payment_request_service.dart';
 import 'user_role_service.dart';
 
-/// رفض الخادم لأن البصمة مسجلة لحساب آخر.
-class TrialClaimedException implements Exception {
+/// رفض الخادم لأن البصمة مسجلة لحساب آخر. يحمل رسالة واضحة للمستخدم فلا
+/// تُطمَس خلف «حدث خطأ غير متوقع».
+class TrialClaimedException implements UserFacingException {
   const TrialClaimedException(this.message);
   final String message;
+  @override
+  String get userMessage => message;
   @override
   String toString() => message;
 }
