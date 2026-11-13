@@ -129,6 +129,15 @@ echo "Image contains server.js and expiry_scheduler.js"
 inspect '{{range .Config.Env}}{{println .}}{{end}}' \
   | grep -v -E '^(PATH|NODE_VERSION|YARN_VERSION|NODE_ENV|EXPIRY_SCHEDULER_ENABLED)=' \
   | sed '/^$/d' > "$WORK/env" || true
+# Optional extra env for the new container, one KEY=VALUE per line or space,
+# e.g. to turn on the orphan-image cleanup:
+#   EXTRA_ENV='IMAGE_CLEANUP_ENABLED=true' bash replace-gateway.sh <image.tar>
+# These override any copied value and, once set, are carried into later
+# replacements because they become part of the running container's env.
+if [ -n "${EXTRA_ENV:-}" ]; then
+  for pair in $EXTRA_ENV; do printf '%s\n' "$pair" >> "$WORK/env"; done
+  echo "  extra env added: $(for p in $EXTRA_ENV; do printf '%s ' "${p%%=*}"; done)"
+fi
 chmod 600 "$WORK/env"
 if grep -q '^PORT=' "$WORK/env"; then PORT=$(grep '^PORT=' "$WORK/env" | tail -n1 | cut -d= -f2-); fi
 
