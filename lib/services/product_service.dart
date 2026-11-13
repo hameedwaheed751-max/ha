@@ -382,6 +382,38 @@ class ProductService {
     return 'منذ ${diff.inDays ~/ 365} سنة';
   }
 
+  /// نص رسالة واتساب الجاهزة عند الطلب: يذكر اسم الجهاز وسعره ليعرف البائع
+  /// الجهاز المقصود فوراً بدل محادثة فارغة. نقيّة وقابلة للاختبار.
+  static String whatsappInquiry(Product p) {
+    final title = p.title.trim();
+    final name = title.isNotEmpty
+        ? title
+        : (p.description.trim().isNotEmpty
+            ? _shortName(p.description.trim())
+            : 'الجهاز');
+    final buffer = StringBuffer('مرحباً، أنا مهتمّ بـ «$name»');
+    if (p.price != null) {
+      buffer.write(' بسعر ${_groupThousands(p.price!)} ${p.currency}'.trimRight());
+    }
+    buffer.write('. هل ما زال متاحاً؟');
+    return buffer.toString();
+  }
+
+  static String _shortName(String text) {
+    final line = text.split('\n').first.trim();
+    return line.length <= 40 ? line : '${line.substring(0, 40).trim()}…';
+  }
+
+  static String _groupThousands(double v) {
+    final n = v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+    final b = StringBuffer();
+    for (var i = 0; i < n.length; i++) {
+      if (i > 0 && (n.length - i) % 3 == 0) b.write(',');
+      b.write(n[i]);
+    }
+    return b.toString();
+  }
+
   /// حذف أفضل جهد لصورة برابطها (يتجاهل روابط غير الـ gateway).
   Future<void> deleteImage(String url) => _uploader.delete(url);
 

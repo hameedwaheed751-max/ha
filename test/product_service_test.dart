@@ -285,6 +285,43 @@ void main() {
     });
   });
 
+  group('whatsappInquiry', () {
+    Product dev({String title = '', String desc = 'جهاز', double? price, String currency = 'د.ع'}) =>
+        Product(
+          key: 'k',
+          storeKey: 's',
+          ownerUid: 'u',
+          ownerName: 'o',
+          description: desc,
+          images: const ['https://x/a.jpg'],
+          title: title,
+          price: price,
+          currency: currency,
+        );
+
+    test('names the device by its title and includes the price', () {
+      final text = ProductService.whatsappInquiry(
+        dev(title: 'راوتر TP-Link AX1500', price: 25000),
+      );
+      expect(text.contains('راوتر TP-Link AX1500'), isTrue);
+      expect(text.contains('25,000 د.ع'), isTrue);
+      expect(text.contains('مهتمّ'), isTrue);
+    });
+
+    test('omits the price clause when there is no price', () {
+      final text = ProductService.whatsappInquiry(dev(title: 'سويتش', price: null));
+      expect(text.contains('سويتش'), isTrue);
+      expect(text.contains('بسعر'), isFalse);
+    });
+
+    test('falls back to a short description when there is no title', () {
+      final text = ProductService.whatsappInquiry(
+        dev(title: '', desc: 'أنتينا خارجية بحالة ممتازة'),
+      );
+      expect(text.contains('أنتينا خارجية بحالة ممتازة'), isTrue);
+    });
+  });
+
   group('relativeTime', () {
     final now = DateTime(2026, 11, 13, 12, 0, 0);
     int ago(Duration d) => now.subtract(d).millisecondsSinceEpoch;

@@ -529,7 +529,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     var digits = widget.product.whatsapp.replaceAll(RegExp(r'[^0-9]'), '');
     if (digits.startsWith('00')) digits = digits.substring(2);
     if (digits.startsWith('0')) digits = '964${digits.substring(1)}';
-    final uri = Uri.parse('https://wa.me/$digits');
+    final text = ProductService.whatsappInquiry(widget.product);
+    final uri = Uri.parse(
+      'https://wa.me/$digits?text=${Uri.encodeComponent(text)}',
+    );
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 

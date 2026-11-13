@@ -189,6 +189,19 @@ function loadConfig(env = process.env) {
       // Subscriber dates without a zone are device-local; Iraq is UTC+3.
       utcOffsetMinutes: Number(env.NETAGENT_UTC_OFFSET_MINUTES || 180),
     },
+    // Orphan product/store image sweeper. Off until explicitly enabled; deletes
+    // only unreferenced uploads older than the grace window (default one day).
+    imageCleanup: {
+      enabled: String(env.IMAGE_CLEANUP_ENABLED || '').trim() === 'true',
+      intervalMs: Math.max(
+        Number(env.IMAGE_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000),
+        60 * 60 * 1000,
+      ),
+      graceMs: Math.max(
+        Number(env.IMAGE_CLEANUP_GRACE_MS || 24 * 60 * 60 * 1000),
+        60 * 60 * 1000,
+      ),
+    },
   };
 }
 
@@ -794,7 +807,31 @@ function start() {
     });
     console.log(`Expiry scheduler enabled every ${config.expiryScheduler.intervalMs / 1000}s`);
   }
+
+  let stopImageCleanup = () => {};
+  if (config.imageCleanup.enabled) {
+    const { getDatabase } = require('firebase-admin/database');
+    const db = getDatabase(firebaseApp);
+    const { runImageCleanup, startImageCleanup } = require('./image_cleanup');
+    stopImageCleanup = startImageCleanup({
+      run: () =>
+        runImageCleanup({
+          db,
+          uploadsDir: config.uploadsDir,
+          publicBaseUrl: config.publicBaseUrl,
+          graceMs: config.imageCleanup.graceMs,
+          log: (line) => console.log(line),
+        }),
+      intervalMs: config.imageCleanup.intervalMs,
+    });
+    console.log(
+      `Image cleanup enabled every ${config.imageCleanup.intervalMs / 1000}s ` +
+        `(grace ${config.imageCleanup.graceMs / 1000}s)`,
+    );
+  }
+
   const shutdown = () => {
+    stopImageCleanup();
     // Let a notice being sent finish and be saved, within Docker's 10 second
     // stop timeout, so it is not left for manual review.
     const timeout = new Promise((resolve) => setTimeout(resolve, 8000).unref());
