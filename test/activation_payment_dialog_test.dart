@@ -168,12 +168,12 @@ void main() {
 
     await tester.enterText(
       find.byKey(const Key('activation-card-pin')),
-      '58952087807522',
+      '11112222333344',
     );
     await tester.pumpAndSettle();
     await confirm(tester);
 
-    expect(result()?.cardPin, '58952087807522');
+    expect(result()?.cardPin, '11112222333344');
     // التسجيل المالي يبقى كما هو إلى جانب البطاقة.
     expect(result()?.saleAmount, 35000);
     expect(result()?.collected, 35000);

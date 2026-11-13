@@ -158,10 +158,10 @@ void main() {
         '2026-819119': [
           CardPin(
             serialnumber: 'a',
-            pin: '76323652302266',
+            pin: '55556666777788',
             usedAt: '2026-11-12',
           ),
-          CardPin(serialnumber: 'b', pin: '64991012169097', usedAt: ''),
+          CardPin(serialnumber: 'b', pin: '99990000111122', usedAt: ''),
         ],
       },
     );
@@ -176,8 +176,8 @@ void main() {
     await tester.pumpAndSettle();
 
     // أرقام الـ PIN ظاهرة مع حالتها.
-    expect(find.text('64991012169097'), findsOneWidget);
+    expect(find.text('99990000111122'), findsOneWidget);
     expect(find.text('غير مستعمل'), findsOneWidget);
-    expect(find.text('76323652302266'), findsOneWidget);
+    expect(find.text('55556666777788'), findsOneWidget);
   });
 }

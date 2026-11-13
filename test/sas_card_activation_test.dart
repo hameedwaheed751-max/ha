@@ -39,14 +39,14 @@ void main() {
     test('matches the SAS4 card-activation shape from the HAR', () {
       final p = SasApiService.buildCardActivatePayload(
         userId: 300064,
-        pin: '58952087807522',
+        pin: '11112222333344',
         price: 20000,
         units: 1,
         issueInvoice: 0,
         transactionId: 'tx-1',
       );
       expect(p['method'], 'card');
-      expect(p['pin'], '58952087807522');
+      expect(p['pin'], '11112222333344');
       expect(p['user_id'], 300064);
       expect(p['money_collected'], 1);
       expect(p['issue_invoice'], 0);

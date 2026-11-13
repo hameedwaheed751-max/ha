@@ -114,13 +114,13 @@ void main() {
       'data': [
         {
           'serialnumber': '2026-788904-1749-12033',
-          'pin': '76323652302266',
+          'pin': '55556666777788',
           'used_at': '2026-11-12 23:28:12',
           'user_id': 300125,
         },
         {
           'serialnumber': '2026-788904-1749-12034',
-          'pin': '64991012169097',
+          'pin': '99990000111122',
           'used_at': null,
           'user_id': null,
         },
@@ -130,9 +130,9 @@ void main() {
     test('parses pin and used status', () {
       final list = CardPin.parseList(response);
       expect(list.length, 2);
-      expect(list[0].pin, '76323652302266');
+      expect(list[0].pin, '55556666777788');
       expect(list[0].isUsed, isTrue);
-      expect(list[1].pin, '64991012169097');
+      expect(list[1].pin, '99990000111122');
       expect(list[1].isUsed, isFalse);
     });
 
