@@ -26,6 +26,8 @@ import 'subscriber_details_screen.dart';
 import 'packages_screen.dart';
 import 'sas_settings_screen.dart';
 import 'cards_screen.dart';
+import 'sas_onboarding_screen.dart';
+import '../services/onboarding_gate.dart';
 import 'sas_wallet_breakdown.dart';
 import 'receipt_screen.dart';
 import 'quick_reports_screen.dart';
@@ -148,6 +150,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       unawaited(_loadNotificationsSeenAt());
       _handleSubscriptionGuardTick();
       _handleMonthlyRollover();
+      unawaited(_enforceOnboardingAndReminder());
     });
   }
 
@@ -188,6 +191,55 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
       ),
     );
+  }
+
+  /// دفاع ثانٍ: لو وصل وكيل مجاني غير مربوط إلى الداشبورد (مسار غير متوقّع)
+  /// يُعاد إلى بوابة الربط. وللمدفوع: تذكير لطيف لمرة واحدة بالمزامنة.
+  Future<void> _enforceOnboardingAndReminder() async {
+    if (!mounted || !widget.isAgentMode) return;
+    if (await OnboardingGate.isTrialOnboardingRequired()) {
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const SasOnboardingScreen()),
+      );
+      return;
+    }
+    if (!mounted) return;
+    if (await OnboardingGate.shouldShowPaidSyncReminder()) {
+      await OnboardingGate.markPaidReminderShown();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            icon: const Icon(Icons.sync, color: Colors.indigo),
+            title: const Text('اربط ساسك وزامن مشتركيك'),
+            content: const Text(
+              'لتحصل على كل مزايا التطبيق، اربط حساب الساس وزامن مشتركيك من '
+              'الإعدادات. تكفي مرة واحدة.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('لاحقاً'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const SasSettingsScreen(),
+                    ),
+                  );
+                },
+                child: const Text('ربط الآن'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
   }
 
   @override

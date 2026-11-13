@@ -10,9 +10,11 @@ import '../models.dart';
 import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
 import '../services/app_startup.dart';
+import '../services/onboarding_gate.dart';
 import '../services/payment_request_service.dart';
 import '../services/trial_guard_service.dart';
 import '../services/user_role_service.dart';
+import 'sas_onboarding_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final bool forceExpiredMode;
@@ -152,6 +154,16 @@ class _LoginScreenState extends State<LoginScreen> {
     AppStore.refreshSubscriptionStatus();
     if (role == UserRoleService.agentRole && AppStore.isSubscriptionBlocked) {
       await _enforceExpiredAccessForCurrentSession();
+      return;
+    }
+    // الباقة المجانية: لا دخول قبل ربط الساس وأول مزامنة ناجحة (لمرة واحدة).
+    if (role == UserRoleService.agentRole &&
+        await OnboardingGate.isTrialOnboardingRequired()) {
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const SasOnboardingScreen()),
+      );
       return;
     }
     if (!mounted) return;
