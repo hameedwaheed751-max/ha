@@ -8,13 +8,26 @@ class _FakeVoucherApi implements VoucherApi {
   _FakeVoucherApi({
     this.balance = 100000,
     List<VoucherPurchase>? purchases,
+    List<CardSeries>? series,
+    Map<String, List<CardPin>>? cardsBySeries,
     this.buyThrows = false,
-  }) : purchases = purchases ?? const [];
+  }) : purchases = purchases ?? const [],
+       series = series ?? const [],
+       cardsBySeries = cardsBySeries ?? const {};
 
   double? balance;
   List<VoucherPurchase> purchases;
+  List<CardSeries> series;
+  Map<String, List<CardPin>> cardsBySeries;
   bool buyThrows;
   final List<({int cardValue, int quantity})> buys = [];
+
+  @override
+  Future<List<CardSeries>> fetchCardSeries() async => series;
+
+  @override
+  Future<List<CardPin>> fetchSeriesCards(String s) async =>
+      cardsBySeries[s] ?? const [];
 
   @override
   Future<double?> fetchVoucherBalance() async => balance;
@@ -126,5 +139,45 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('الرصيد غير كافٍ لإتمام الشراء'), findsOneWidget);
+  });
+
+  testWidgets('tapping a series opens its card pins', (tester) async {
+    final api = _FakeVoucherApi(
+      series: const [
+        CardSeries(
+          series: '2026-819119',
+          value: 23000,
+          qty: 2,
+          used: 1,
+          profileName: 'Standard',
+          seriesDate: '2026-11-12',
+          expiration: '2027-12-31',
+        ),
+      ],
+      cardsBySeries: const {
+        '2026-819119': [
+          CardPin(
+            serialnumber: 'a',
+            pin: '76323652302266',
+            usedAt: '2026-11-12',
+          ),
+          CardPin(serialnumber: 'b', pin: '64991012169097', usedAt: ''),
+        ],
+      },
+    );
+    await pump(tester, api);
+
+    // السلسلة ظاهرة مع المتاح/الإجمالي.
+    expect(find.text('متاح 1/2'), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(const Key('series-2026-819119')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('series-2026-819119')));
+    await tester.pumpAndSettle();
+
+    // أرقام الـ PIN ظاهرة مع حالتها.
+    expect(find.text('64991012169097'), findsOneWidget);
+    expect(find.text('غير مستعمل'), findsOneWidget);
+    expect(find.text('76323652302266'), findsOneWidget);
   });
 }

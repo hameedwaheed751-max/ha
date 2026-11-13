@@ -14,7 +14,150 @@ abstract class VoucherApi {
   Future<double?> fetchVoucherBalance();
   Future<List<VoucherPurchase>> fetchVoucherPurchases();
   Future<String> buyVouchers({required int cardValue, required int quantity});
+
+  /// سلاسل الكروت المملوكة (admin API: POST index/series).
+  Future<List<CardSeries>> fetchCardSeries();
+
+  /// كروت سلسلة معيّنة مع أرقام الـ PIN (admin API: POST index/card/{series}).
+  Future<List<CardPin>> fetchSeriesCards(String series);
 }
+
+int _toInt(dynamic v) {
+  if (v is num) return v.toInt();
+  return int.tryParse('${v ?? ''}'.trim()) ??
+      double.tryParse('${v ?? ''}'.trim())?.toInt() ??
+      0;
+}
+
+/// سلسلة كروت (دفعة) كما يعيدها index/series.
+class CardSeries {
+  const CardSeries({
+    required this.series,
+    required this.value,
+    required this.qty,
+    required this.used,
+    required this.profileName,
+    required this.seriesDate,
+    required this.expiration,
+  });
+
+  final String series;
+  final int value;
+  final int qty;
+  final int used;
+  final String profileName;
+  final String seriesDate;
+  final String expiration;
+
+  int get available => (qty - used).clamp(0, qty);
+
+  static CardSeries? fromMap(dynamic raw) {
+    if (raw is! Map) return null;
+    final series = '${raw['series'] ?? ''}'.trim();
+    if (series.isEmpty) return null;
+    final profile = raw['profile_details'];
+    return CardSeries(
+      series: series,
+      value: _toInt(raw['value']),
+      qty: _toInt(raw['qty']),
+      used: _toInt(raw['used']),
+      profileName: profile is Map
+          ? '${profile['name'] ?? ''}'.trim()
+          : '${raw['profile'] ?? ''}'.trim(),
+      seriesDate: '${raw['series_date'] ?? raw['seriesDate'] ?? ''}'.trim(),
+      expiration: '${raw['expiration'] ?? ''}'.trim(),
+    );
+  }
+
+  static List<CardSeries> parseList(dynamic response) {
+    dynamic data = response;
+    if (response is Map) data = response['data'];
+    if (data is! List) return const [];
+    final out = <CardSeries>[];
+    for (final item in data) {
+      final s = fromMap(item);
+      if (s != null) out.add(s);
+    }
+    return out;
+  }
+}
+
+/// كارت مفرد داخل سلسلة، مع رقم الـ PIN وحالة الاستخدام.
+class CardPin {
+  const CardPin({
+    required this.serialnumber,
+    required this.pin,
+    required this.usedAt,
+  });
+
+  final String serialnumber;
+  final String pin;
+  final String usedAt;
+
+  bool get isUsed => usedAt.trim().isNotEmpty;
+
+  static CardPin? fromMap(dynamic raw) {
+    if (raw is! Map) return null;
+    final pin = '${raw['pin'] ?? ''}'.trim();
+    if (pin.isEmpty) return null;
+    return CardPin(
+      serialnumber: '${raw['serialnumber'] ?? ''}'.trim(),
+      pin: pin,
+      usedAt: raw['used_at'] == null ? '' : '${raw['used_at']}'.trim(),
+    );
+  }
+
+  static List<CardPin> parseList(dynamic response) {
+    dynamic data = response;
+    if (response is Map) data = response['data'];
+    if (data is! List) return const [];
+    final out = <CardPin>[];
+    for (final item in data) {
+      final c = fromMap(item);
+      if (c != null) out.add(c);
+    }
+    return out;
+  }
+}
+
+/// جسم طلب قائمة السلاسل (admin index/series) — مطابق للـ HAR.
+Map<String, dynamic> cardSeriesQuery({int page = 1, int count = 20}) => {
+  'page': page,
+  'count': count,
+  'sortBy': 'series_date',
+  'direction': 'desc',
+  'search': '',
+  'columns': [
+    'series',
+    'type',
+    'value',
+    'qty',
+    'used',
+    'username',
+    'name',
+    'name',
+    'expiration',
+  ],
+};
+
+/// جسم طلب كروت سلسلة (admin index/card/{series}) — مطابق للـ HAR.
+Map<String, dynamic> seriesCardsQuery({int page = 1, int count = 100}) => {
+  'page': page,
+  'count': count,
+  'sortBy': 'id',
+  'direction': 'asc',
+  'search': '',
+  'columns': [
+    'id',
+    'serialnumber',
+    'pin',
+    'username',
+    'password',
+    'used_at',
+    'username',
+    'username',
+  ],
+};
 
 /// دفعة كروت مُشتراة كما يعيدها GET purchase.
 class VoucherPurchase {

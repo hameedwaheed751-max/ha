@@ -2582,6 +2582,16 @@ class SasApiService implements VoucherApi {
     return voucherResultMessage(res);
   }
 
+  /// سلاسل الكروت المملوكة (admin API المشفّر: POST index/series).
+  @override
+  Future<List<CardSeries>> fetchCardSeries() async =>
+      CardSeries.parseList(await _post('index/series', cardSeriesQuery()));
+
+  /// كروت سلسلة معيّنة مع أرقام الـ PIN (admin API: POST index/card/{series}).
+  @override
+  Future<List<CardPin>> fetchSeriesCards(String series) async =>
+      CardPin.parseList(await _post('index/card/$series', seriesCardsQuery()));
+
   Future<dynamic> _get(String route) async {
     final uri = _uriFor(route);
     final headers = <String, String>{

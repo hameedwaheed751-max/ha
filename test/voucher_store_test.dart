@@ -68,6 +68,101 @@ void main() {
     });
   });
 
+  group('CardSeries.parseList', () {
+    final response = {
+      'current_page': 1,
+      'data': [
+        {
+          'series': '2026-819119',
+          'value': '23000.000',
+          'qty': 2,
+          'used': '1',
+          'series_date': '2026-11-12 23:28:05',
+          'expiration': '2027-12-31',
+          'profile_details': {'id': 5, 'name': 'Standard'},
+        },
+      ],
+    };
+
+    test('parses series, value, qty, used, profile and dates', () {
+      final list = CardSeries.parseList(response);
+      expect(list.length, 1);
+      final s = list.first;
+      expect(s.series, '2026-819119');
+      expect(s.value, 23000);
+      expect(s.qty, 2);
+      expect(s.used, 1);
+      expect(s.available, 1);
+      expect(s.profileName, 'Standard');
+      expect(s.expiration, '2027-12-31');
+    });
+
+    test('skips rows without a series', () {
+      expect(
+        CardSeries.parseList({
+          'data': [
+            {'value': 1},
+          ],
+        }),
+        isEmpty,
+      );
+    });
+  });
+
+  group('CardPin.parseList', () {
+    final response = {
+      'data': [
+        {
+          'serialnumber': '2026-788904-1749-12033',
+          'pin': '76323652302266',
+          'used_at': '2026-11-12 23:28:12',
+          'user_id': 300125,
+        },
+        {
+          'serialnumber': '2026-788904-1749-12034',
+          'pin': '64991012169097',
+          'used_at': null,
+          'user_id': null,
+        },
+      ],
+    };
+
+    test('parses pin and used status', () {
+      final list = CardPin.parseList(response);
+      expect(list.length, 2);
+      expect(list[0].pin, '76323652302266');
+      expect(list[0].isUsed, isTrue);
+      expect(list[1].pin, '64991012169097');
+      expect(list[1].isUsed, isFalse);
+    });
+
+    test('skips rows without a pin', () {
+      expect(
+        CardPin.parseList({
+          'data': [
+            {'serialnumber': 'x'},
+          ],
+        }),
+        isEmpty,
+      );
+    });
+  });
+
+  group('query builders', () {
+    test('cardSeriesQuery matches the HAR shape', () {
+      final q = cardSeriesQuery();
+      expect(q['sortBy'], 'series_date');
+      expect(q['direction'], 'desc');
+      expect(q['page'], 1);
+      expect((q['columns'] as List).contains('series'), isTrue);
+    });
+    test('seriesCardsQuery matches the HAR shape', () {
+      final q = seriesCardsQuery();
+      expect(q['sortBy'], 'id');
+      expect((q['columns'] as List).contains('pin'), isTrue);
+    });
+  });
+
   group('VoucherPurchase.parseList', () {
     final response = {
       'status': 200,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models.dart';
 import '../sas_api_service.dart';
@@ -22,6 +23,7 @@ class _CardsScreenState extends State<CardsScreen> {
 
   double? _balance;
   List<VoucherPurchase> _purchases = const [];
+  List<CardSeries> _series = const [];
   bool _loading = true;
   bool _buying = false;
   String? _error;
@@ -45,14 +47,18 @@ class _CardsScreenState extends State<CardsScreen> {
       _error = null;
     });
     try {
-      final results = await Future.wait([
-        widget.api.fetchVoucherBalance(),
-        widget.api.fetchVoucherPurchases(),
-      ]);
+      final balance = await widget.api.fetchVoucherBalance();
+      final purchases = await widget.api.fetchVoucherPurchases();
+      // السلاسل عبر admin API؛ لا نُفشل الشاشة كلها إن تعذّرت وحدها.
+      List<CardSeries> series = const [];
+      try {
+        series = await widget.api.fetchCardSeries();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
-        _balance = results[0] as double?;
-        _purchases = results[1] as List<VoucherPurchase>;
+        _balance = balance;
+        _purchases = purchases;
+        _series = series;
         _loading = false;
       });
     } catch (e) {
@@ -162,6 +168,23 @@ class _CardsScreenState extends State<CardsScreen> {
                     _balanceCard(),
                     const SizedBox(height: 16),
                     _buyCard(),
+                    if (_series.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      const Text(
+                        'الكروت المتوفرة',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'اضغط على سلسلة لعرض أرقام الـ PIN',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                      const SizedBox(height: 8),
+                      ..._series.map(_seriesTile),
+                    ],
                     const SizedBox(height: 20),
                     const Text(
                       'سجل الشراء',
@@ -281,6 +304,33 @@ class _CardsScreenState extends State<CardsScreen> {
     ),
   );
 
+  Widget _seriesTile(CardSeries s) {
+    final allUsed = s.available == 0;
+    return Card(
+      child: ListTile(
+        key: Key('series-${s.series}'),
+        leading: Icon(
+          Icons.style_rounded,
+          color: allUsed ? Colors.grey : Colors.green.shade700,
+        ),
+        title: Text('${moneyText(s.value.toDouble())} — ${s.profileName}'),
+        subtitle: Text('السلسلة ${s.series} • ${s.seriesDate}'),
+        trailing: Text(
+          'متاح ${s.available}/${s.qty}',
+          style: TextStyle(
+            color: allUsed ? Colors.grey : Colors.green.shade700,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => SeriesCardsScreen(api: widget.api, series: s),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _purchaseTile(VoucherPurchase p) {
     final complete = p.isComplete;
     return Card(
@@ -297,6 +347,140 @@ class _CardsScreenState extends State<CardsScreen> {
             color: complete ? Colors.green.shade700 : Colors.orange.shade700,
             fontWeight: FontWeight.w700,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// تفاصيل سلسلة: أرقام الـ PIN مع حالة الاستخدام وزر نسخ. الأرقام محفوظة في
+/// SAS وتُجلب عند الطلب (لا تُخزَّن في التطبيق).
+class SeriesCardsScreen extends StatefulWidget {
+  const SeriesCardsScreen({super.key, required this.api, required this.series});
+
+  final VoucherApi api;
+  final CardSeries series;
+
+  @override
+  State<SeriesCardsScreen> createState() => _SeriesCardsScreenState();
+}
+
+class _SeriesCardsScreenState extends State<SeriesCardsScreen> {
+  List<CardPin> _cards = const [];
+  bool _loading = true;
+  String? _error;
+  bool _showUsed = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final cards = await widget.api.fetchSeriesCards(widget.series.series);
+      if (!mounted) return;
+      setState(() {
+        _cards = cards;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e is SasApiException ? e.message : 'تعذّر جلب أرقام الكروت';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = _showUsed ? _cards : _cards.where((c) => !c.isUsed).toList();
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text('كروت ${moneyText(widget.series.value.toDouble())}'),
+          actions: [
+            IconButton(
+              onPressed: _loading ? null : _load,
+              icon: const Icon(Icons.refresh_rounded),
+              tooltip: 'تحديث',
+            ),
+          ],
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+            ? Center(child: Text(_error!))
+            : Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        Text(
+                          'السلسلة ${widget.series.series}',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const Spacer(),
+                        const Text('إظهار المستعملة'),
+                        Switch(
+                          value: _showUsed,
+                          onChanged: (v) => setState(() => _showUsed = v),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: shown.isEmpty
+                        ? const Center(child: Text('لا توجد كروت'))
+                        : ListView.builder(
+                            itemCount: shown.length,
+                            itemBuilder: (_, i) => _pinTile(shown[i]),
+                          ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _pinTile(CardPin c) {
+    final used = c.isUsed;
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: ListTile(
+        leading: Icon(
+          used ? Icons.check_circle : Icons.credit_card_rounded,
+          color: used ? Colors.grey : Colors.green.shade700,
+        ),
+        title: Text(
+          c.pin,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.5,
+            decoration: used ? TextDecoration.lineThrough : null,
+            color: used ? Colors.grey : null,
+          ),
+        ),
+        subtitle: Text(used ? 'مستعمل • ${c.usedAt}' : 'غير مستعمل'),
+        trailing: IconButton(
+          icon: const Icon(Icons.copy_rounded),
+          tooltip: 'نسخ',
+          onPressed: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            await Clipboard.setData(ClipboardData(text: c.pin));
+            messenger.showSnackBar(
+              const SnackBar(content: Text('تم نسخ رقم الكارت')),
+            );
+          },
         ),
       ),
     );
