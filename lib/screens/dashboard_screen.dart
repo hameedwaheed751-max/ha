@@ -25,6 +25,7 @@ import 'app_notifications_screen.dart';
 import 'subscriber_details_screen.dart';
 import 'packages_screen.dart';
 import 'sas_settings_screen.dart';
+import 'cards_screen.dart';
 import 'sas_wallet_breakdown.dart';
 import 'receipt_screen.dart';
 import 'quick_reports_screen.dart';
@@ -127,11 +128,15 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (mounted) setState(() => _notificationsSeenAt = seenAt);
   }
 
+  /// حساب SAS الذي يدعم متجر الكروت (otto-isp) إن وُجد؛ يُظهر عنصر «الكروت».
+  SasSettings? _cardsAccount;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _startSubscriptionGuard();
+    unawaited(_checkCardsAccount());
     _monthlyRolloverTimer = Timer.periodic(
       const Duration(minutes: 1),
       (_) => _handleMonthlyRollover(),
@@ -152,6 +157,37 @@ class _DashboardScreenState extends State<DashboardScreen>
     _subscriptionGuardTimer?.cancel();
     _monthlyRolloverTimer?.cancel();
     super.dispose();
+  }
+
+  /// يبحث عن حساب SAS يدعم الكروت (otto-isp) لإظهار العنصر في القائمة.
+  Future<void> _checkCardsAccount() async {
+    try {
+      final accounts = await SasSettings.loadAll();
+      final match = accounts
+          .where((a) => SasApiService.supportsCardActivation(a.serverUrl))
+          .cast<SasSettings?>()
+          .firstWhere((a) => true, orElse: () => null);
+      if (mounted && match != null) setState(() => _cardsAccount = match);
+    } catch (_) {
+      // بلا حساب كروت: لا يظهر العنصر، دون إزعاج.
+    }
+  }
+
+  void _openCards() {
+    final account = _cardsAccount;
+    if (account == null) return;
+    Navigator.pop(context); // إغلاق القائمة الجانبية
+    final label = account.company.trim().isNotEmpty
+        ? account.company.trim()
+        : account.label.trim();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CardsScreen(
+          api: SasApiService(account),
+          companyLabel: label,
+        ),
+      ),
+    );
   }
 
   @override
@@ -1436,6 +1472,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                     _showProfileDialog();
                   },
                 ),
+                if (_cardsAccount != null)
+                  _drawerTile(
+                    icon: Icons.credit_card_rounded,
+                    title: 'الكروت',
+                    onTap: _openCards,
+                  ),
                 ExpansionTile(
                   leading: Icon(
                     Icons.groups,

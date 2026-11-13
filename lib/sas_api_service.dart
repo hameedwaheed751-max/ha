@@ -12,6 +12,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'sas_http_overrides.dart'
     if (dart.library.io) 'sas_http_overrides_io.dart';
+import 'services/voucher_store.dart';
 import 'models.dart' show Subscriber;
 import 'services/runtime_app_config.dart';
 
@@ -676,7 +677,7 @@ class SasManagerJournalMonth {
   }
 }
 
-class SasApiService {
+class SasApiService implements VoucherApi {
   // Web builds must use the deployed HTTPS proxy. The value comes from
   // SAS_WEB_PROXY_URL or from persisted app settings; it is intentionally not
   // hard-coded to localhost.
@@ -2469,6 +2470,116 @@ class SasApiService {
           .toList();
     }
     return const [];
+  }
+
+  // ======== متجر الكروت (VoucherStore) — otto-isp ========
+  // تطبيق PHP منفصل عن لوحة الإدارة، بجسم JSON صريح (لا تشفير). يعيد استخدام
+  // جلسة SAS نفسها (توكن Bearer + ترويسات الوكيل/البروكسي).
+
+  String get _voucherBase {
+    final base = _base.endsWith('/')
+        ? _base.substring(0, _base.length - 1)
+        : _base;
+    const adminSeg = '/admin/api/index.php/api';
+    const voucherSeg = '/VoucherStore/index.php/api';
+    if (base.contains(adminSeg)) {
+      return base.replaceFirst(adminSeg, voucherSeg);
+    }
+    final origin = _sasOrigin.isNotEmpty ? _sasOrigin : base;
+    final cleanOrigin = origin.endsWith('/')
+        ? origin.substring(0, origin.length - 1)
+        : origin;
+    return '$cleanOrigin$voucherSeg';
+  }
+
+  Uri _voucherUri(String route) {
+    final cleanRoute = route.startsWith('/') ? route : '/$route';
+    return Uri.parse('$_voucherBase$cleanRoute');
+  }
+
+  dynamic _decodeVoucher(http.Response res) {
+    if (res.statusCode == 401 || res.statusCode == 403) {
+      throw SasApiException('الجلسة غير مصرّح لها بمتجر الكروت');
+    }
+    if (res.statusCode >= 500) {
+      throw SasApiException('تعذّر الاتصال بمتجر الكروت (${res.statusCode})');
+    }
+    try {
+      return res.body.isEmpty ? null : jsonDecode(res.body);
+    } catch (_) {
+      throw SasApiException('رد متجر الكروت غير مفهوم');
+    }
+  }
+
+  Map<String, String> _voucherHeaders({bool json = false}) {
+    final headers = <String, String>{
+      'Accept': 'application/json, text/plain, */*',
+    };
+    if (json) headers['Content-Type'] = 'application/json';
+    _addProxyTarget(headers);
+    if (_token != null) headers['authorization'] = 'Bearer $_token';
+    return headers;
+  }
+
+  Future<dynamic> _voucherGet(String route) async {
+    if (_token == null) await login();
+    final uri = _voucherUri(route);
+    var res = await _httpClient
+        .get(uri, headers: _voucherHeaders())
+        .timeout(const Duration(seconds: 45));
+    if (res.statusCode == 401) {
+      await login();
+      res = await _httpClient
+          .get(uri, headers: _voucherHeaders())
+          .timeout(const Duration(seconds: 45));
+    }
+    return _decodeVoucher(res);
+  }
+
+  Future<dynamic> _voucherPostPlain(
+    String route,
+    Map<String, dynamic> body,
+  ) async {
+    if (_token == null) await login();
+    final uri = _voucherUri(route);
+    final encoded = jsonEncode(body);
+    var res = await _httpClient
+        .post(uri, headers: _voucherHeaders(json: true), body: encoded)
+        .timeout(const Duration(seconds: 45));
+    if (res.statusCode == 401) {
+      await login();
+      res = await _httpClient
+          .post(uri, headers: _voucherHeaders(json: true), body: encoded)
+          .timeout(const Duration(seconds: 45));
+    }
+    return _decodeVoucher(res);
+  }
+
+  /// رصيد المكتب من متجر الكروت.
+  @override
+  Future<double?> fetchVoucherBalance() async =>
+      parseVoucherBalance(await _voucherGet('auth'));
+
+  /// سجل شراء الكروت (الأحدث أولاً كما يعيدها الخادم).
+  @override
+  Future<List<VoucherPurchase>> fetchVoucherPurchases() async =>
+      VoucherPurchase.parseList(await _voucherGet('purchase'));
+
+  /// شراء كروت: يخصم من رصيد المكتب ويولّد كروتاً بأرقام PIN جديدة.
+  /// يرمي SasApiException برسالة عربية عند الفشل.
+  @override
+  Future<String> buyVouchers({
+    required int cardValue,
+    required int quantity,
+  }) async {
+    final res = await _voucherPostPlain(
+      'purchase',
+      voucherBuyBody(cardValue: cardValue, quantity: quantity),
+    );
+    if (!voucherBuySucceeded(res)) {
+      throw SasApiException(voucherResultMessage(res));
+    }
+    return voucherResultMessage(res);
   }
 
   Future<dynamic> _get(String route) async {
