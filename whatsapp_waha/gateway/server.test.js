@@ -9,6 +9,9 @@ const {
   createApp,
   isAuthorizedAccount,
   isAllowedEventType,
+  isEligibleAgent,
+  subscriptionEndMs,
+  createAgentAuthorizer,
   JsonIdempotencyStore,
   loadConfig,
   sessionNameForUid,
@@ -103,14 +106,72 @@ function createWahaStub() {
   return { calls, fetchImpl, sessions };
 }
 
-test('any enabled Firebase account is authorized regardless of role or subscription', () => {
+test('isAuthorizedAccount only checks that the Firebase account is usable', () => {
   for (const uid of ['uid-admin', 'uid-agent', 'uid-standard']) {
     assert.equal(isAuthorizedAccount({ disabled: false }, uid), true);
   }
-  assert.equal(isAuthorizedAccount({ disabled: false }, 'uid-free-agent', {
-    profile: { role: 'agent', status: 'pending' },
-    subscription: { plan: 'free', status: 'expired' },
-  }), true);
+});
+
+// R1: the gateway serves only real agents, mirroring the app's own rule
+// (AppStore.refreshSubscriptionStatus in lib/models.dart).
+const NOW = Date.parse('2026-11-14T12:00:00Z');
+const DAY = 24 * 60 * 60 * 1000;
+const activeProfile = { role: 'agent', status: 'active' };
+const eligible = (extra) => isEligibleAgent({
+  authUser: { disabled: false },
+  uid: 'uid-agent',
+  adminUid: TEST_ADMIN_UID,
+  now: NOW,
+  profile: activeProfile,
+  subscription: { plan: 'three_months', endDate: new Date(NOW + 10 * DAY).toISOString() },
+  ...extra,
+});
+
+test('an active agent with an unexpired subscription is eligible', () => {
+  assert.equal(eligible(), true);
+});
+
+test('the admin is eligible without an agent profile or subscription', () => {
+  assert.equal(eligible({ uid: TEST_ADMIN_UID, profile: null, subscription: null }), true);
+});
+
+test('an expired subscription is rejected, including at the exact end instant', () => {
+  assert.equal(eligible({ subscription: { plan: 'free_15_days', endDate: NOW - DAY } }), false);
+  assert.equal(eligible({ subscription: { plan: 'three_months', endDate: NOW } }), false);
+});
+
+test('accounts without the agent role or an active status are rejected', () => {
+  assert.equal(eligible({ profile: null }), false);
+  assert.equal(eligible({ profile: { status: 'active' } }), false);
+  assert.equal(eligible({ profile: { role: 'agent', status: 'pending' } }), false);
+});
+
+test('an empty or "free" plan is rejected even with a future end date', () => {
+  const endDate = NOW + 10 * DAY;
+  assert.equal(eligible({ subscription: { plan: '', endDate } }), false);
+  assert.equal(eligible({ subscription: { plan: 'free', endDate } }), false);
+  assert.equal(eligible({ subscription: null }), false);
+});
+
+test('without an end date the plan length from the start date is used', () => {
+  const recent = { plan: 'free_15_days', startDate: NOW - 5 * DAY };
+  const old = { plan: 'free_15_days', startDate: NOW - 20 * DAY };
+  assert.equal(eligible({ subscription: recent }), true);
+  assert.equal(eligible({ subscription: old }), false);
+  assert.equal(eligible({ subscription: { plan: 'unknown_plan', startDate: NOW - DAY } }), false);
+  assert.equal(eligible({ subscription: { plan: 'three_months' } }), false);
+});
+
+test('a disabled Firebase account is rejected even with a valid subscription', () => {
+  assert.equal(eligible({ authUser: { disabled: true } }), false);
+  assert.equal(eligible({ uid: TEST_ADMIN_UID, authUser: { disabled: true } }), false);
+});
+
+test('subscriptionEndMs accepts ISO strings and millisecond numbers', () => {
+  assert.equal(subscriptionEndMs({ plan: 'one_year', endDate: '2026-12-01T00:00:00.000Z' }),
+    Date.parse('2026-12-01T00:00:00.000Z'));
+  assert.equal(subscriptionEndMs({ plan: 'one_year', endDate: 1790000000000 }), 1790000000000);
+  assert.equal(subscriptionEndMs({ plan: 'six_months', startDate: 0 }), 183 * DAY);
 });
 
 test('disabled, missing, or invalid Firebase accounts are rejected', () => {
@@ -650,4 +711,80 @@ test('a request WAHA rejected may be retried, an unresolved one may not', async 
   } finally {
     temp.cleanup();
   }
+});
+
+test('createAgentAuthorizer reads profile and subscription and applies the rule', async () => {
+  const reads = [];
+  const authorize = createAgentAuthorizer({
+    adminUid: TEST_ADMIN_UID,
+    now: () => NOW,
+    getUser: async (uid) => ({ uid, disabled: false }),
+    readAgent: async (uid) => {
+      reads.push(uid);
+      if (uid === 'uid-expired') {
+        return { profile: activeProfile, subscription: { plan: 'free_15_days', endDate: NOW - DAY } };
+      }
+      return { profile: activeProfile, subscription: { plan: 'three_months', endDate: NOW + DAY } };
+    },
+  });
+  assert.equal(await authorize('uid-agent'), true);
+  assert.equal(await authorize('uid-expired'), false);
+  assert.equal(await authorize(TEST_ADMIN_UID), true);
+  assert.deepEqual(reads, ['uid-agent', 'uid-expired']);
+});
+
+test('createAgentAuthorizer rejects unknown users and caches decisions briefly', async () => {
+  let clock = NOW;
+  let reads = 0;
+  const authorize = createAgentAuthorizer({
+    adminUid: TEST_ADMIN_UID,
+    cacheMs: 60000,
+    now: () => clock,
+    getUser: async (uid) => {
+      if (uid === 'uid-missing') {
+        const error = new Error('missing');
+        error.code = 'auth/user-not-found';
+        throw error;
+      }
+      return { uid, disabled: false };
+    },
+    readAgent: async () => {
+      reads += 1;
+      return { profile: activeProfile, subscription: { plan: 'three_months', endDate: NOW + DAY } };
+    },
+  });
+  assert.equal(await authorize('uid-missing'), false);
+  await authorize('uid-agent');
+  await authorize('uid-agent');
+  assert.equal(reads, 1);
+  clock += 61000;
+  await authorize('uid-agent');
+  assert.equal(reads, 2);
+});
+
+test('createAgentAuthorizer lets database errors propagate (gateway answers 503)', async () => {
+  const authorize = createAgentAuthorizer({
+    adminUid: TEST_ADMIN_UID,
+    getUser: async (uid) => ({ uid, disabled: false }),
+    readAgent: async () => { throw new Error('database unavailable'); },
+  });
+  await assert.rejects(authorize('uid-agent'), /database unavailable/);
+});
+
+test('a refusal is cached only briefly so a brand-new agent is served within seconds', async () => {
+  let clock = NOW;
+  let profile = null; // الحساب أُنشئ للتو ولم تُكتب عقدة الوكيل بعد
+  const authorize = createAgentAuthorizer({
+    adminUid: TEST_ADMIN_UID,
+    now: () => clock,
+    getUser: async (uid) => ({ uid, disabled: false }),
+    readAgent: async () => ({
+      profile,
+      subscription: { plan: 'free_15_days', startDate: NOW },
+    }),
+  });
+  assert.equal(await authorize('uid-new-agent'), false);
+  profile = activeProfile; // مسار التجربة كتب الدور والاشتراك
+  clock += 6000;
+  assert.equal(await authorize('uid-new-agent'), true);
 });

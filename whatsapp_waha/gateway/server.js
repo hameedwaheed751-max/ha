@@ -108,6 +108,102 @@ function isAuthorizedAccount(authUser, uid) {
   return true;
 }
 
+// مدد الخطط: نسخة من AppStore._subscriptionDurationForPlan في lib/models.dart.
+const DAY_MS = 24 * 60 * 60 * 1000;
+const PLAN_DAYS = {
+  free_15_days: 15,
+  trial: 15,
+  three_months: 90,
+  '3m': 90,
+  six_months: 183,
+  '6m': 183,
+  one_year: 365,
+  '1y': 365,
+};
+
+function toMillis(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber)) return asNumber;
+  const parsed = Date.parse(String(value));
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/** نهاية اشتراك الوكيل بالملّي ثانية، أو null إن لم تُعرف (= غير نشط). */
+function subscriptionEndMs(subscription) {
+  if (!subscription || typeof subscription !== 'object') return null;
+  const end = toMillis(subscription.endDate);
+  if (end !== null) return end;
+  const start = toMillis(subscription.startDate);
+  const days = PLAN_DAYS[String(subscription.plan || '').trim()];
+  return start !== null && days ? start + days * DAY_MS : null;
+}
+
+/**
+ * R1: البوابة تخدم الوكلاء الحقيقيين فقط، بنفس قاعدة التطبيق
+ * (AppStore.refreshSubscriptionStatus): المدير دائماً، وغيره يحتاج
+ * profile.role=agent وstatus=active وخطة غير free لم تنتهِ.
+ */
+function isEligibleAgent({ authUser, uid, adminUid, profile, subscription, now = Date.now() }) {
+  if (!isAuthorizedAccount(authUser, uid)) return false;
+  if (adminUid && uid === adminUid) return true;
+  if (!profile || profile.role !== 'agent' || profile.status !== 'active') return false;
+  const plan = String(subscription?.plan || '').trim();
+  if (!plan || plan === 'free') return false;
+  const end = subscriptionEndMs(subscription);
+  return end !== null && now < end;
+}
+
+/**
+ * يبني دالة التحقق المستعملة في requireAgent وفي المجدول. القرار يُحفظ
+ * دقيقة واحدة لكل uid حتى لا يقرأ كل طلب من قاعدة البيانات؛ فتجديد اشتراك
+ * أو انتهاؤه يظهر أثره خلال دقيقة. أخطاء القراءة تُرمى (البوابة تعيد 503).
+ */
+function createAgentAuthorizer({
+  getUser,
+  readAgent,
+  adminUid,
+  cacheMs = 60000,
+  // الرفض يُحفظ ثواني فقط: وكيل جديد سجّل للتو يُخدم فور كتابة حسابه.
+  refusalCacheMs = 5000,
+  now = Date.now,
+}) {
+  const cache = new Map();
+  return async (uid) => {
+    const t = now();
+    const hit = cache.get(uid);
+    if (hit && t - hit.at < (hit.ok ? cacheMs : refusalCacheMs)) return hit.ok;
+
+    let authUser;
+    try {
+      authUser = await getUser(uid);
+    } catch (error) {
+      if (error?.code === 'auth/user-not-found') return false;
+      throw error;
+    }
+    let agent = { profile: null, subscription: null };
+    if (isAuthorizedAccount(authUser, uid) && uid !== adminUid) {
+      agent = (await readAgent(uid)) || agent;
+    }
+    const ok = isEligibleAgent({
+      authUser,
+      uid,
+      adminUid,
+      profile: agent.profile,
+      subscription: agent.subscription,
+      now: t,
+    });
+    cache.set(uid, { ok, at: t });
+    if (cache.size > 5000) {
+      for (const [key, value] of cache) {
+        if (t - value.at >= cacheMs) cache.delete(key);
+      }
+    }
+    return ok;
+  };
+}
+
 function loadConfig(env = process.env) {
   const wahaBaseUrl = String(env.WAHA_BASE_URL || '').replace(/\/+$/, '');
   let wahaUrl;
@@ -762,16 +858,20 @@ function start() {
   });
   const auth = getAuth(firebaseApp);
   const verifyIdToken = (token) => auth.verifyIdToken(token);
-  const authorizeAccount = async (uid) => {
-    let authUser;
-    try {
-      authUser = await auth.getUser(uid);
-    } catch (error) {
-      if (error.code === 'auth/user-not-found') return false;
-      throw error;
-    }
-    return isAuthorizedAccount(authUser, uid);
-  };
+  const { getDatabase } = require('firebase-admin/database');
+  const database = getDatabase(firebaseApp);
+  // R1: وكيل حقيقي فقط (دور agent، حالة active، اشتراك ساري) أو المدير.
+  const authorizeAccount = createAgentAuthorizer({
+    adminUid: config.adminUid,
+    getUser: (uid) => auth.getUser(uid),
+    readAgent: async (uid) => {
+      const [profile, subscription] = await Promise.all([
+        database.ref(`agents/${uid}/profile`).once('value'),
+        database.ref(`agents/${uid}/subscription`).once('value'),
+      ]);
+      return { profile: profile.val(), subscription: subscription.val() };
+    },
+  });
   const wahaSender = createWahaSender({ config });
   const app = createApp({ config, verifyIdToken, authorizeAccount, wahaSender });
   // Docker publishes only a loopback-bound host port in the local pilot compose file.
@@ -781,22 +881,24 @@ function start() {
 
   let stopScheduler = () => {};
   if (config.expiryScheduler.enabled) {
-    const { getDatabase } = require('firebase-admin/database');
     const { ExpiryScheduler, FirebaseNoticeStore, startExpiryScheduler } = require('./expiry_scheduler');
     const listAgentUids = async () => {
       const uids = [];
       let pageToken;
       do {
         const page = await auth.listUsers(1000, pageToken);
+        // الوكيل المنتهي لا تُرسل تذكيراته حتى يجدد (قرار المالك 2026-11-14).
         for (const user of page.users) {
-          if (isAuthorizedAccount(user, user.uid)) uids.push(user.uid);
+          if (isAuthorizedAccount(user, user.uid) && (await authorizeAccount(user.uid))) {
+            uids.push(user.uid);
+          }
         }
         pageToken = page.pageToken;
       } while (pageToken);
       return uids;
     };
     const scheduler = new ExpiryScheduler({
-      store: new FirebaseNoticeStore(getDatabase(firebaseApp)),
+      store: new FirebaseNoticeStore(database),
       sender: wahaSender,
       listAgentUids,
       sessionNameForUid,
@@ -858,6 +960,9 @@ module.exports = {
   createRateLimiter,
   detectImageType,
   isAuthorizedAccount,
+  isEligibleAgent,
+  subscriptionEndMs,
+  createAgentAuthorizer,
   isAllowedEventType,
   loadConfig,
   normalizePhone,
