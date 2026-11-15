@@ -15,6 +15,15 @@ Use a new key after revoking any exposed key. Put secrets in an untracked `.env`
 
 The production Compose file appends `https://wakeel-unel.onrender.com` to the exact origin(s) supplied in `NETAGENT_WEB_ORIGIN`. Preserve the existing value in the VPS `/opt/gateway/.env`; it may contain a comma-separated origin list. Redeploy the gateway with `docker compose -f compose.production.yaml up -d gateway` after updating the Compose file.
 
+## Subscriber portal («مشترك نت», off by default)
+
+`subscriber_portal.js` mounts `/api/v1/*` only when `SUBSCRIBER_PORTAL_ENABLED=true`. With the flag unset, nothing is mounted and existing routes are unchanged.
+
+- `SUBSCRIBER_PORTAL_PEPPER`: server secret, 32+ characters, required when enabled. Invitation codes, link tokens and phones are stored only as salted SHA-256 hashes; changing the pepper invalidates open invitations.
+- `SUBSCRIBER_FIREBASE_PROJECT_ID`: the subscriber Firebase project (`mushtarak-net`). It verifies subscriber ID tokens and needs no key. While empty, subscriber routes answer `503 auth_not_configured`; agent routes still work.
+
+The portal writes only under the new `subscriberPortal/` node with the Admin SDK and reads `agents/{uid}/subscribers` and `settings`. Agent routes reuse `requireAgent` (the R1 check), and an ineligible agent cannot receive renewal requests. Route list and data shapes: `C:\Mushtaraknet\docs\SUBSCRIBER_API.md`.
+
 ## Security and delivery semantics
 
 The gateway accepts only a valid Firebase ID token for an enabled Firebase Auth user. The trusted administrator UID used by NetAgent's `UserRoleService` can manage only their own UID-derived session and does not receive access to agent records. Other users must have `agents/{uid}/profile` with `role=agent` and `status=active`, plus an active, unexpired subscription at `agents/{uid}/subscription`. Every identity gets a deterministic opaque session name derived server-side from the verified UID. Session status, creation, QR, reconnect, logout, and sends all use that same identity-derived session; client-provided `uid`, `agentKey`, or `session` values are ignored.

@@ -74,10 +74,10 @@ function detectImageType(buffer) {
 
 // Simple in-memory sliding-window limiter keyed by uid. Single-instance only,
 // which matches the one-container deployment; it resets on restart.
-function createRateLimiter({ max, windowMs }, now = Date.now) {
+function createRateLimiter({ max, windowMs, key: keyFor }, now = Date.now) {
   const hits = new Map();
   return function rateLimit(req, res, next) {
-    const key = req.agentUid || 'anonymous';
+    const key = keyFor ? keyFor(req) : req.rateKey || req.agentUid || 'anonymous';
     const t = now();
     const recent = (hits.get(key) || []).filter((ts) => t - ts < windowMs);
     if (recent.length >= max) {
@@ -285,6 +285,20 @@ function loadConfig(env = process.env) {
       // Subscriber dates without a zone are device-local; Iraq is UTC+3.
       utcOffsetMinutes: Number(env.NETAGENT_UTC_OFFSET_MINUTES || 180),
     },
+    // «مشترك نت» (D7): مطفأة حتى تُفعَّل صراحة. الملح يحمي رموز الدعوات والهواتف المخزنة كبصمات.
+    subscriberPortal: (() => {
+      const enabled = String(env.SUBSCRIBER_PORTAL_ENABLED || '').trim() === 'true';
+      const pepper = String(env.SUBSCRIBER_PORTAL_PEPPER || '').trim();
+      if (enabled && pepper.length < 32) {
+        throw new Error('SUBSCRIBER_PORTAL_PEPPER must be set (32+ characters) when the subscriber portal is enabled.');
+      }
+      return {
+        enabled,
+        pepper,
+        // مشروع Firebase للمشتركين لا يحتاج مفتاحاً للتحقق من التوكن. فارغ = الدخول غير مفعّل بعد.
+        firebaseProjectId: String(env.SUBSCRIBER_FIREBASE_PROJECT_ID || '').trim(),
+      };
+    })(),
     // Orphan product/store image sweeper. Off until explicitly enabled; deletes
     // only unreferenced uploads older than the grace window (default one day).
     imageCleanup: {
@@ -530,6 +544,8 @@ function createApp({
   fetchImpl = fetch,
   idempotencyStore,
   wahaSender,
+  subscriberPortal,
+  authenticateSubscriber,
 }) {
   const app = express();
   const sender = wahaSender || createWahaSender({ config, fetchImpl, idempotencyStore });
@@ -832,6 +848,22 @@ function createApp({
     return res.status(result.status).json(result.body);
   });
 
+  // «مشترك نت»: يُركَّب فقط عند تمرير الخدمة (SUBSCRIBER_PORTAL_ENABLED=true).
+  if (subscriberPortal) {
+    const { createSubscriberPortalRouter } = require('./subscriber_portal');
+    app.use(
+      '/api/v1',
+      createSubscriberPortalRouter({
+        portal: subscriberPortal,
+        requireAgent,
+        authenticateSubscriber,
+        // التحقق من الدعوة بلا حساب: حد واحد مشترك يجعل تخمين الرموز غير عملي.
+        publicRateLimit: createRateLimiter({ max: 30, windowMs: 10 * 60 * 1000, key: () => 'invitation-validate' }),
+        accountRateLimit: createRateLimiter({ max: 120, windowMs: 60 * 1000 }),
+      }),
+    );
+  }
+
   // Translate body-parser limit errors (e.g. an oversize image) to JSON.
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
@@ -873,7 +905,40 @@ function start() {
     },
   });
   const wahaSender = createWahaSender({ config });
-  const app = createApp({ config, verifyIdToken, authorizeAccount, wahaSender });
+  let subscriberPortal;
+  let authenticateSubscriber;
+  if (config.subscriberPortal.enabled) {
+    const { createSubscriberPortal } = require('./subscriber_portal');
+    const { firebaseDb } = require('./portal_db');
+    subscriberPortal = createSubscriberPortal({
+      db: firebaseDb(database),
+      pepper: config.subscriberPortal.pepper,
+      // الوكيل المنتهي لا يستقبل طلبات تجديد (نفس قاعدة R1).
+      isAgentEligible: authorizeAccount,
+    });
+    if (config.subscriberPortal.firebaseProjectId) {
+      const subscriberApp = getApps().find((a) => a.name === 'subscribers') ||
+        initializeApp({ projectId: config.subscriberPortal.firebaseProjectId }, 'subscribers');
+      const subscriberAuth = getAuth(subscriberApp);
+      authenticateSubscriber = async (req) => {
+        const match = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
+        if (!match) return null;
+        const decoded = await subscriberAuth.verifyIdToken(match[1]);
+        return { accountId: decoded.uid, phone: decoded.phone_number || '' };
+      };
+    }
+    console.log(
+      `Subscriber portal enabled (sign-in ${authenticateSubscriber ? 'configured' : 'not configured'})`,
+    );
+  }
+  const app = createApp({
+    config,
+    verifyIdToken,
+    authorizeAccount,
+    wahaSender,
+    subscriberPortal,
+    authenticateSubscriber,
+  });
   // Docker publishes only a loopback-bound host port in the local pilot compose file.
   const server = app.listen(config.port, '0.0.0.0', () => {
     console.log(`WAHA gateway listening on container port ${config.port}`);

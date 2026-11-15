@@ -788,3 +788,74 @@ test('a refusal is cached only briefly so a brand-new agent is served within sec
   clock += 6000;
   assert.equal(await authorize('uid-new-agent'), true);
 });
+
+// --- «مشترك نت»: الوحدة مطفأة افتراضياً، وعند تفعيلها تمر مسارات الوكيل بفحص R1 نفسه ---
+
+test('the subscriber portal is off by default and needs a pepper to turn on', () => {
+  const temp = createTempStore();
+  try {
+    assert.equal(testConfig(temp.filePath).subscriberPortal.enabled, false);
+    assert.throws(
+      () => testConfig(temp.filePath, { SUBSCRIBER_PORTAL_ENABLED: 'true' }),
+      /SUBSCRIBER_PORTAL_PEPPER/,
+    );
+    const on = testConfig(temp.filePath, {
+      SUBSCRIBER_PORTAL_ENABLED: 'true',
+      SUBSCRIBER_PORTAL_PEPPER: 'x'.repeat(32),
+    });
+    assert.equal(on.subscriberPortal.enabled, true);
+    assert.equal(on.subscriberPortal.firebaseProjectId, '');
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test('subscriber portal routes do not exist unless the portal is passed in', async () => {
+  const temp = createTempStore();
+  const app = createApp({
+    config: testConfig(temp.filePath),
+    verifyIdToken: async () => ({ uid: 'uid-agent-a' }),
+    authorizeAccount: async () => true,
+    fetchImpl: createWahaStub().fetchImpl,
+  });
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/v1/agent/subscriber-links`, {
+        headers: { Authorization: 'Bearer valid-agent-token' },
+      });
+      assert.equal(response.status, 404);
+    });
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test('enabled portal agent routes reject ineligible agents and serve eligible ones', async () => {
+  const { MemoryDb } = require('./portal_db');
+  const { createSubscriberPortal } = require('./subscriber_portal');
+  const temp = createTempStore();
+  const portal = createSubscriberPortal({ db: new MemoryDb({}), pepper: 'x'.repeat(32) });
+  const eligible = new Set(['uid-agent-a']);
+  const app = createApp({
+    config: testConfig(temp.filePath),
+    verifyIdToken: async (token) => ({ uid: token }),
+    authorizeAccount: async (uid) => eligible.has(uid),
+    fetchImpl: createWahaStub().fetchImpl,
+    subscriberPortal: portal,
+  });
+  try {
+    await withServer(app, async (baseUrl) => {
+      const get = (token, route) =>
+        fetch(`${baseUrl}/api/v1${route}`, { headers: { Authorization: `Bearer ${token}` } });
+      assert.equal((await get('uid-expired', '/agent/subscriber-links')).status, 403);
+      const ok = await get('uid-agent-a', '/agent/subscriber-links');
+      assert.equal(ok.status, 200);
+      assert.deepEqual(await ok.json(), { success: true, data: [] });
+      const me = await get('any', '/me');
+      assert.equal(me.status, 503);
+      assert.equal((await me.json()).error, 'auth_not_configured');
+    });
+  } finally {
+    temp.cleanup();
+  }
+});
