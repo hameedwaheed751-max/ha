@@ -913,6 +913,14 @@ test('account admin resets by phone id and reports dead push tokens', async () =
         return { uid: 'u1' };
       },
       updateUser: async (uid, changes) => updated.push([uid, changes.password]),
+      deleteUser: async (uid) => {
+        if (uid === 'gone') {
+          const error = new Error('missing');
+          error.code = 'auth/user-not-found';
+          throw error;
+        }
+        updated.push(['deleted', uid]);
+      },
     },
     messaging: {
       sendEachForMulticast: async (message) => {
@@ -930,6 +938,9 @@ test('account admin resets by phone id and reports dead push tokens', async () =
   assert.equal(await admin.setPassword('9647701234567', 'new-pass'), true);
   assert.deepEqual(updated, [['u1', 'new-pass']]);
   assert.equal(await admin.setPassword('9647800000000', 'x'), false);
+  await admin.deleteUser('u1');
+  assert.deepEqual(updated.at(-1), ['deleted', 'u1']);
+  await admin.deleteUser('gone'); // حُذف من قبل: لا خطأ.
   const result = await admin.sendPush(['a', 'b', 'c'], { title: 'T', body: 'B', data: { kind: 'k' } });
   assert.deepEqual(result.invalidTokens, ['b']);
   assert.equal(sent[0].notification.title, 'T');

@@ -913,6 +913,13 @@ function createSubscriberAccountAdmin({ auth, messaging }) {
       await auth.updateUser(user.uid, { password });
       return true;
     },
+    async deleteUser(uid) {
+      try {
+        await auth.deleteUser(uid);
+      } catch (error) {
+        if (error?.code !== 'auth/user-not-found') throw error;
+      }
+    },
     async sendPush(tokens, { title, body, data = {} }) {
       if (tokens.length === 0) return { invalidTokens: [] };
       const result = await messaging.sendEachForMulticast({

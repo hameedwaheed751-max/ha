@@ -828,3 +828,43 @@ test('the agent master account from office settings reaches the subscriber', asy
     assert.equal(me.json.data.subscriptions[0].agent.master_account, '7012 3456 7890 1234');
   });
 });
+
+// --- حذف الحساب (شرط Google Play): الحساب وروابطه وأجهزته وإشعاراته ---
+
+test('deleting the account removes links, devices and notifications, cancels open requests, and deletes the sign-in', async () => {
+  const deleted = [];
+  const accountAdmin = { ...fakeAccountAdmin(), deleteUser: async (uid) => deleted.push(uid) };
+  const { app, db } = setup({ accountAdmin });
+  await withServer(app, async (call) => {
+    const sub = await linkAccount(call);
+    await call('POST', '/subscriber/devices', { account: 'acc-1', body: { token: 'token-aaaaaaaaaaaaaaaaaaaaaaaa' } });
+    const r = await call('POST', '/subscriber/renewals', {
+      account: 'acc-1',
+      key: 'key-11111111',
+      body: { subscription_id: sub.id, package_id: sub.package_id },
+    });
+    const res = await call('DELETE', '/subscriber/account', { account: 'acc-1' });
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    assert.deepEqual(deleted, ['acc-1']);
+    assert.deepEqual((await call('GET', '/agent/subscriber-links', { agent: 'agent-a' })).json.data, []);
+    const inbox = (await call('GET', '/agent/renewal-requests', { agent: 'agent-a' })).json.data;
+    assert.equal(inbox.find((x) => x.id === r.json.data.id).status, 'cancelled');
+    for (const node of ['links', 'devices', 'notifications', 'renewalKeys', 'renewalsByAccount', 'ticketsByAccount']) {
+      assert.equal(await db.get(`subscriberPortal/${node}/acc-1`), null, node);
+    }
+    // الوكيل يستطيع دعوة المشترك من جديد لاحقاً.
+    const again = await call('POST', '/agent/subscriber-invitations', { agent: 'agent-a', body: { subscriber_id: 'sub-1' } });
+    assert.equal(again.status, 200);
+  });
+});
+
+test('deleting an account with no links still deletes the sign-in, and needs a signed-in subscriber', async () => {
+  const deleted = [];
+  const { app } = setup({ accountAdmin: { ...fakeAccountAdmin(), deleteUser: async (uid) => deleted.push(uid) } });
+  await withServer(app, async (call) => {
+    assert.equal((await call('DELETE', '/subscriber/account')).status, 401);
+    const res = await call('DELETE', '/subscriber/account', { account: 'acc-9' });
+    assert.equal(res.status, 200);
+    assert.deepEqual(deleted, ['acc-9']);
+  });
+});

@@ -1093,10 +1093,16 @@ function createSubscriberPortal({
   // فك الربط من مكان واحد: بزر الوكيل، أو تلقائياً حين يحذف الوكيل المشترك.
   // يُغلق الطلب المفتوح ويحرر قفله، ويُشعر المشترك مرة واحدة. يُرجع false إن
   // لم يكن مربوطاً (أو سبقه طلب آخر لفك نفس الربط).
-  async function detach(agentUid, subscriberId) {
+  // silent: بلا إشعار (حذف الحساب). onlyAccount: لا يُفك إلا ربط هذا الحساب.
+  async function detach(agentUid, subscriberId, { silent = false, onlyAccount = null } = {}) {
     let removed = null;
     await db.transaction(paths.record(agentUid, subscriberId), (current) => {
-      removed = current; // آخر استدعاء يحمل القيمة الحقيقية (انظر cancelInvitation).
+      // آخر استدعاء يحمل القيمة الحقيقية (انظر cancelInvitation).
+      if (current && onlyAccount && current.accountId !== onlyAccount) {
+        removed = null;
+        return current;
+      }
+      removed = current;
       return null;
     });
     if (!removed) return false;
@@ -1114,6 +1120,7 @@ function createSubscriberPortal({
       [`summaries/${agentUid}/${subscriberId}`]: null,
       [`agents/${agentUid}/openRenewals/${subscriberId}`]: null,
     });
+    if (silent) return true;
     await notify(removed.accountId, {
       kind: 'system',
       title: 'انتهى ربط اشتراكك',
@@ -1121,6 +1128,21 @@ function createSubscriberPortal({
       important: true,
     });
     return true;
+  }
+
+  // حذف حساب المشترك بطلبه (شرط Google Play). يبقى سجله وتاريخه عند الوكيل.
+  async function deleteAccount(accountId) {
+    if (!accountAdmin?.deleteUser) fail(503, 'delete_unavailable');
+    for (const [, link] of entriesOf(await db.get(paths.links(accountId)))) {
+      await detach(link.agentUid, link.subscriberId, { silent: true, onlyAccount: accountId });
+    }
+    const patch = {};
+    for (const node of ['links', 'devices', 'notifications', 'renewalKeys', 'renewalsByAccount', 'ticketsByAccount', 'expiryNotices']) {
+      patch[`${node}/${accountId}`] = null;
+    }
+    await db.update(PORTAL, patch);
+    await accountAdmin.deleteUser(accountId);
+    return null;
   }
 
   async function unlink(agentUid, subscriberIdInput) {
@@ -1179,6 +1201,7 @@ function createSubscriberPortal({
     getSettings,
     putSettings,
     registerDevice,
+    deleteAccount,
     resetPasswordWithInvitation,
     runExpiryNotices,
     createTicket,
@@ -1279,6 +1302,7 @@ function createSubscriberPortalRouter({
   router.post('/subscriber/account/link-existing', ...sub, handle((req) =>
     portal.linkExisting(req.subscriber, req.body?.code)));
   router.get('/me', ...sub, handle((req) => portal.me(req.subscriber)));
+  router.delete('/subscriber/account', ...sub, handle((req) => portal.deleteAccount(account(req))));
 
   const subscriptionId = (req) =>
     typeof req.query.subscription_id === 'string' ? req.query.subscription_id : '';
