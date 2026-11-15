@@ -23,6 +23,7 @@ class PortalException implements Exception {
     'portal_disabled' => 'خدمة مشترك نت غير مفعّلة بعد',
     'phone_missing' => 'أضف رقم هاتف المشترك أولاً',
     'record_already_linked' => 'المشترك مرتبط بالتطبيق مسبقاً',
+    'not_linked' => 'المشترك غير مربوط بتطبيق مشترك نت',
     'subscription_not_found' => 'احفظ المشترك ثم أعد المحاولة',
     'forbidden' => 'حسابك لا يملك صلاحية هذه الخدمة',
     'invalid_state' => 'تغيّرت حالة الطلب، حدّث القائمة',

@@ -881,3 +881,57 @@ test('browser preflight allows PUT for the subscriber portal summary and setting
     temp.cleanup();
   }
 });
+
+test('the subscriber service key must belong to the subscriber project', () => {
+  const { readSubscriberServiceAccount } = require('./server');
+  const temp = createTempStore();
+  const file = temp.filePath.replace('idempotency.json', 'sa.json');
+  try {
+    fs.writeFileSync(file, JSON.stringify({ type: 'service_account', project_id: 'wakeiq', private_key: 'k', client_email: 'e' }));
+    assert.throws(() => readSubscriberServiceAccount(file, 'mushtarak-net'), /mushtarak-net/);
+    fs.writeFileSync(file, JSON.stringify({ type: 'service_account', project_id: 'mushtarak-net', private_key: 'k', client_email: 'e' }));
+    assert.equal(readSubscriberServiceAccount(file, 'mushtarak-net').project_id, 'mushtarak-net');
+    fs.writeFileSync(file, 'not json');
+    assert.throws(() => readSubscriberServiceAccount(file, 'mushtarak-net'), /service account/i);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test('account admin resets by phone id and reports dead push tokens', async () => {
+  const { createSubscriberAccountAdmin } = require('./server');
+  const updated = [];
+  const sent = [];
+  const admin = createSubscriberAccountAdmin({
+    auth: {
+      getUserByEmail: async (email) => {
+        if (email !== '9647701234567@phone.mushtarak.net') {
+          const error = new Error('missing');
+          error.code = 'auth/user-not-found';
+          throw error;
+        }
+        return { uid: 'u1' };
+      },
+      updateUser: async (uid, changes) => updated.push([uid, changes.password]),
+    },
+    messaging: {
+      sendEachForMulticast: async (message) => {
+        sent.push(message);
+        return {
+          responses: [
+            { success: true },
+            { success: false, error: { code: 'messaging/registration-token-not-registered' } },
+            { success: false, error: { code: 'messaging/internal-error' } },
+          ],
+        };
+      },
+    },
+  });
+  assert.equal(await admin.setPassword('9647701234567', 'new-pass'), true);
+  assert.deepEqual(updated, [['u1', 'new-pass']]);
+  assert.equal(await admin.setPassword('9647800000000', 'x'), false);
+  const result = await admin.sendPush(['a', 'b', 'c'], { title: 'T', body: 'B', data: { kind: 'k' } });
+  assert.deepEqual(result.invalidTokens, ['b']);
+  assert.equal(sent[0].notification.title, 'T');
+  assert.equal(sent[0].data.kind, 'k');
+});

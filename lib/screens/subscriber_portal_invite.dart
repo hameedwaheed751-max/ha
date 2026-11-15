@@ -45,6 +45,18 @@ Future<PortalInvitation?> inviteWithRelink(
   }
 }
 
+/// يلغي ربط المشترك بمشترك نت بعد تأكيد الوكيل. البوابة تغلق طلبه المفتوح
+/// وتُشعره. false = تراجع الوكيل؛ غير المربوط يرمي PortalException(not_linked).
+Future<bool> unlinkFromPortal(
+  SubscriberPortalClient client,
+  String subscriberId, {
+  required Future<bool> Function() confirm,
+}) async {
+  if (!await confirm()) return false;
+  await client.unlink(subscriberId);
+  return true;
+}
+
 /// زر «دعوة لمشترك نت» في شريط معلومات المشترك. يظهر لحساب التجربة فقط.
 class SubscriberPortalInviteAction extends StatefulWidget {
   const SubscriberPortalInviteAction({super.key, required this.subscriber});
@@ -87,6 +99,79 @@ class _SubscriberPortalInviteActionState
     }
   }
 
+  Future<void> _showOptions() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.send_to_mobile),
+                title: const Text('إرسال دعوة لمشترك نت'),
+                onTap: () => Navigator.pop(context, 'invite'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.link_off),
+                title: const Text('إلغاء ربط مشترك نت'),
+                subtitle: const Text('يتوقف وصول المشترك لاشتراكه في التطبيق'),
+                onTap: () => Navigator.pop(context, 'unlink'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (choice == 'invite') await _invite();
+    if (choice == 'unlink') await _unlink();
+  }
+
+  Future<void> _unlink() async {
+    setState(() => _busy = true);
+    try {
+      final done = await unlinkFromPortal(
+        SubscriberPortalSync.instance.client,
+        widget.subscriber.subscriberId,
+        confirm: _confirmUnlink,
+      );
+      SubscriberPortalSync.instance.markLinksStale();
+      if (done) _snack('أُلغي ربط المشترك، ووصله إشعار بذلك');
+    } on PortalException catch (e) {
+      _snack(e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<bool> _confirmUnlink() async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            title: const Text('إلغاء ربط مشترك نت'),
+            content: Text(
+              'لن يرى ${widget.subscriber.name} اشتراكه في تطبيق مشترك نت، ولن يستطيع طلب التجديد منه. '
+              'يُلغى طلبه المفتوح إن وُجد، ويصله إشعار. يمكن ربطه لاحقاً بدعوة جديدة.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('تراجع'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('إلغاء الربط'),
+              ),
+            ],
+          ),
+        ),
+      ) ??
+      false;
+
   Future<bool> _confirmRelink() async =>
       await showDialog<bool>(
         context: context,
@@ -124,8 +209,8 @@ class _SubscriberPortalInviteActionState
     builder: (context, snapshot) {
       if (snapshot.data != true) return const SizedBox.shrink();
       return IconButton(
-        tooltip: 'دعوة لتطبيق مشترك نت',
-        onPressed: _busy ? null : _invite,
+        tooltip: 'مشترك نت',
+        onPressed: _busy ? null : _showOptions,
         icon: _busy
             ? const SizedBox.square(
                 dimension: 20,

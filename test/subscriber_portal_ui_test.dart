@@ -122,4 +122,29 @@ void main() {
     expect(invitation?.code, 'ABCD2345');
     expect(calls, contains('DELETE /api/v1/agent/subscriber-links/s1'));
   });
+
+  test('cancelling the link asks first, and an unlinked subscriber gets a clear message', () async {
+    final calls = <String>[];
+    var linked = true;
+    final client = SubscriberPortalClient(
+      gatewayUrl: 'https://gw.test',
+      getIdToken: () async => 'token',
+      client: MockClient((r) async {
+        calls.add('${r.method} ${r.url.path}');
+        if (!linked) {
+          return http.Response(jsonEncode({'success': false, 'error': 'not_linked'}), 404);
+        }
+        linked = false;
+        return http.Response(jsonEncode({'success': true, 'data': null}), 200);
+      }),
+    );
+    expect(await unlinkFromPortal(client, 's1', confirm: () async => false), isFalse);
+    expect(calls, isEmpty);
+    expect(await unlinkFromPortal(client, 's1', confirm: () async => true), isTrue);
+    expect(calls, ['DELETE /api/v1/agent/subscriber-links/s1']);
+    await expectLater(
+      unlinkFromPortal(client, 's1', confirm: () async => true),
+      throwsA(isA<PortalException>().having((e) => e.message, 'message', 'المشترك غير مربوط بتطبيق مشترك نت')),
+    );
+  });
 }

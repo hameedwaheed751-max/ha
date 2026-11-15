@@ -43,7 +43,7 @@ function seed() {
   };
 }
 
-function setup({ eligible = () => true, withAuth = true } = {}) {
+function setup({ eligible = () => true, withAuth = true, accountAdmin } = {}) {
   const db = new MemoryDb(seed());
   let clock = START;
   const portal = createSubscriberPortal({
@@ -51,6 +51,7 @@ function setup({ eligible = () => true, withAuth = true } = {}) {
     pepper: 'p'.repeat(32),
     now: () => clock,
     isAgentEligible: async (uid) => eligible(uid),
+    accountAdmin,
   });
   const app = express();
   app.use(express.json());
@@ -67,7 +68,7 @@ function setup({ eligible = () => true, withAuth = true } = {}) {
           : null
     : null;
   app.use('/api/v1', createSubscriberPortalRouter({ portal, requireAgent, authenticateSubscriber }));
-  return { db, app, advance: (ms) => { clock += ms; } };
+  return { db, app, portal, advance: (ms) => { clock += ms; } };
 }
 
 async function withServer(app, action) {
@@ -536,4 +537,195 @@ test('the account phone comes from the phone-number sign-in id, never from other
   assert.equal(accountPhoneFromToken({ email: '9647701234567@gmail.com' }), '');
   assert.equal(accountPhoneFromToken({ email: 'x9647701234567@phone.mushtarak.net' }), '');
   assert.equal(accountPhoneFromToken({}), '');
+});
+
+// --- مفتاح خدمة mushtarak-net: استعادة كلمة المرور والإشعار الفوري وتذكير الانتهاء ---
+
+function fakeAccountAdmin({ accounts = { '9647701234567': 'old-pass' } } = {}) {
+  const pushes = [];
+  return {
+    accounts,
+    pushes,
+    async setPassword(phone, password) {
+      if (!(phone in accounts)) return false;
+      accounts[phone] = password;
+      return true;
+    },
+    async sendPush(tokens, message) {
+      pushes.push({ tokens: [...tokens], ...message });
+      return { invalidTokens: tokens.filter((t) => t.startsWith('dead')) };
+    },
+  };
+}
+
+test('a valid invitation and the matching phone reset the password', async () => {
+  const accountAdmin = fakeAccountAdmin();
+  const { app } = setup({ accountAdmin });
+  await withServer(app, async (call) => {
+    const inv = await invite(call);
+    const wrongPhone = await call('POST', '/subscriber/account/reset-password', {
+      body: { code: inv.code, phone: '07809999999', new_password: 'new-pass' },
+    });
+    assert.equal(wrongPhone.json.error, 'phone_mismatch');
+    const short = await call('POST', '/subscriber/account/reset-password', {
+      body: { code: inv.code, phone: '07701234567', new_password: '123' },
+    });
+    assert.equal(short.json.error, 'validation_failed');
+    const badCode = await call('POST', '/subscriber/account/reset-password', {
+      body: { code: 'ZZZZZZZZ', phone: '07701234567', new_password: 'new-pass' },
+    });
+    assert.equal(badCode.json.error, 'invalid_code');
+    const ok = await call('POST', '/subscriber/account/reset-password', {
+      body: { code: inv.code, phone: '0770 123 4567', new_password: 'new-pass' },
+    });
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    assert.equal(accountAdmin.accounts['9647701234567'], 'new-pass');
+    // الدعوة نفسها تبقى صالحة للربط بعد الاستعادة.
+    const still = await call('POST', '/subscriber/invitations/validate', { body: { code: inv.code } });
+    assert.equal(still.status, 200);
+  });
+});
+
+test('reset refuses phones without an account, and is unavailable without the service key', async () => {
+  const accountAdmin = fakeAccountAdmin({ accounts: {} });
+  const { app } = setup({ accountAdmin });
+  await withServer(app, async (call) => {
+    const inv = await invite(call);
+    const res = await call('POST', '/subscriber/account/reset-password', {
+      body: { code: inv.code, phone: '07701234567', new_password: 'new-pass' },
+    });
+    assert.equal(res.json.error, 'account_not_found');
+  });
+  const bare = setup();
+  await withServer(bare.app, async (call) => {
+    const inv = await invite(call);
+    const res = await call('POST', '/subscriber/account/reset-password', {
+      body: { code: inv.code, phone: '07701234567', new_password: 'new-pass' },
+    });
+    assert.equal(res.status, 503);
+    assert.equal(res.json.error, 'reset_unavailable');
+  });
+});
+
+test('devices register per account and every notification is also pushed to them', async () => {
+  const accountAdmin = fakeAccountAdmin();
+  const { app, db } = setup({ accountAdmin });
+  await withServer(app, async (call) => {
+    const sub = await linkAccount(call);
+    const bad = await call('POST', '/subscriber/devices', { account: 'acc-1', body: { token: 'x' } });
+    assert.equal(bad.json.error, 'validation_failed');
+    for (const token of ['token-aaaaaaaaaaaaaaaaaaaaaaaa', 'dead-bbbbbbbbbbbbbbbbbbbbbbbb']) {
+      const ok = await call('POST', '/subscriber/devices', {
+        account: 'acc-1',
+        body: { token, platform: 'android' },
+      });
+      assert.equal(ok.status, 200);
+    }
+    await call('POST', '/subscriber/renewals', {
+      account: 'acc-1',
+      key: 'key-11111111',
+      body: { subscription_id: sub.id, package_id: sub.package_id },
+    });
+    const push = accountAdmin.pushes.at(-1);
+    assert.equal(push.title, 'وصل طلب التجديد');
+    assert.equal(push.data.kind, 'renewalReceived');
+    assert.equal(push.tokens.length, 2);
+    // الرمز الميت يُحذف بعد أول فشل.
+    const devices = await db.get('subscriberPortal/devices/acc-1');
+    assert.equal(Object.values(devices).some((d) => d.token.startsWith('dead')), false);
+    const stored = JSON.stringify(await db.get('subscriberPortal/devices'));
+    assert.equal(stored.includes('acc-2'), false);
+  });
+});
+
+test('expiry reminders go out once at three days and once at expiry, never for an expired agent', async () => {
+  const accountAdmin = fakeAccountAdmin();
+  let eligible = true;
+  const { app, portal, advance } = setup({ accountAdmin, eligible: () => eligible });
+  await withServer(app, async (call) => {
+    await linkAccount(call);
+    await call('POST', '/subscriber/devices', {
+      account: 'acc-1',
+      body: { token: 'token-aaaaaaaaaaaaaaaaaaaaaaaa' },
+    });
+    // ينتهي 2026-12-01؛ الآن 2026-11-15: لا تذكير.
+    assert.equal(await portal.runExpiryNotices(), 0);
+    advance(14 * 24 * HOUR); // 2026-11-29: يومان متبقيان
+    assert.equal(await portal.runExpiryNotices(), 1);
+    assert.equal(await portal.runExpiryNotices(), 0, 'not twice');
+    advance(2 * 24 * HOUR); // 2026-12-01 ظهراً: انتهى قبل ساعات (نافذة يوم، والفحص كل ساعة)
+    eligible = false;
+    assert.equal(await portal.runExpiryNotices(), 0, 'agent expired: reminders stop');
+    eligible = true;
+    assert.equal(await portal.runExpiryNotices(), 1);
+    const kinds = (await call('GET', '/subscriber/notifications', { account: 'acc-1' })).json.data.map((n) => n.kind);
+    assert.deepEqual(kinds, ['expired', 'expirySoon']);
+    assert.deepEqual(accountAdmin.pushes.map((p) => p.data.kind), ['expirySoon', 'expired']);
+  });
+});
+
+// --- فك الارتباط: يغلق الطلب المفتوح، ويُشعر المشترك، ويحدث تلقائياً عند حذف المشترك ---
+
+test('unlinking cancels the open request, releases it for a later link, and tells the subscriber', async () => {
+  const { app } = setup();
+  await withServer(app, async (call) => {
+    const sub = await linkAccount(call);
+    const created = await call('POST', '/subscriber/renewals', {
+      account: 'acc-1',
+      key: 'key-11111111',
+      body: { subscription_id: sub.id, package_id: sub.package_id },
+    });
+    await call('DELETE', '/agent/subscriber-links/sub-1', { agent: 'agent-a' });
+    const inbox = await call('GET', '/agent/renewal-requests', { agent: 'agent-a' });
+    assert.equal(inbox.json.data.find((r) => r.id === created.json.data.id).status, 'cancelled');
+    const notes = (await call('GET', '/subscriber/notifications', { account: 'acc-1' })).json.data;
+    assert.equal(notes[0].kind, 'system');
+    assert.equal(notes[0].title, 'انتهى ربط اشتراكك');
+    // ربط جديد لنفس السجل يستطيع طلب التجديد (لا قفل معلّق).
+    const again = await linkAccount(call, 'acc-1');
+    const renew = await call('POST', '/subscriber/renewals', {
+      account: 'acc-1',
+      key: 'key-22222222',
+      body: { subscription_id: again.id, package_id: again.package_id },
+    });
+    assert.equal(renew.status, 200, JSON.stringify(renew.json));
+  });
+});
+
+test('a subscriber removed by the agent loses access and is told, even with a published summary', async () => {
+  const { app, db } = setup();
+  await withServer(app, async (call) => {
+    const sub = await linkAccount(call);
+    await call('PUT', '/agent/subscriber-summaries/sub-1', {
+      agent: 'agent-a',
+      body: { subscriber_name: 'علي', package_name: 'Fiber 50', price: 35000, end_date: '2026-12-01T00:00:00.000' },
+    });
+    // الوكيل حذف المشترك؛ بقي مشترك آخر في القائمة.
+    await db.set('agents/agent-a/subscribers', [{ subscriberId: 'sub-2', name: 'بلا هاتف', phone: '' }]);
+    const me = await call('GET', '/me', { account: 'acc-1' });
+    assert.equal(me.json.data.subscriptions.length, 0);
+    const gone = await call('GET', `/subscriber/subscription?subscription_id=${sub.id}`, { account: 'acc-1' });
+    assert.equal(gone.json.error, 'subscription_not_found');
+    const notes = (await call('GET', '/subscriber/notifications', { account: 'acc-1' })).json.data;
+    assert.equal(notes[0].title, 'انتهى ربط اشتراكك');
+    assert.equal(notes.filter((n) => n.title === 'انتهى ربط اشتراكك').length, 1, 'told once');
+    const links = await call('GET', '/agent/subscriber-links', { agent: 'agent-a' });
+    assert.deepEqual(links.json.data, []);
+  });
+});
+
+test('an empty subscriber list never unlinks anyone (could be a bad save, not deletions)', async () => {
+  const { app, db } = setup();
+  await withServer(app, async (call) => {
+    await linkAccount(call);
+    await call('PUT', '/agent/subscriber-summaries/sub-1', {
+      agent: 'agent-a',
+      body: { subscriber_name: 'علي', package_name: 'Fiber 50', price: 35000, end_date: '2026-12-01T00:00:00.000' },
+    });
+    await db.set('agents/agent-a/subscribers', null);
+    const me = await call('GET', '/me', { account: 'acc-1' });
+    assert.equal(me.json.data.subscriptions.length, 1);
+    const links = await call('GET', '/agent/subscriber-links', { agent: 'agent-a' });
+    assert.equal(links.json.data.length, 1);
+  });
 });

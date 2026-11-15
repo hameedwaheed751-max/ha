@@ -297,6 +297,8 @@ function loadConfig(env = process.env) {
         pepper,
         // مشروع Firebase للمشتركين لا يحتاج مفتاحاً للتحقق من التوكن. فارغ = الدخول غير مفعّل بعد.
         firebaseProjectId: String(env.SUBSCRIBER_FIREBASE_PROJECT_ID || '').trim(),
+        // مسار ملف مفتاح خدمة mushtarak-net (لا محتواه): استعادة كلمة المرور والإشعار الفوري.
+        serviceAccountFile: String(env.SUBSCRIBER_SERVICE_ACCOUNT_FILE || '').trim(),
       };
     })(),
     // Orphan product/store image sweeper. Off until explicitly enabled; deletes
@@ -879,6 +881,60 @@ function createApp({
   return app;
 }
 
+// مفتاح خدمة مشروع المشتركين (mushtarak-net) من ملف على قرص البيانات. يُرفض
+// أي مفتاح لمشروع آخر حتى لا يوضع مفتاح الوكلاء هنا خطأً.
+function readSubscriberServiceAccount(file, expectedProjectId) {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (_) {
+    throw new Error('Subscriber service account file is missing or not valid JSON.');
+  }
+  if (parsed?.type !== 'service_account' || !parsed.private_key || !parsed.client_email) {
+    throw new Error('Subscriber service account file is not a Firebase service account key.');
+  }
+  if (parsed.project_id !== expectedProjectId) {
+    throw new Error(`Subscriber service account must belong to ${expectedProjectId}.`);
+  }
+  return parsed;
+}
+
+// استعادة كلمة المرور والإشعار الفوري لمشتركي مشترك نت (Admin SDK للمشروع المستقل).
+function createSubscriberAccountAdmin({ auth, messaging }) {
+  return {
+    async setPassword(phone, password) {
+      let user;
+      try {
+        user = await auth.getUserByEmail(`${phone}@phone.mushtarak.net`);
+      } catch (error) {
+        if (error?.code === 'auth/user-not-found') return false;
+        throw error;
+      }
+      await auth.updateUser(user.uid, { password });
+      return true;
+    },
+    async sendPush(tokens, { title, body, data = {} }) {
+      if (tokens.length === 0) return { invalidTokens: [] };
+      const result = await messaging.sendEachForMulticast({
+        tokens,
+        notification: { title, body },
+        data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v ?? '')])),
+        android: { priority: 'high' },
+      });
+      const dead = new Set([
+        'messaging/registration-token-not-registered',
+        'messaging/invalid-registration-token',
+        'messaging/invalid-argument',
+      ]);
+      return {
+        invalidTokens: result.responses
+          .map((r, i) => (!r.success && dead.has(r.error?.code) ? tokens[i] : null))
+          .filter(Boolean),
+      };
+    },
+  };
+}
+
 function start() {
   const config = loadConfig();
   const { initializeApp, applicationDefault, getApps } = require('firebase-admin/app');
@@ -910,15 +966,37 @@ function start() {
   if (config.subscriberPortal.enabled) {
     const { createSubscriberPortal } = require('./subscriber_portal');
     const { firebaseDb } = require('./portal_db');
+    const portalConfig = config.subscriberPortal;
+    let subscriberApp = null;
+    let accountAdmin = null;
+    if (portalConfig.firebaseProjectId) {
+      const { cert } = require('firebase-admin/app');
+      const key = portalConfig.serviceAccountFile
+        ? readSubscriberServiceAccount(portalConfig.serviceAccountFile, portalConfig.firebaseProjectId)
+        : null;
+      subscriberApp = getApps().find((a) => a.name === 'subscribers') ||
+        initializeApp(
+          key
+            ? { credential: cert(key), projectId: portalConfig.firebaseProjectId }
+            : { projectId: portalConfig.firebaseProjectId },
+          'subscribers',
+        );
+      if (key) {
+        const { getMessaging } = require('firebase-admin/messaging');
+        accountAdmin = createSubscriberAccountAdmin({
+          auth: getAuth(subscriberApp),
+          messaging: getMessaging(subscriberApp),
+        });
+      }
+    }
     subscriberPortal = createSubscriberPortal({
       db: firebaseDb(database),
-      pepper: config.subscriberPortal.pepper,
-      // الوكيل المنتهي لا يستقبل طلبات تجديد (نفس قاعدة R1).
+      pepper: portalConfig.pepper,
+      // الوكيل المنتهي لا يستقبل طلبات تجديد ولا تذكيرات (نفس قاعدة R1).
       isAgentEligible: authorizeAccount,
+      accountAdmin,
     });
-    if (config.subscriberPortal.firebaseProjectId) {
-      const subscriberApp = getApps().find((a) => a.name === 'subscribers') ||
-        initializeApp({ projectId: config.subscriberPortal.firebaseProjectId }, 'subscribers');
+    if (subscriberApp) {
       const subscriberAuth = getAuth(subscriberApp);
       authenticateSubscriber = async (req) => {
         const match = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
@@ -929,8 +1007,17 @@ function start() {
       };
     }
     console.log(
-      `Subscriber portal enabled (sign-in ${authenticateSubscriber ? 'configured' : 'not configured'})`,
+      `Subscriber portal enabled (sign-in ${authenticateSubscriber ? 'configured' : 'not configured'}, ` +
+        `service key ${accountAdmin ? 'loaded' : 'not set'})`,
     );
+    // تذكير انتهاء اشتراك المشتركين المربوطين: كل ساعة، وأول مرة بعد دقيقة.
+    const runNotices = () =>
+      subscriberPortal
+        .runExpiryNotices()
+        .then((n) => n && console.log(`Subscriber expiry notices sent: ${n}`))
+        .catch((e) => console.error('Subscriber expiry notices failed:', e?.message || e));
+    setTimeout(runNotices, 60 * 1000).unref();
+    setInterval(runNotices, 60 * 60 * 1000).unref();
   }
   const app = createApp({
     config,
@@ -1029,6 +1116,8 @@ module.exports = {
   isEligibleAgent,
   subscriptionEndMs,
   createAgentAuthorizer,
+  readSubscriberServiceAccount,
+  createSubscriberAccountAdmin,
   isAllowedEventType,
   loadConfig,
   normalizePhone,

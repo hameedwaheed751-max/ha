@@ -137,6 +137,9 @@ function createSubscriberPortal({
   now = Date.now,
   randomBytes = crypto.randomBytes,
   isAgentEligible = async () => true,
+  // يتطلب مفتاح خدمة mushtarak-net: { setPassword(phone, password) → bool,
+  // sendPush(tokens, {title, body, data}) → {invalidTokens} }. بدونه: لا استعادة ولا إشعار فوري.
+  accountAdmin = null,
 }) {
   if (typeof pepper !== 'string' || pepper.length < 32) {
     throw new Error('SUBSCRIBER_PORTAL_PEPPER must be at least 32 characters.');
@@ -185,6 +188,10 @@ function createSubscriberPortal({
     accountRenewals: (accountId) => `${PORTAL}/renewalsByAccount/${accountId}`,
     notifications: (accountId) => `${PORTAL}/notifications/${accountId}`,
     notification: (accountId, id) => `${PORTAL}/notifications/${accountId}/${id}`,
+    devices: (accountId) => `${PORTAL}/devices/${accountId}`,
+    device: (accountId, key) => `${PORTAL}/devices/${accountId}/${key}`,
+    noticeSent: (accountId, key) => `${PORTAL}/expiryNotices/${accountId}/${key}`,
+    allRecords: () => `${PORTAL}/recordIndex`,
   };
 
   async function findRecord(agentUid, subscriberId) {
@@ -385,10 +392,18 @@ function createSubscriberPortal({
   }
 
   async function loadSubscription(link) {
-    const [summary, office] = await Promise.all([
+    const [summary, office, subscribers] = await Promise.all([
       db.get(paths.summary(link.agentUid, link.subscriberId)),
       officeOf(link.agentUid),
+      db.get(`agents/${link.agentUid}/subscribers`).then(listOf),
     ]);
+    const record = subscribers.find((s) => s && s.subscriberId === link.subscriberId) || null;
+    // حذفه الوكيل: ينتهي الربط ولا تبقى بيانات قديمة ظاهرة. قائمة فارغة كلياً لا
+    // تُعامل كحذف، فقد تكون حفظاً ناقصاً لا قراراً من الوكيل.
+    if (!record && subscribers.length > 0) {
+      await detach(link.agentUid, link.subscriberId);
+      return null;
+    }
     const { lastSasSync, ...agent } = office;
     let fields;
     if (summary) {
@@ -405,7 +420,6 @@ function createSubscriberPortal({
       };
     } else {
       // قبل أول ملخص من تطبيق الوكيل: الحقول الأساسية من السجل فقط، بلا مالية.
-      const record = await findRecord(link.agentUid, link.subscriberId);
       if (!record) return null;
       fields = {
         subscriber_name: text(record.name),
@@ -531,6 +545,124 @@ function createSubscriberPortal({
       subscription_id: subscriptionId,
       target,
     });
+    await pushToDevices(accountId, {
+      title,
+      body,
+      data: {
+        kind,
+        notification_id: id,
+        subscription_id: subscriptionId,
+        target_kind: target?.kind || '',
+        target_id: target?.id || '',
+      },
+    });
+  }
+
+  // الإشعار الفوري لا يُفشل العملية أبداً: الإشعار محفوظ في التطبيق على أي حال.
+  async function pushToDevices(accountId, message) {
+    if (!accountAdmin?.sendPush) return;
+    try {
+      const devices = entriesOf(await db.get(paths.devices(accountId)));
+      if (devices.length === 0) return;
+      const { invalidTokens = [] } = await accountAdmin.sendPush(
+        devices.map(([, d]) => d.token),
+        message,
+      );
+      const dead = new Set(invalidTokens);
+      const patch = {};
+      for (const [key, d] of devices) if (dead.has(d.token)) patch[key] = null;
+      if (Object.keys(patch).length) await db.update(paths.devices(accountId), patch);
+    } catch (error) {
+      console.error('subscriber push failed:', error?.message || error);
+    }
+  }
+
+  async function registerDevice(accountId, { token, platform }) {
+    const value = typeof token === 'string' ? token.trim() : '';
+    if (value.length < 20 || value.length > 4096) fail(400, 'validation_failed');
+    const existing = entriesOf(await db.get(paths.devices(accountId)));
+    const patch = {
+      [shortHash(`device/${value}`)]: {
+        token: value,
+        platform: text(platform, 20) || 'android',
+        updatedAt: iso(),
+      },
+    };
+    // خمسة أجهزة كحد أقصى لكل حساب: الأقدم يُحذف.
+    const others = existing
+      .filter(([key]) => key !== shortHash(`device/${value}`))
+      .sort((a, b) => (a[1].updatedAt < b[1].updatedAt ? 1 : -1));
+    for (const [key] of others.slice(4)) patch[key] = null;
+    await db.update(paths.devices(accountId), patch);
+    return null;
+  }
+
+  // --- استعادة كلمة المرور بدعوة من الوكيل ---
+
+  async function resetPasswordWithInvitation({ code, phone, newPassword }) {
+    if (!accountAdmin?.setPassword) fail(503, 'reset_unavailable');
+    const { invitation } = await resolveInvitation(code);
+    checkInvitationUsable(invitation);
+    const normalized = normalizePhone(phone);
+    if (!normalized || hash(`phone/${normalized}`) !== invitation.phoneHash) {
+      fail(403, 'phone_mismatch');
+    }
+    const password = typeof newPassword === 'string' ? newPassword : '';
+    if (password.length < 6 || password.length > 128) fail(400, 'validation_failed');
+    if (!(await accountAdmin.setPassword(normalized, password))) fail(404, 'account_not_found');
+    return null;
+  }
+
+  // --- تذكير انتهاء الاشتراك للمشتركين المربوطين ---
+  // مرة قبل الانتهاء بثلاثة أيام ومرة عند الانتهاء، لكل فترة اشتراك. الوكيل المنتهي
+  // لا تُرسل تذكيرات مشتركيه حتى يجدد (قرار المالك 2026-11-14).
+  async function runExpiryNotices() {
+    let sent = 0;
+    const DAY = 24 * 60 * 60 * 1000;
+    for (const [agentUid, records] of entriesOf(await db.get(paths.allRecords()))) {
+      if (!(await isAgentEligible(agentUid))) continue;
+      for (const [subscriberId, record] of entriesOf(records)) {
+        try {
+          const linkId = linkIdFor(agentUid, subscriberId);
+          const loaded = await loadSubscription({ linkId, agentUid, subscriberId, linkedAt: record.linkedAt });
+          if (!loaded || loaded.subscription.disabled) continue;
+          const { subscription } = loaded;
+          const end = Date.parse(subscription.end_date);
+          if (Number.isNaN(end)) continue;
+          const left = end - now();
+          let kind = null;
+          if (left > 0 && left <= 3 * DAY) kind = 'expirySoon';
+          else if (left <= 0 && left > -DAY) kind = 'expired';
+          if (!kind) continue;
+          const key = shortHash(`notice/${linkId}/${subscription.end_date}/${kind}`);
+          const claim = await db.transaction(paths.noticeSent(record.accountId, key), (current) =>
+            current ? undefined : iso(),
+          );
+          if (!claim.committed) continue;
+          await notify(record.accountId, kind === 'expirySoon'
+            ? {
+                kind,
+                title: 'اشتراكك ينتهي قريباً',
+                body: `ينتهي اشتراك ${subscription.package_name} في ${subscription.end_date.slice(0, 10)}. اطلب التجديد من التطبيق.`,
+                important: true,
+                subscriptionId: linkId,
+                target: { kind: 'subscription', id: linkId },
+              }
+            : {
+                kind,
+                title: 'انتهى اشتراكك',
+                body: 'اطلب التجديد من التطبيق أو تواصل مع وكيلك.',
+                important: true,
+                subscriptionId: linkId,
+                target: { kind: 'subscription', id: linkId },
+              });
+          sent += 1;
+        } catch (error) {
+          console.error('expiry notice failed:', error?.message || error);
+        }
+      }
+    }
+    return sent;
   }
 
   async function notifications(accountId, limit = 50) {
@@ -802,16 +934,42 @@ function createSubscriberPortal({
     }));
   }
 
-  async function unlink(agentUid, subscriberIdInput) {
-    const subscriberId = requireId(subscriberIdInput);
-    const record = await db.get(paths.record(agentUid, subscriberId));
-    if (!record) fail(404, 'not_linked');
+  // فك الربط من مكان واحد: بزر الوكيل، أو تلقائياً حين يحذف الوكيل المشترك.
+  // يُغلق الطلب المفتوح ويحرر قفله، ويُشعر المشترك مرة واحدة. يُرجع false إن
+  // لم يكن مربوطاً (أو سبقه طلب آخر لفك نفس الربط).
+  async function detach(agentUid, subscriberId) {
+    let removed = null;
+    await db.transaction(paths.record(agentUid, subscriberId), (current) => {
+      removed = current; // آخر استدعاء يحمل القيمة الحقيقية (انظر cancelInvitation).
+      return null;
+    });
+    if (!removed) return false;
+    const openId = await db.get(paths.openRenewal(agentUid, subscriberId));
+    if (openId) {
+      try {
+        await transition(agentUid, openId, ['pending', 'approved', 'processing'], 'cancelled', {}, 'انتهى ربط الاشتراك');
+      } catch (_) {
+        // الطلب أُغلق من قبل؛ القفل يُحرر أدناه على أي حال.
+      }
+    }
     const linkId = linkIdFor(agentUid, subscriberId);
     await db.update(PORTAL, {
-      [`recordIndex/${agentUid}/${subscriberId}`]: null,
-      [`links/${record.accountId}/${linkId}`]: null,
+      [`links/${removed.accountId}/${linkId}`]: null,
       [`summaries/${agentUid}/${subscriberId}`]: null,
+      [`agents/${agentUid}/openRenewals/${subscriberId}`]: null,
     });
+    await notify(removed.accountId, {
+      kind: 'system',
+      title: 'انتهى ربط اشتراكك',
+      body: 'أنهى مكتبك ربط اشتراكك بالتطبيق. للاستفسار تواصل مع مكتبك، أو اطلب منه دعوة جديدة.',
+      important: true,
+    });
+    return true;
+  }
+
+  async function unlink(agentUid, subscriberIdInput) {
+    const subscriberId = requireId(subscriberIdInput);
+    if (!(await detach(agentUid, subscriberId))) fail(404, 'not_linked');
     return null;
   }
 
@@ -864,6 +1022,9 @@ function createSubscriberPortal({
     unlink,
     getSettings,
     putSettings,
+    registerDevice,
+    resetPasswordWithInvitation,
+    runExpiryNotices,
   };
 }
 
@@ -943,6 +1104,15 @@ function createSubscriberPortalRouter({
   // --- مسارات المشترك ---
   router.post('/subscriber/invitations/validate', publicRateLimit, handle((req) =>
     portal.validateInvitation(req.body?.code)));
+  // بلا حساب: الدعوة الصالحة مع رقم المشترك نفسه هما الإثبات. نفس حد التخمين.
+  router.post('/subscriber/account/reset-password', publicRateLimit, handle((req) =>
+    portal.resetPasswordWithInvitation({
+      code: req.body?.code,
+      phone: req.body?.phone,
+      newPassword: req.body?.new_password,
+    })));
+  router.post('/subscriber/devices', ...sub, handle((req) =>
+    portal.registerDevice(account(req), { token: req.body?.token, platform: req.body?.platform })));
   router.post('/subscriber/account/link-existing', ...sub, handle((req) =>
     portal.linkExisting(req.subscriber, req.body?.code)));
   router.get('/me', ...sub, handle((req) => portal.me(req.subscriber)));
