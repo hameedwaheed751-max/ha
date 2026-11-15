@@ -208,17 +208,49 @@ class _SubscriberPortalInviteActionState
     future: _enabled,
     builder: (context, snapshot) {
       if (snapshot.data != true) return const SizedBox.shrink();
-      return IconButton(
-        tooltip: 'مشترك نت',
-        onPressed: _busy ? null : _showOptions,
-        icon: _busy
-            ? const SizedBox.square(
-                dimension: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.phone_iphone),
-      );
+      return PortalInviteButton(onPressed: _showOptions, busy: _busy);
     },
+  );
+}
+
+/// أيقونة مشترك نت وتحتها كلمة «دعوة»، داخل بطاقة المشترك الداكنة.
+class PortalInviteButton extends StatelessWidget {
+  const PortalInviteButton({super.key, required this.onPressed, required this.busy});
+
+  final VoidCallback? onPressed;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: 'مشترك نت: دعوة أو إلغاء ربط',
+    child: InkWell(
+      onTap: busy ? null : onPressed,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            busy
+                ? const SizedBox.square(
+                    dimension: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.phone_iphone, color: Colors.white, size: 24),
+            const SizedBox(height: 4),
+            const Text(
+              'دعوة',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    ),
   );
 }
 

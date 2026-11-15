@@ -220,4 +220,46 @@ void main() {
     expect(t.awaitingAgent, isFalse);
     expect(t.messages.single.fromSubscriber, isTrue);
   });
+
+  testWidgets('opening from quick access lands on the support tab with readable tab labels', (tester) async {
+    final client = SubscriberPortalClient(
+      gatewayUrl: 'https://gw.test',
+      getIdToken: () async => 'token',
+      client: MockClient((r) async {
+        Object? data = [];
+        if (r.url.path.endsWith('/portal-settings')) data = {'show_debt': false};
+        if (r.url.path.endsWith('/support-tickets')) {
+          data = [
+            {
+              'id': 't1', 'number': 'T-101', 'subscriber_id': 's1', 'subscriber_name': 'سارة',
+              'category': 'help', 'status': 'open', 'created_at': '2026-11-20T18:00:00Z',
+              'updated_at': '2026-11-20T18:00:00Z', 'messages': [],
+            },
+          ];
+        }
+        return http.Response.bytes(utf8.encode(jsonEncode({'success': true, 'data': data})), 200);
+      }),
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: SubscriberPortalRequestsScreen(client: client, initialTab: 1),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('سارة'), findsOneWidget);
+    final tabBar = tester.widget<TabBar>(find.byType(TabBar));
+    expect(tabBar.labelColor, Colors.white);
+    expect(tabBar.unselectedLabelColor, isNotNull);
+    expect(tabBar.indicatorColor, Colors.white);
+  });
+
+  testWidgets('the invite control in the subscriber card shows its icon with the word دعوة', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: PortalInviteButton(onPressed: null, busy: false)),
+    ));
+    expect(find.text('دعوة'), findsOneWidget);
+    expect(find.byIcon(Icons.phone_iphone), findsOneWidget);
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: PortalInviteButton(onPressed: null, busy: true)),
+    ));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+  });
 }

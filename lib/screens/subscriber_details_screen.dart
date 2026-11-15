@@ -1110,11 +1110,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
       textDirection: TextDirection.rtl,
       child: Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        appBar: AppBar(
-          title: const Text('معلومات المشترك'),
-          centerTitle: true,
-          actions: [SubscriberPortalInviteAction(subscriber: s)],
-        ),
+        appBar: AppBar(title: const Text('معلومات المشترك'), centerTitle: true),
         body: Column(
           children: [
             Container(
@@ -1189,6 +1185,8 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                       ],
                     ),
                   ),
+                  // دعوة مشترك نت أو إلغاء ربطه، داخل البطاقة بجانب الاسم.
+                  SubscriberPortalInviteAction(subscriber: s),
                 ],
               ),
             ),

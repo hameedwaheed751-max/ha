@@ -7,9 +7,12 @@ import 'subscriber_portal_support.dart';
 /// القبول لا يفعّل شيئاً: التفعيل يبقى بزر التفعيل المعتاد، وبعده يصل
 /// «تم التجديد» للمشترك تلقائياً حين يتقدّم تاريخ انتهائه.
 class SubscriberPortalRequestsScreen extends StatefulWidget {
-  const SubscriberPortalRequestsScreen({super.key, this.client});
+  const SubscriberPortalRequestsScreen({super.key, this.client, this.initialTab = 0});
 
   final SubscriberPortalClient? client;
+
+  /// 0 = التجديد، 1 = الدعم (مربع «الدعم الفني» في الوصول السريع يفتح عليه).
+  final int initialTab;
 
   @override
   State<SubscriberPortalRequestsScreen> createState() =>
@@ -226,11 +229,21 @@ class _SubscriberPortalRequestsScreenState
       textDirection: TextDirection.rtl,
       child: DefaultTabController(
         length: 2,
+        initialIndex: widget.initialTab,
         child: Scaffold(
           appBar: AppBar(
             title: const Text('طلبات مشترك نت'),
             centerTitle: true,
-            bottom: const TabBar(tabs: [Tab(text: 'التجديد'), Tab(text: 'الدعم')]),
+            // الشريط أخضر: التسميات بيضاء لتُقرأ، والمؤشر أبيض تحت المحدد.
+            bottom: const TabBar(
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.white70,
+              indicatorColor: Colors.white,
+              indicatorWeight: 3,
+              dividerColor: Colors.transparent,
+              labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              tabs: [Tab(text: 'التجديد'), Tab(text: 'الدعم')],
+            ),
           ),
           body: TabBarView(
             children: [

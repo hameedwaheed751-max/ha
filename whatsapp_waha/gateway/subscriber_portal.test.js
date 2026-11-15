@@ -817,3 +817,14 @@ test('closed tickets accept no more messages, and open tickets per subscriber ar
     assert.equal(open.json.data.length, 5);
   });
 });
+
+test('the agent master account from office settings reaches the subscriber', async () => {
+  const { app, db } = setup();
+  await withServer(app, async (call) => {
+    const sub = await linkAccount(call);
+    assert.equal(sub.agent.master_account, '');
+    await db.set('agents/agent-a/settings/masterAccount', ' 7012 3456 7890 1234 ');
+    const me = await call('GET', '/me', { account: 'acc-1' });
+    assert.equal(me.json.data.subscriptions[0].agent.master_account, '7012 3456 7890 1234');
+  });
+});

@@ -1699,6 +1699,9 @@ class AppStore {
   static String officeName = '';
   static String officePhone = '';
   static String officeAddress = '';
+
+  /// حساب الماستر للوكيل، يظهر للمشترك في تطبيق مشترك نت ضمن «مزوّد الخدمة».
+  static String masterAccount = '';
   static String officeLogoBase64 = '';
   static String receiptFooter = '';
   static String sasUsername = '';
@@ -1947,6 +1950,10 @@ class AppStore {
           if (settings['officeAddress'] != null) {
             officeAddress = settings['officeAddress'].toString();
             await p.setString('officeAddress', officeAddress);
+          }
+          if (settings['masterAccount'] != null) {
+            masterAccount = settings['masterAccount'].toString();
+            await p.setString('masterAccount', masterAccount);
           }
           if (settings['officeLogoBase64'] != null) {
             officeLogoBase64 = settings['officeLogoBase64'].toString();
@@ -2304,6 +2311,7 @@ class AppStore {
     officeName = '';
     officePhone = '';
     officeAddress = '';
+    masterAccount = '';
     officeLogoBase64 = '';
     receiptFooter = '';
     balance = 0;
@@ -2344,6 +2352,7 @@ class AppStore {
       'officeName',
       'officePhone',
       'officeAddress',
+      'masterAccount',
       'officeLogoBase64',
       'receiptFooter',
       'balance',
@@ -2480,6 +2489,7 @@ class AppStore {
     officeName = p.getString('officeName') ?? '';
     officePhone = p.getString('officePhone') ?? '';
     officeAddress = p.getString('officeAddress') ?? '';
+    masterAccount = p.getString('masterAccount') ?? '';
     officeLogoBase64 = p.getString('officeLogoBase64') ?? '';
     receiptFooter = p.getString('receiptFooter') ?? '';
     balance = p.getDouble('balance') ?? 0;
@@ -3169,6 +3179,7 @@ class AppStore {
     await p.setString('officeName', officeName);
     await p.setString('officePhone', officePhone);
     await p.setString('officeAddress', officeAddress);
+    await p.setString('masterAccount', masterAccount);
     await p.setString('officeLogoBase64', officeLogoBase64);
     await p.setString('receiptFooter', receiptFooter);
     await p.setDouble('balance', balance);
@@ -3257,6 +3268,7 @@ class AppStore {
         'settings/officeName': officeName,
         'settings/officePhone': officePhone,
         'settings/officeAddress': officeAddress,
+        'settings/masterAccount': masterAccount,
         'settings/officeLogoBase64': officeLogoBase64,
         'settings/receiptFooter': receiptFooter,
         'settings/balance': balance,
@@ -3353,6 +3365,10 @@ class AppStore {
               if (settings['officeAddress'] != null) {
                 officeAddress = settings['officeAddress'].toString();
                 await p.setString('officeAddress', officeAddress);
+              }
+              if (settings['masterAccount'] != null) {
+                masterAccount = settings['masterAccount'].toString();
+                await p.setString('masterAccount', masterAccount);
               }
               if (settings['officeLogoBase64'] != null) {
                 officeLogoBase64 = settings['officeLogoBase64'].toString();

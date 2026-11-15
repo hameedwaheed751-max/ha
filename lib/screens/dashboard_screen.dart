@@ -2169,9 +2169,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                         const SizedBox(height: 16),
                         _sectionTitle('الوصول السريع', Icons.bolt_rounded),
                         const SizedBox(height: 8),
-                        ValueListenableBuilder<int>(
-                          valueListenable: AppStore.chatMessagesChange,
-                          builder: (context, _, __) => _quickActionsGrid(),
+                        ListenableBuilder(
+                          listenable: Listenable.merge([
+                            AppStore.chatMessagesChange,
+                            SubscriberPortalSync.instance.openRequests,
+                          ]),
+                          builder: (context, _) => _quickActionsGrid(),
                         ),
                         const SizedBox(height: 16),
                         _financialStatus(daySummary),
@@ -2576,6 +2579,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     final colors = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final chatUnreadCount = AppStore.unreadChatCount;
+    final supportCount = SubscriberPortalSync.instance.openRequests.value;
     final actions = <(String, String, Color, VoidCallback)>[
       (
         'تسديد الديون',
@@ -2625,6 +2629,14 @@ class _DashboardScreenState extends State<DashboardScreen>
         const Color(0xFF1261A6),
         () => _pushDashboard(const SpeedTestScreen()),
       ),
+      // طلبات مشترك نت وتذاكره، يفتح على تبويب الدعم.
+      (
+        'الدعم الفني',
+        'support',
+        const Color(0xFF2E7D32),
+        () =>
+            _pushDashboard(const SubscriberPortalRequestsScreen(initialTab: 1)),
+      ),
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -2635,99 +2647,109 @@ class _DashboardScreenState extends State<DashboardScreen>
           runSpacing: 8,
           children: [
             for (final action in actions)
-              SizedBox(
-                width: width,
-                child: InkWell(
-                  onTap: action.$4,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    constraints: const BoxConstraints(minHeight: 102),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 9,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? const Color(0xFF1E293B)
-                          : const Color(0xFFFFFFFF),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.08)
-                            : const Color(0xFFE3EDE5),
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x140B5D2E),
-                          blurRadius: 8,
-                          offset: Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Image.asset(
-                              _referenceAssetPath(_dashboardIcon(action.$2)),
-                              width: 42,
-                              height: 42,
-                              fit: BoxFit.contain,
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              action.$1,
-                              maxLines: 2,
-                              textAlign: TextAlign.center,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: colors.onSurface,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (action.$1 == 'الدردشة' && chatUnreadCount > 0)
-                          Positioned(
-                            top: -4,
-                            right: -4,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              constraints: const BoxConstraints(minWidth: 22),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFD32F2F),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: Colors.white,
-                                  width: 1.5,
-                                ),
-                              ),
-                              child: Text(
-                                chatUnreadCount > 99
-                                    ? '99+'
-                                    : '$chatUnreadCount',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
+              _quickTile(
+                action,
+                switch (action.$1) {
+                  'الدردشة' => chatUnreadCount,
+                  'الدعم الفني' => supportCount,
+                  _ => 0,
+                },
+                width,
+                colors,
+                isDark,
               ),
           ],
         );
       },
+    );
+  }
+
+  Widget _quickTile(
+    (String, String, Color, VoidCallback) action,
+    int badgeCount,
+    double width,
+    ColorScheme colors,
+    bool isDark,
+  ) {
+    return SizedBox(
+      width: width,
+      child: InkWell(
+        onTap: action.$4,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 102),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFFFFFFF),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : const Color(0xFFE3EDE5),
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x140B5D2E),
+                blurRadius: 8,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Image.asset(
+                    _referenceAssetPath(_dashboardIcon(action.$2)),
+                    width: 42,
+                    height: 42,
+                    fit: BoxFit.contain,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    action.$1,
+                    maxLines: 2,
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: colors.onSurface,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+              if (badgeCount > 0)
+                Positioned(
+                  top: -4,
+                  right: -4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    constraints: const BoxConstraints(minWidth: 22),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD32F2F),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white, width: 1.5),
+                    ),
+                    child: Text(
+                      badgeCount > 99 ? '99+' : '$badgeCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

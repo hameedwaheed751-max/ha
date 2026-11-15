@@ -213,6 +213,8 @@ function createSubscriberPortal({
       office_name: text(settings?.officeName) || 'مكتب الوكيل',
       phone: text(settings?.officePhone, 30),
       address: text(settings?.officeAddress),
+      // حساب الماستر الذي يكتبه الوكيل في «إعدادات المكتب» ليدفع عليه مشتركوه.
+      master_account: text(settings?.masterAccount, 60),
       show_debt: portalSettings?.showDebt === true,
       allow_package_change: false,
       lastSasSync: isoOrNull(settings?.lastSasSync),

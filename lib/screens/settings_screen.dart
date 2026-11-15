@@ -15,7 +15,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late final TextEditingController name, phone, address, footer;
+  late final TextEditingController name, phone, address, master, footer;
   bool _isSaving = false;
   bool _isBackupBusy = false;
   bool? _saveFailed;
@@ -27,6 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     name = TextEditingController(text: AppStore.officeName);
     phone = TextEditingController(text: AppStore.officePhone);
     address = TextEditingController(text: AppStore.officeAddress);
+    master = TextEditingController(text: AppStore.masterAccount);
     footer = TextEditingController(text: AppStore.receiptFooter);
   }
 
@@ -35,6 +36,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     name.dispose();
     phone.dispose();
     address.dispose();
+    master.dispose();
     footer.dispose();
     super.dispose();
   }
@@ -70,6 +72,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       AppStore.officeName = name.text.trim();
       AppStore.officePhone = phone.text.trim();
       AppStore.officeAddress = address.text.trim();
+      AppStore.masterAccount = master.text.trim();
       AppStore.receiptFooter = footer.text.trim();
       await AppStore.save();
       if (!mounted) return;
@@ -172,6 +175,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         name.text = AppStore.officeName;
         phone.text = AppStore.officePhone;
         address.text = AppStore.officeAddress;
+        master.text = AppStore.masterAccount;
         footer.text = AppStore.receiptFooter;
       });
       ScaffoldMessenger.of(context).showSnackBar(
@@ -250,6 +254,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 12),
           TextField(controller: address, decoration: dec('عنوان المكتب')),
+          const SizedBox(height: 12),
+          // يظهر للمشترك في تطبيق مشترك نت ضمن «مزوّد الخدمة».
+          TextField(
+            controller: master,
+            maxLength: 60,
+            decoration: dec('حساب الماستر').copyWith(
+              helperText: 'يظهر لمشتركيك في تطبيق مشترك نت ليدفعوا عليه',
+              counterText: '',
+            ),
+          ),
           const SizedBox(height: 22),
           _sectionTitle('تفاصيل الإيصال', Icons.receipt_long_outlined),
           const SizedBox(height: 12),
