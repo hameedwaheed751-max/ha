@@ -264,7 +264,10 @@ function createSubscriberPortal({
     let state = null;
     const result = await db.transaction(paths.invitation(agentUid, id), (current) => {
       state = current ? current.status : null;
-      if (!current || current.status !== 'pending') return undefined;
+      // null في أول استدعاء يعني «لا نسخة محلية» لا «غير موجود»: كتابة فارغة
+      // يعيدها Firebase بالقيمة الحقيقية. undefined تُلغي المعاملة نهائياً.
+      if (!current) return null;
+      if (current.status !== 'pending') return undefined;
       return { ...current, status: 'cancelled' };
     });
     if (!state) fail(404, 'not_found');
@@ -329,15 +332,16 @@ function createSubscriberPortal({
     let redeemState = null;
     const redeem = await db.transaction(paths.invitation(agentUid, id), (current) => {
       redeemState = current ? current.status : null;
-      if (current && current.status === 'redeemed' && current.redeemedBy === identity.accountId) {
+      if (!current) return null; // انظر cancelInvitation: ليست «غير موجودة».
+      if (current.status === 'redeemed' && current.redeemedBy === identity.accountId) {
         return current;
       }
-      if (!current || current.status !== 'pending' || Date.parse(current.expiresAt) <= now()) {
+      if (current.status !== 'pending' || Date.parse(current.expiresAt) <= now()) {
         return undefined;
       }
       return { ...current, status: 'redeemed', redeemedAt: linkedAt, redeemedBy: identity.accountId };
     });
-    if (!redeem.committed) {
+    if (!redeem.committed || !redeem.value) {
       if (claimedNow) await db.set(paths.record(agentUid, subscriberId), null);
       if (redeemState === 'redeemed') fail(409, 'invitation_used');
       if (redeemState === 'cancelled') fail(410, 'invitation_cancelled');
@@ -672,7 +676,8 @@ function createSubscriberPortal({
     let previous = null;
     const result = await db.transaction(paths.renewal(agentUid, id), (current) => {
       previous = current ? current.status : null;
-      if (!current || !allowed.includes(current.status)) return undefined;
+      if (!current) return null; // انظر cancelInvitation: ليست «غير موجودة».
+      if (!allowed.includes(current.status)) return undefined;
       const at = iso();
       return {
         ...current,
@@ -687,7 +692,7 @@ function createSubscriberPortal({
     const request = result.value;
     if (!OPEN_RENEWAL.has(status)) {
       await db.transaction(paths.openRenewal(agentUid, request.subscriberId), (current) =>
-        current === id ? null : undefined,
+        current === null || current === id ? null : undefined,
       );
     }
     return request;

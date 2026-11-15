@@ -56,10 +56,17 @@ class MemoryDb {
     }
   }
 
-  // fn تُرجع القيمة الجديدة، أو undefined لإلغاء المعاملة.
+  // يحاكي Realtime Database كما هي في Admin SDK: أول استدعاء لـ fn يكون بقيمة
+  // null (لا نسخة محلية)، ثم يُعاد بالقيمة الحقيقية إن اختلفت. undefined يلغي
+  // المعاملة فوراً حتى في الاستدعاء الأول.
   async transaction(path, fn) {
-    const next = fn(clone(this._read(path)));
-    if (next === undefined) return { committed: false, value: clone(this._read(path)) };
+    const actual = clone(this._read(path));
+    let next = fn(null);
+    if (next === undefined) return { committed: false, value: actual };
+    if (JSON.stringify(actual) !== JSON.stringify(null)) {
+      next = fn(clone(actual));
+      if (next === undefined) return { committed: false, value: actual };
+    }
     this._write(path, next);
     return { committed: true, value: clone(next) };
   }
