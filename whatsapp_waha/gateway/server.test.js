@@ -859,3 +859,25 @@ test('enabled portal agent routes reject ineligible agents and serve eligible on
     temp.cleanup();
   }
 });
+
+test('browser preflight allows PUT for the subscriber portal summary and settings routes', async () => {
+  const temp = createTempStore();
+  const app = createApp({
+    config: testConfig(temp.filePath),
+    verifyIdToken: async () => ({ uid: 'uid-agent-a' }),
+    authorizeAccount: async () => true,
+    fetchImpl: createWahaStub().fetchImpl,
+  });
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/v1/agent/portal-settings`, {
+        method: 'OPTIONS',
+        headers: { Origin: 'http://localhost:60518', 'Access-Control-Request-Method': 'PUT' },
+      });
+      assert.equal(response.status, 204);
+      assert.match(response.headers.get('access-control-allow-methods'), /\bPUT\b/);
+    });
+  } finally {
+    temp.cleanup();
+  }
+});
