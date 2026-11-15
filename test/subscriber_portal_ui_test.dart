@@ -82,4 +82,44 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('خدمة مشترك نت غير مفعّلة بعد'), findsOneWidget);
   });
+
+  test('an already-linked record is unlinked and re-invited only after the agent confirms', () async {
+    final calls = <String>[];
+    var linked = true;
+    final client = SubscriberPortalClient(
+      gatewayUrl: 'https://gw.test',
+      getIdToken: () async => 'token',
+      client: MockClient((r) async {
+        calls.add('${r.method} ${r.url.path}');
+        if (r.method == 'DELETE') {
+          linked = false;
+          return http.Response(jsonEncode({'success': true, 'data': null}), 200);
+        }
+        if (linked) {
+          return http.Response(
+            jsonEncode({'success': false, 'error': 'record_already_linked'}),
+            409,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'success': true,
+            'data': {
+              'id': 'i1',
+              'code': 'ABCD2345',
+              'masked_phone': '67',
+              'expires_at': '2026-11-17T10:00:00Z',
+            },
+          }),
+          200,
+        );
+      }),
+    );
+    final refused = await inviteWithRelink(client, 's1', confirmRelink: () async => false);
+    expect(refused, isNull);
+    expect(calls.where((c) => c.startsWith('DELETE')), isEmpty);
+    final invitation = await inviteWithRelink(client, 's1', confirmRelink: () async => true);
+    expect(invitation?.code, 'ABCD2345');
+    expect(calls, contains('DELETE /api/v1/agent/subscriber-links/s1'));
+  });
 }

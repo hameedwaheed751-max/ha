@@ -28,6 +28,23 @@ String? whatsappNumber(String phone) {
   return digits.length >= 12 ? digits : null;
 }
 
+/// ينشئ دعوة. إن كان السجل مربوطاً بجهاز سابق (حذف المشترك التطبيق مثلاً)
+/// يُفك الربط ويُعاد الإنشاء، لكن فقط بعد تأكيد الوكيل. null = تراجع الوكيل.
+Future<PortalInvitation?> inviteWithRelink(
+  SubscriberPortalClient client,
+  String subscriberId, {
+  required Future<bool> Function() confirmRelink,
+}) async {
+  try {
+    return await client.createInvitation(subscriberId);
+  } on PortalException catch (e) {
+    if (e.code != 'record_already_linked') rethrow;
+    if (!await confirmRelink()) return null;
+    await client.unlink(subscriberId);
+    return client.createInvitation(subscriberId);
+  }
+}
+
 /// زر «دعوة لمشترك نت» في شريط معلومات المشترك. يظهر لحساب التجربة فقط.
 class SubscriberPortalInviteAction extends StatefulWidget {
   const SubscriberPortalInviteAction({super.key, required this.subscriber});
@@ -52,10 +69,13 @@ class _SubscriberPortalInviteActionState
     }
     setState(() => _busy = true);
     try {
-      final invitation = await SubscriberPortalSync.instance.client
-          .createInvitation(s.subscriberId);
+      final invitation = await inviteWithRelink(
+        SubscriberPortalSync.instance.client,
+        s.subscriberId,
+        confirmRelink: _confirmRelink,
+      );
       SubscriberPortalSync.instance.markLinksStale();
-      if (!mounted) return;
+      if (!mounted || invitation == null) return;
       await showDialog<void>(
         context: context,
         builder: (_) => _InvitationDialog(subscriber: s, invitation: invitation),
@@ -66,6 +86,32 @@ class _SubscriberPortalInviteActionState
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  Future<bool> _confirmRelink() async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            title: const Text('المشترك مرتبط مسبقاً'),
+            content: const Text(
+              'هذا المشترك مربوط بتطبيق مشترك نت على جهاز آخر. '
+              'إنشاء دعوة جديدة يفك ذلك الربط، ولن يرى الجهاز القديم الاشتراك بعدها.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('تراجع'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('فك الربط وإنشاء دعوة'),
+              ),
+            ],
+          ),
+        ),
+      ) ??
+      false;
 
   void _snack(String text) {
     if (!mounted) return;
