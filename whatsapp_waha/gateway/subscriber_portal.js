@@ -39,6 +39,18 @@ function normalizePhone(value) {
   return phone;
 }
 
+// حساب «الهاتف وكلمة المرور» في مشروع mushtarak-net معرّفه الداخلي
+// <964…>@phone.mushtarak.net. الربط يقارن هذا الرقم برقم المشترك عند الوكيل.
+const ACCOUNT_EMAIL_PATTERN = /^(964\d{9,11})@phone\.mushtarak\.net$/i;
+
+function accountPhoneFromToken(decoded) {
+  if (decoded && typeof decoded.phone_number === 'string' && decoded.phone_number) {
+    return normalizePhone(decoded.phone_number);
+  }
+  const match = ACCOUNT_EMAIL_PATTERN.exec(String(decoded?.email || ''));
+  return match ? match[1] : '';
+}
+
 function normalizeCode(value) {
   return String(value || '').toUpperCase().replace(/[\s-]/g, '');
 }
@@ -974,6 +986,7 @@ module.exports = {
   createSubscriberPortal,
   createSubscriberPortalRouter,
   normalizeCode,
+  accountPhoneFromToken,
   sanitizeSummary,
   PortalError,
 };

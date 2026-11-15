@@ -527,3 +527,13 @@ test('the agent inbox carries the end date at request time, to detect the real a
     assert.equal('previous_end_date' in mine.json.data[0], false);
   });
 });
+
+test('the account phone comes from the phone-number sign-in id, never from other emails', () => {
+  const { accountPhoneFromToken } = require('./subscriber_portal');
+  assert.equal(accountPhoneFromToken({ email: '9647701234567@phone.mushtarak.net' }), '9647701234567');
+  assert.equal(accountPhoneFromToken({ email: '9647701234567@PHONE.mushtarak.net' }), '9647701234567');
+  assert.equal(accountPhoneFromToken({ phone_number: '+9647701234567' }), '9647701234567');
+  assert.equal(accountPhoneFromToken({ email: '9647701234567@gmail.com' }), '');
+  assert.equal(accountPhoneFromToken({ email: 'x9647701234567@phone.mushtarak.net' }), '');
+  assert.equal(accountPhoneFromToken({}), '');
+});

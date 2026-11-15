@@ -924,7 +924,8 @@ function start() {
         const match = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
         if (!match) return null;
         const decoded = await subscriberAuth.verifyIdToken(match[1]);
-        return { accountId: decoded.uid, phone: decoded.phone_number || '' };
+        const { accountPhoneFromToken } = require('./subscriber_portal');
+        return { accountId: decoded.uid, phone: accountPhoneFromToken(decoded) };
       };
     }
     console.log(
