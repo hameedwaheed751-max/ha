@@ -564,7 +564,13 @@ function createSubscriberPortal({
   }
 
   function agentRenewalView(id, r) {
-    return { ...renewalView(id, r), subscriber_id: r.subscriberId, subscriber_name: r.subscriberName };
+    return {
+      ...renewalView(id, r),
+      subscriber_id: r.subscriberId,
+      subscriber_name: r.subscriberName,
+      // تطبيق الوكيل يعتبر التجديد منفّذاً حين يتقدّم تاريخ الانتهاء عن هذا.
+      previous_end_date: r.previousEndDate || null,
+    };
   }
 
   async function renewalByKey(accountId, keyHash) {
@@ -606,6 +612,7 @@ function createSubscriberPortal({
       packageName: subscription.package_name,
       // السعر من بيانات الوكيل، وأي سعر يرسله التطبيق يُتجاهل.
       quotedPrice: subscription.price,
+      previousEndDate: subscription.end_date,
       status: 'pending',
       createdAt: at,
       updatedAt: at,

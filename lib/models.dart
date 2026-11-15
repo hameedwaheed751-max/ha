@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'services/user_role_service.dart';
+import 'services/subscriber_portal_service.dart';
 import 'dart:async';
 
 final RegExp _subscriberUuidPattern = RegExp(
@@ -3284,6 +3285,8 @@ class AppStore {
 
       await ref.child('messageTemplates').set(messageTemplates);
       debugPrint('Firebase save completed successfully');
+      // «مشترك نت»: ملخصات المربوطين وإشارة التجديد، في الخلفية وللمدير فقط الآن.
+      SubscriberPortalSync.instance.schedule();
     } catch (e) {
       lastSaveSyncError = e.toString();
       debugPrint('Firebase save failed: $e');

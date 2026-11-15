@@ -1,0 +1,165 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../models.dart';
+import '../services/subscriber_portal_service.dart';
+
+/// نص الدعوة الذي يصل للمشترك. نقيّة.
+String portalInviteMessage({
+  required String subscriberName,
+  required String officeName,
+  required String code,
+}) {
+  final office = officeName.trim().isEmpty ? 'مكتبنا' : officeName.trim();
+  return 'مرحباً ${subscriberName.trim()}،\n'
+      '$office يدعوك لتطبيق «مشترك نت» لمتابعة اشتراكك وطلب التجديد.\n'
+      'رمز الدعوة: $code\n'
+      'الرمز صالح 48 ساعة ولمرة واحدة.';
+}
+
+/// رقم بصيغة wa.me (964…)، أو null إن لم يصلح. نقيّة.
+String? whatsappNumber(String phone) {
+  var digits = phone.replaceAll(RegExp(r'\D'), '');
+  if (digits.startsWith('00')) digits = digits.substring(2);
+  if (digits.startsWith('9640')) digits = '964${digits.substring(4)}';
+  if (digits.startsWith('0')) digits = '964${digits.substring(1)}';
+  if (digits.length == 10 && digits.startsWith('7')) digits = '964$digits';
+  return digits.length >= 12 ? digits : null;
+}
+
+/// زر «دعوة لمشترك نت» في شريط معلومات المشترك. يظهر لحساب التجربة فقط.
+class SubscriberPortalInviteAction extends StatefulWidget {
+  const SubscriberPortalInviteAction({super.key, required this.subscriber});
+
+  final Subscriber subscriber;
+
+  @override
+  State<SubscriberPortalInviteAction> createState() =>
+      _SubscriberPortalInviteActionState();
+}
+
+class _SubscriberPortalInviteActionState
+    extends State<SubscriberPortalInviteAction> {
+  late final Future<bool> _enabled = SubscriberPortalFeature.isEnabled();
+  bool _busy = false;
+
+  Future<void> _invite() async {
+    final s = widget.subscriber;
+    if (s.phone.trim().isEmpty) {
+      _snack('أضف رقم هاتف المشترك أولاً');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final invitation = await SubscriberPortalSync.instance.client
+          .createInvitation(s.subscriberId);
+      SubscriberPortalSync.instance.markLinksStale();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => _InvitationDialog(subscriber: s, invitation: invitation),
+      );
+    } on PortalException catch (e) {
+      _snack(e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _snack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<bool>(
+    future: _enabled,
+    builder: (context, snapshot) {
+      if (snapshot.data != true) return const SizedBox.shrink();
+      return IconButton(
+        tooltip: 'دعوة لتطبيق مشترك نت',
+        onPressed: _busy ? null : _invite,
+        icon: _busy
+            ? const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.phone_iphone),
+      );
+    },
+  );
+}
+
+class _InvitationDialog extends StatelessWidget {
+  const _InvitationDialog({required this.subscriber, required this.invitation});
+
+  final Subscriber subscriber;
+  final PortalInvitation invitation;
+
+  String get _message => portalInviteMessage(
+    subscriberName: subscriber.name,
+    officeName: AppStore.officeName,
+    code: invitation.displayCode,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final number = whatsappNumber(subscriber.phone);
+    final expires = invitation.expiresAt;
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        title: const Text('دعوة لتطبيق مشترك نت'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('أرسل الرمز إلى ${subscriber.name} على الرقم المنتهي بـ '
+                '${invitation.maskedPhone.replaceAll('•', '')}.'),
+            const SizedBox(height: 16),
+            SelectableText(
+              invitation.displayCode,
+              textAlign: TextAlign.center,
+              textDirection: TextDirection.ltr,
+              style: const TextStyle(
+                fontSize: 30,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 4,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'صالح حتى ${expires.year}/${expires.month}/${expires.day} '
+              '${expires.hour.toString().padLeft(2, '0')}:${expires.minute.toString().padLeft(2, '0')}، '
+              'ولمرة واحدة. الرمز لا يظهر مرة أخرى؛ دعوة جديدة تلغي هذا الرمز.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: _message));
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('نُسخت رسالة الدعوة')),
+                );
+              }
+            },
+            child: const Text('نسخ الرسالة'),
+          ),
+          if (number != null)
+            FilledButton.icon(
+              onPressed: () => launchUrl(
+                Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(_message)}'),
+                mode: LaunchMode.externalApplication,
+              ),
+              icon: const Icon(Icons.send),
+              label: const Text('إرسال واتساب'),
+            ),
+        ],
+      ),
+    );
+  }
+}

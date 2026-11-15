@@ -11,6 +11,7 @@ import 'dashboard_widgets.dart';
 import 'manual_entry_flow.dart';
 import 'partial_payment_flow.dart';
 import 'receipt_screen.dart';
+import 'subscriber_portal_invite.dart';
 
 class CancelEntryDialog extends StatefulWidget {
   const CancelEntryDialog({
@@ -1109,7 +1110,11 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
       textDirection: TextDirection.rtl,
       child: Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        appBar: AppBar(title: const Text('معلومات المشترك'), centerTitle: true),
+        appBar: AppBar(
+          title: const Text('معلومات المشترك'),
+          centerTitle: true,
+          actions: [SubscriberPortalInviteAction(subscriber: s)],
+        ),
         body: Column(
           children: [
             Container(

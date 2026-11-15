@@ -46,6 +46,8 @@ import 'partial_payment_flow.dart';
 import 'speed_test_screen.dart';
 import 'ping_screen.dart';
 import 'accounting_reports_screen.dart';
+import 'subscriber_portal_requests_screen.dart';
+import '../services/subscriber_portal_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   final bool isAgentMode;
@@ -1743,6 +1745,28 @@ class _DashboardScreenState extends State<DashboardScreen>
                         ),
                       );
                     },
+                  ),
+                // «مشترك نت»: التجربة على حساب المدير (D11).
+                if (!widget.isAgentMode)
+                  ValueListenableBuilder<int>(
+                    valueListenable: SubscriberPortalSync.instance.openRequests,
+                    builder: (context, open, _) => _drawerTile(
+                      icon: Icons.phone_iphone,
+                      title: 'طلبات مشترك نت',
+                      trailing: open > 0
+                          ? Badge(label: Text('$open'))
+                          : null,
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                const SubscriberPortalRequestsScreen(),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 if (!widget.isAgentMode)
                   _drawerTile(

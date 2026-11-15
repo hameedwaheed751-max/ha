@@ -511,3 +511,19 @@ test('required dates are always ISO strings, because the app cannot parse null',
     }
   });
 });
+
+test('the agent inbox carries the end date at request time, to detect the real activation', async () => {
+  const { app } = setup();
+  await withServer(app, async (call) => {
+    const sub = await linkAccount(call);
+    await call('POST', '/subscriber/renewals', {
+      account: 'acc-1',
+      key: 'key-11111111',
+      body: { subscription_id: sub.id, package_id: sub.package_id },
+    });
+    const inbox = await call('GET', '/agent/renewal-requests', { agent: 'agent-a' });
+    assert.equal(inbox.json.data[0].previous_end_date, '2026-12-01T00:00:00.000');
+    const mine = await call('GET', `/subscriber/renewals?subscription_id=${sub.id}`, { account: 'acc-1' });
+    assert.equal('previous_end_date' in mine.json.data[0], false);
+  });
+});
