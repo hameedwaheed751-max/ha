@@ -128,6 +128,11 @@ void main() {
            'previous_end_date': '2026-12-01T00:00:00.000', 'created_at': '2026-11-20T00:00:00Z'},
         ]);
       }
+      if (r.url.path.endsWith('/support-tickets')) {
+        return _ok([
+          {'id': 't1', 'status': 'open', 'messages': []},
+        ]);
+      }
       if (r.url.path.endsWith('/result')) {
         expect(jsonDecode(r.body)['result'], 'completed');
         return _ok({'id': 'r1', 'status': 'completed'});
@@ -143,7 +148,8 @@ void main() {
     await sync.run();
     expect(calls.where((c) => c.startsWith('PUT')), hasLength(1));
     expect(calls.where((c) => c.endsWith('/r1/result')), hasLength(1));
-    expect(sync.openRequests.value, 1);
+    // طلب تجديد بانتظار الرد + تذكرة بانتظار الرد.
+    expect(sync.openRequests.value, 2);
     await sync.run();
     expect(calls.where((c) => c.startsWith('PUT')), hasLength(1));
     s.name = 'علي حسن';

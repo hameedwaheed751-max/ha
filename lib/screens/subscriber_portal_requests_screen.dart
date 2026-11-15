@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../services/subscriber_portal_service.dart';
+import 'subscriber_portal_support.dart';
 
-/// طلبات التجديد الواردة من تطبيق «مشترك نت».
+/// طلبات التجديد وتذاكر الدعم الواردة من تطبيق «مشترك نت».
 /// القبول لا يفعّل شيئاً: التفعيل يبقى بزر التفعيل المعتاد، وبعده يصل
 /// «تم التجديد» للمشترك تلقائياً حين يتقدّم تاريخ انتهائه.
 class SubscriberPortalRequestsScreen extends StatefulWidget {
@@ -223,9 +224,21 @@ class _SubscriberPortalRequestsScreenState
     }
     return Directionality(
       textDirection: TextDirection.rtl,
-      child: Scaffold(
-        appBar: AppBar(title: const Text('طلبات مشترك نت'), centerTitle: true),
-        body: RefreshIndicator(onRefresh: _load, child: body),
+      child: DefaultTabController(
+        length: 2,
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('طلبات مشترك نت'),
+            centerTitle: true,
+            bottom: const TabBar(tabs: [Tab(text: 'التجديد'), Tab(text: 'الدعم')]),
+          ),
+          body: TabBarView(
+            children: [
+              RefreshIndicator(onRefresh: _load, child: body),
+              SupportTicketsTab(client: _client),
+            ],
+          ),
+        ),
       ),
     );
   }

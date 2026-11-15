@@ -729,3 +729,91 @@ test('an empty subscriber list never unlinks anyone (could be a bad save, not de
     assert.equal(links.json.data.length, 1);
   });
 });
+
+// --- الدعم الفني: تذاكر بين المشترك المربوط ووكيله فقط ---
+
+async function openTicket(call, sub, account = 'acc-1', description = 'الإنترنت ينقطع مساءً') {
+  return call('POST', '/subscriber/support/tickets', {
+    account,
+    body: { subscription_id: sub.id, category: 'connection', description },
+  });
+}
+
+test('a linked subscriber opens a ticket that reaches only their agent', async () => {
+  const { app } = setup();
+  await withServer(app, async (call) => {
+    const sub = await linkAccount(call);
+    const bad = await call('POST', '/subscriber/support/tickets', {
+      account: 'acc-1',
+      body: { subscription_id: sub.id, category: 'connection', description: '' },
+    });
+    assert.equal(bad.json.error, 'validation_failed');
+    const created = await openTicket(call, sub);
+    assert.equal(created.status, 200, JSON.stringify(created.json));
+    const t = created.json.data;
+    assert.match(t.number, /^T-\d+$/);
+    assert.equal(t.status, 'open');
+    assert.equal(t.category, 'connection');
+    assert.equal(t.messages[0].from_subscriber, true);
+    assert.equal(t.messages[0].text, 'الإنترنت ينقطع مساءً');
+    const mine = await call('GET', '/subscriber/support/tickets', { account: 'acc-1' });
+    assert.equal(mine.json.data.length, 1);
+    const stranger = await call('GET', `/subscriber/support/tickets/${t.id}`, { account: 'acc-2' });
+    assert.equal(stranger.status, 404);
+    const inbox = await call('GET', '/agent/support-tickets', { agent: 'agent-a' });
+    assert.equal(inbox.json.data[0].subscriber_name, 'علي حسن');
+    assert.equal(inbox.json.data[0].subscriber_id, 'sub-1');
+    const other = await call('GET', '/agent/support-tickets', { agent: 'agent-b' });
+    assert.deepEqual(other.json.data, []);
+  });
+});
+
+test('the agent replies and the subscriber is notified; a reply from the subscriber reopens it', async () => {
+  const { app } = setup();
+  await withServer(app, async (call) => {
+    const sub = await linkAccount(call);
+    const t = (await openTicket(call, sub)).json.data;
+    const foreign = await call('POST', `/agent/support-tickets/${t.id}/messages`, {
+      agent: 'agent-b',
+      body: { text: 'رد' },
+    });
+    assert.equal(foreign.status, 404);
+    const reply = await call('POST', `/agent/support-tickets/${t.id}/messages`, {
+      agent: 'agent-a',
+      body: { text: 'سنفحص الخط اليوم' },
+    });
+    assert.equal(reply.json.data.status, 'answered');
+    const seen = (await call('GET', `/subscriber/support/tickets/${t.id}`, { account: 'acc-1' })).json.data;
+    assert.equal(seen.messages[1].from_subscriber, false);
+    assert.equal(seen.messages[1].author, 'مكتب النور');
+    const note = (await call('GET', '/subscriber/notifications', { account: 'acc-1' })).json.data[0];
+    assert.equal(note.kind, 'supportReply');
+    assert.deepEqual(note.target, { kind: 'ticket', id: t.id });
+    const back = await call('POST', `/subscriber/support/tickets/${t.id}/messages`, {
+      account: 'acc-1',
+      body: { text: 'شكراً، ما زال ينقطع' },
+    });
+    assert.equal(back.json.data.status, 'open');
+    assert.equal(back.json.data.messages.length, 3);
+  });
+});
+
+test('closed tickets accept no more messages, and open tickets per subscriber are limited', async () => {
+  const { app } = setup();
+  await withServer(app, async (call) => {
+    const sub = await linkAccount(call);
+    const t = (await openTicket(call, sub)).json.data;
+    const closed = await call('POST', `/agent/support-tickets/${t.id}/close`, { agent: 'agent-a' });
+    assert.equal(closed.json.data.status, 'closed');
+    const late = await call('POST', `/subscriber/support/tickets/${t.id}/messages`, {
+      account: 'acc-1',
+      body: { text: 'مرحباً' },
+    });
+    assert.equal(late.json.error, 'invalid_state');
+    for (let i = 0; i < 5; i += 1) assert.equal((await openTicket(call, sub)).status, 200);
+    const sixth = await openTicket(call, sub);
+    assert.equal(sixth.json.error, 'too_many_tickets');
+    const open = await call('GET', '/agent/support-tickets?status=open', { agent: 'agent-a' });
+    assert.equal(open.json.data.length, 5);
+  });
+});

@@ -192,6 +192,10 @@ function createSubscriberPortal({
     device: (accountId, key) => `${PORTAL}/devices/${accountId}/${key}`,
     noticeSent: (accountId, key) => `${PORTAL}/expiryNotices/${accountId}/${key}`,
     allRecords: () => `${PORTAL}/recordIndex`,
+    ticket: (agentUid, id) => `${PORTAL}/agents/${agentUid}/tickets/${id}`,
+    agentTickets: (agentUid) => `${PORTAL}/agents/${agentUid}/tickets`,
+    ticketCounter: (agentUid) => `${PORTAL}/agents/${agentUid}/ticketCounter`,
+    accountTickets: (accountId) => `${PORTAL}/ticketsByAccount/${accountId}`,
   };
 
   async function findRecord(agentUid, subscriberId) {
@@ -917,6 +921,156 @@ function createSubscriberPortal({
     return fail(400, 'validation_failed');
   }
 
+  // --- الدعم الفني ---
+  // التذكرة بين المشترك المربوط ووكيله فقط. حالاتها: open (بانتظار الوكيل)،
+  // answered (ردّ الوكيل)، closed (أغلقها الوكيل؛ لا رسائل بعدها).
+
+  const TICKET_CATEGORIES = new Set(['inquiry', 'connection', 'subscription', 'billing', 'help']);
+  const MAX_OPEN_TICKETS = 5;
+  const MAX_TICKET_MESSAGES = 100;
+
+  function messageText(value) {
+    const t = typeof value === 'string' ? value.trim().slice(0, 1000) : '';
+    if (!t) fail(400, 'validation_failed');
+    return t;
+  }
+
+  function ticketView(id, t) {
+    return {
+      id,
+      number: t.number,
+      subscription_id: t.linkId,
+      category: t.category,
+      status: t.status,
+      created_at: t.createdAt,
+      updated_at: t.updatedAt,
+      messages: listOf(t.messages),
+    };
+  }
+
+  function agentTicketView(id, t) {
+    return { ...ticketView(id, t), subscriber_id: t.subscriberId, subscriber_name: t.subscriberName };
+  }
+
+  async function createTicket(accountId, { subscriptionId, category, description }) {
+    const { link, subscription } = await subscriptionFor(accountId, requireId(subscriptionId));
+    if (!TICKET_CATEGORIES.has(category)) fail(400, 'validation_failed');
+    const text0 = messageText(description);
+    let open = 0;
+    for (const [id, pointer] of entriesOf(await db.get(paths.accountTickets(accountId)))) {
+      const t = await db.get(paths.ticket(pointer.agentUid, id));
+      if (t && t.status !== 'closed') open += 1;
+    }
+    if (open >= MAX_OPEN_TICKETS) fail(409, 'too_many_tickets');
+    const counter = await db.transaction(paths.ticketCounter(link.agentUid), (n) => (Number(n) || 0) + 1);
+    const id = newId();
+    const at = iso();
+    const ticket = {
+      number: `T-${100 + counter.value}`,
+      accountId,
+      linkId: link.linkId,
+      subscriberId: link.subscriberId,
+      subscriberName: subscription.subscriber_name,
+      category,
+      status: 'open',
+      createdAt: at,
+      updatedAt: at,
+      messages: [{ from_subscriber: true, author: subscription.subscriber_name, text: text0, at }],
+    };
+    await db.update(PORTAL, {
+      [`agents/${link.agentUid}/tickets/${id}`]: ticket,
+      [`ticketsByAccount/${accountId}/${id}`]: { agentUid: link.agentUid },
+    });
+    return ticketView(id, ticket);
+  }
+
+  async function accountTicket(accountId, idInput) {
+    const id = requireId(idInput);
+    const pointer = await db.get(`${paths.accountTickets(accountId)}/${id}`);
+    if (!pointer) fail(404, 'not_found');
+    const ticket = await db.get(paths.ticket(pointer.agentUid, id));
+    if (!ticket || ticket.accountId !== accountId) fail(404, 'not_found');
+    return { id, agentUid: pointer.agentUid, ticket };
+  }
+
+  async function listTickets(accountId) {
+    const items = [];
+    for (const [id, pointer] of entriesOf(await db.get(paths.accountTickets(accountId)))) {
+      const t = await db.get(paths.ticket(pointer.agentUid, id));
+      if (t) items.push(ticketView(id, t));
+    }
+    return items.sort((a, b) => (a.id < b.id ? 1 : -1));
+  }
+
+  async function getTicket(accountId, id) {
+    const found = await accountTicket(accountId, id);
+    return ticketView(found.id, found.ticket);
+  }
+
+  // إضافة رسالة بمعاملة ذرية؛ allowed = الحالات المسموح الإضافة فيها.
+  async function appendMessage(agentUid, id, message, status) {
+    let previous = null;
+    const result = await db.transaction(paths.ticket(agentUid, id), (current) => {
+      previous = current ? current.status : null;
+      if (!current) return null; // انظر cancelInvitation: ليست «غير موجودة».
+      const messages = listOf(current.messages);
+      if (current.status === 'closed' || messages.length >= MAX_TICKET_MESSAGES) return undefined;
+      return { ...current, status, updatedAt: message.at, messages: [...messages, message] };
+    });
+    if (!previous) fail(404, 'not_found');
+    if (!result.committed) fail(409, 'invalid_state');
+    return result.value;
+  }
+
+  async function subscriberReply(accountId, idInput, textInput) {
+    const { id, agentUid, ticket } = await accountTicket(accountId, idInput);
+    const message = { from_subscriber: true, author: ticket.subscriberName, text: messageText(textInput), at: iso() };
+    return ticketView(id, await appendMessage(agentUid, id, message, 'open'));
+  }
+
+  async function listAgentTickets(agentUid, status) {
+    return entriesOf(await db.get(paths.agentTickets(agentUid)))
+      .filter(([, t]) => !status || t.status === status)
+      .map(([id, t]) => agentTicketView(id, t))
+      .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
+  }
+
+  async function agentReply(agentUid, idInput, textInput) {
+    const id = requireId(idInput);
+    const office = await officeOf(agentUid);
+    const message = { from_subscriber: false, author: office.office_name, text: messageText(textInput), at: iso() };
+    const ticket = await appendMessage(agentUid, id, message, 'answered');
+    await notify(ticket.accountId, {
+      kind: 'supportReply',
+      title: `ردّ ${office.office_name} على تذكرتك`,
+      body: message.text.slice(0, 120),
+      subscriptionId: ticket.linkId,
+      target: { kind: 'ticket', id },
+    });
+    return agentTicketView(id, ticket);
+  }
+
+  async function closeTicket(agentUid, idInput) {
+    const id = requireId(idInput);
+    let previous = null;
+    const result = await db.transaction(paths.ticket(agentUid, id), (current) => {
+      previous = current ? current.status : null;
+      if (!current) return null;
+      if (current.status === 'closed') return undefined;
+      return { ...current, status: 'closed', updatedAt: iso() };
+    });
+    if (!previous) fail(404, 'not_found');
+    if (!result.committed) fail(409, 'invalid_state');
+    await notify(result.value.accountId, {
+      kind: 'supportReply',
+      title: `أُغلقت التذكرة ${result.value.number}`,
+      body: 'إن بقيت المشكلة افتح تذكرة جديدة من التطبيق.',
+      subscriptionId: result.value.linkId,
+      target: { kind: 'ticket', id },
+    });
+    return agentTicketView(id, result.value);
+  }
+
   // --- ملخصات وروابط الوكيل ---
 
   async function putSummary(agentUid, subscriberIdInput, body) {
@@ -1025,6 +1179,13 @@ function createSubscriberPortal({
     registerDevice,
     resetPasswordWithInvitation,
     runExpiryNotices,
+    createTicket,
+    listTickets,
+    getTicket,
+    subscriberReply,
+    listAgentTickets,
+    agentReply,
+    closeTicket,
   };
 }
 
@@ -1143,6 +1304,22 @@ function createSubscriberPortalRouter({
   router.get('/subscriber/renewals/:id', ...sub, handle((req) => portal.getRenewal(account(req), req.params.id)));
   router.post('/subscriber/renewals/:id/cancel', ...sub, handle((req) =>
     portal.cancelRenewal(account(req), req.params.id)));
+  router.get('/subscriber/support/tickets', ...sub, handle((req) => portal.listTickets(account(req))));
+  router.get('/subscriber/support/tickets/:id', ...sub, handle((req) => portal.getTicket(account(req), req.params.id)));
+  router.post('/subscriber/support/tickets', ...sub, handle((req) =>
+    portal.createTicket(account(req), {
+      subscriptionId: req.body?.subscription_id,
+      category: req.body?.category,
+      description: req.body?.description,
+    })));
+  router.post('/subscriber/support/tickets/:id/messages', ...sub, handle((req) =>
+    portal.subscriberReply(account(req), req.params.id, req.body?.text)));
+  router.get('/agent/support-tickets', requireAgent, handle((req) =>
+    portal.listAgentTickets(req.agentUid, typeof req.query.status === 'string' ? req.query.status : '')));
+  router.post('/agent/support-tickets/:id/messages', requireAgent, handle((req) =>
+    portal.agentReply(req.agentUid, req.params.id, req.body?.text)));
+  router.post('/agent/support-tickets/:id/close', requireAgent, handle((req) =>
+    portal.closeTicket(req.agentUid, req.params.id)));
   router.get('/subscriber/notifications', ...sub, handle((req) => portal.notifications(account(req))));
   router.get('/subscriber/notifications/unread-count', ...sub, handle((req) => portal.unreadCount(account(req))));
   router.post('/subscriber/notifications/read-all', ...sub, handle((req) => portal.markAllRead(account(req))));

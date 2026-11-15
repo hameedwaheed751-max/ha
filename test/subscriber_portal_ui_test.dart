@@ -147,4 +147,77 @@ void main() {
       throwsA(isA<PortalException>().having((e) => e.message, 'message', 'المشترك غير مربوط بتطبيق مشترك نت')),
     );
   });
+
+  testWidgets('the support tab lists tickets, opens one, and sends the agent reply', (tester) async {
+    final posted = <String>[];
+    var status = 'open';
+    final messages = <Map<String, Object>>[
+      {'from_subscriber': true, 'author': 'علي حسن', 'text': 'الإنترنت ينقطع مساءً', 'at': '2026-11-20T18:00:00Z'},
+    ];
+    Map<String, Object> ticket() => {
+      'id': 't1',
+      'number': 'T-101',
+      'subscriber_id': 's1',
+      'subscriber_name': 'علي حسن',
+      'category': 'connection',
+      'status': status,
+      'created_at': '2026-11-20T18:00:00Z',
+      'updated_at': '2026-11-20T18:00:00Z',
+      'messages': messages,
+    };
+    final client = SubscriberPortalClient(
+      gatewayUrl: 'https://gw.test',
+      getIdToken: () async => 'token',
+      client: MockClient((r) async {
+        Object? data;
+        if (r.url.path.endsWith('/portal-settings')) {
+          data = {'show_debt': false};
+        } else if (r.url.path.endsWith('/renewal-requests')) {
+          data = [];
+        } else if (r.method == 'POST' && r.url.path.endsWith('/messages')) {
+          posted.add(r.body);
+          messages.add({'from_subscriber': false, 'author': 'مكتب', 'text': 'سنفحص الخط', 'at': '2026-11-20T19:00:00Z'});
+          status = 'answered';
+          data = ticket();
+        } else if (r.url.path.endsWith('/support-tickets')) {
+          data = [ticket()];
+        }
+        return http.Response.bytes(utf8.encode(jsonEncode({'success': true, 'data': data})), 200);
+      }),
+    );
+    await tester.pumpWidget(MaterialApp(home: SubscriberPortalRequestsScreen(client: client)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('الدعم'));
+    await tester.pumpAndSettle();
+    expect(find.text('علي حسن'), findsOneWidget);
+    expect(find.text('بانتظار ردّك'), findsOneWidget);
+    await tester.tap(find.text('علي حسن'));
+    await tester.pumpAndSettle();
+    expect(find.text('الإنترنت ينقطع مساءً'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'سنفحص الخط');
+    await tester.tap(find.byTooltip('إرسال'));
+    await tester.pumpAndSettle();
+    expect(posted.single, '{"text":"سنفحص الخط"}');
+    expect(find.text('سنفحص الخط'), findsOneWidget);
+  });
+
+  test('tickets parse with labels the agent understands', () {
+    final t = PortalTicket.fromJson({
+      'id': 't1',
+      'number': 'T-101',
+      'subscriber_id': 's1',
+      'subscriber_name': 'علي',
+      'category': 'billing',
+      'status': 'answered',
+      'created_at': '2026-11-20T18:00:00Z',
+      'updated_at': '2026-11-20T19:00:00Z',
+      'messages': [
+        {'from_subscriber': true, 'author': 'علي', 'text': 'سؤال', 'at': '2026-11-20T18:00:00Z'},
+      ],
+    });
+    expect(t.categoryLabel, 'المحاسبة');
+    expect(t.statusLabel, 'تم الرد');
+    expect(t.awaitingAgent, isFalse);
+    expect(t.messages.single.fromSubscriber, isTrue);
+  });
 }

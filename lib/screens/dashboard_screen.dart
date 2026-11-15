@@ -1746,28 +1746,25 @@ class _DashboardScreenState extends State<DashboardScreen>
                       );
                     },
                   ),
-                // «مشترك نت»: التجربة على حساب المدير (D11).
-                if (!widget.isAgentMode)
-                  ValueListenableBuilder<int>(
-                    valueListenable: SubscriberPortalSync.instance.openRequests,
-                    builder: (context, open, _) => _drawerTile(
-                      icon: Icons.phone_iphone,
-                      title: 'طلبات مشترك نت',
-                      trailing: open > 0
-                          ? Badge(label: Text('$open'))
-                          : null,
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                const SubscriberPortalRequestsScreen(),
-                          ),
-                        );
-                      },
-                    ),
+                // «مشترك نت»: لكل الوكلاء (فُتحت بعد نجاح التجربة 2026-11-15).
+                ValueListenableBuilder<int>(
+                  valueListenable: SubscriberPortalSync.instance.openRequests,
+                  builder: (context, open, _) => _drawerTile(
+                    icon: Icons.phone_iphone,
+                    title: 'طلبات مشترك نت',
+                    trailing: open > 0 ? Badge(label: Text('$open')) : null,
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              const SubscriberPortalRequestsScreen(),
+                        ),
+                      );
+                    },
                   ),
+                ),
                 if (!widget.isAgentMode)
                   _drawerTile(
                     icon: Icons.sell_outlined,

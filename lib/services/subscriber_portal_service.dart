@@ -25,7 +25,7 @@ class PortalException implements Exception {
     'record_already_linked' => 'المشترك مرتبط بالتطبيق مسبقاً',
     'not_linked' => 'المشترك غير مربوط بتطبيق مشترك نت',
     'subscription_not_found' => 'احفظ المشترك ثم أعد المحاولة',
-    'forbidden' => 'حسابك لا يملك صلاحية هذه الخدمة',
+    'forbidden' => 'خدمة مشترك نت متاحة للوكلاء ذوي الاشتراك الفعّال',
     'invalid_state' => 'تغيّرت حالة الطلب، حدّث القائمة',
     'rate_limited' => 'محاولات كثيرة، انتظر قليلاً',
     'network' => 'تعذر الاتصال بالخادم',
@@ -256,6 +256,105 @@ class SubscriberPortalClient {
       ) as Map,
     ),
   );
+
+  Future<List<PortalTicket>> supportTickets({String status = ''}) async {
+    final query = status.isEmpty ? '' : '?status=$status';
+    final data = await _send('GET', '/support-tickets$query') as List;
+    return [
+      for (final t in data) PortalTicket.fromJson(Map<String, dynamic>.from(t as Map)),
+    ];
+  }
+
+  Future<PortalTicket> replyToTicket(String id, String text) async =>
+      PortalTicket.fromJson(
+        Map<String, dynamic>.from(
+          await _send('POST', '/support-tickets/$id/messages', body: {'text': text}) as Map,
+        ),
+      );
+
+  Future<PortalTicket> closeTicket(String id) async => PortalTicket.fromJson(
+    Map<String, dynamic>.from(await _send('POST', '/support-tickets/$id/close') as Map),
+  );
+}
+
+class PortalTicketMessage {
+  const PortalTicketMessage({
+    required this.fromSubscriber,
+    required this.author,
+    required this.text,
+    required this.at,
+  });
+
+  final bool fromSubscriber;
+  final String author;
+  final String text;
+  final DateTime at;
+
+  factory PortalTicketMessage.fromJson(Map<String, dynamic> j) => PortalTicketMessage(
+    fromSubscriber: j['from_subscriber'] == true,
+    author: '${j['author'] ?? ''}',
+    text: '${j['text'] ?? ''}',
+    at: DateTime.tryParse('${j['at']}')?.toLocal() ?? DateTime.now(),
+  );
+}
+
+/// تذكرة دعم من مشترك مربوط بتطبيق مشترك نت.
+class PortalTicket {
+  const PortalTicket({
+    required this.id,
+    required this.number,
+    required this.subscriberId,
+    required this.subscriberName,
+    required this.category,
+    required this.status,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.messages,
+  });
+
+  final String id;
+  final String number;
+  final String subscriberId;
+  final String subscriberName;
+  final String category;
+  final String status;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final List<PortalTicketMessage> messages;
+
+  /// المشترك ينتظر ردّ الوكيل.
+  bool get awaitingAgent => status == 'open';
+  bool get isClosed => status == 'closed';
+
+  String get statusLabel => switch (status) {
+    'open' => 'بانتظار ردّك',
+    'answered' => 'تم الرد',
+    'closed' => 'مغلقة',
+    _ => status,
+  };
+
+  String get categoryLabel => switch (category) {
+    'connection' => 'مشكلة اتصال',
+    'subscription' => 'الاشتراك',
+    'billing' => 'المحاسبة',
+    'help' => 'مساعدة',
+    _ => 'استفسار',
+  };
+
+  factory PortalTicket.fromJson(Map<String, dynamic> j) => PortalTicket(
+    id: '${j['id'] ?? ''}',
+    number: '${j['number'] ?? ''}',
+    subscriberId: '${j['subscriber_id'] ?? ''}',
+    subscriberName: '${j['subscriber_name'] ?? ''}',
+    category: '${j['category'] ?? ''}',
+    status: '${j['status'] ?? ''}',
+    createdAt: DateTime.tryParse('${j['created_at']}')?.toLocal() ?? DateTime.now(),
+    updatedAt: DateTime.tryParse('${j['updated_at']}')?.toLocal() ?? DateTime.now(),
+    messages: [
+      for (final m in (j['messages'] as List? ?? const []))
+        PortalTicketMessage.fromJson(Map<String, dynamic>.from(m as Map)),
+    ],
+  );
 }
 
 /// الملخص المنقّى للمشترك (D5-ب): أرقام محسوبة بنفس getters التطبيق،
@@ -328,7 +427,7 @@ class SubscriberPortalSync {
   final Duration debounce;
   final DateTime Function() _now;
 
-  /// عدد الطلبات بانتظار الوكيل، لشارة القائمة.
+  /// طلبات التجديد وتذاكر الدعم بانتظار الوكيل، لشارة القائمة.
   final ValueNotifier<int> openRequests = ValueNotifier(0);
 
   final Map<String, String> _published = {};
@@ -380,7 +479,9 @@ class SubscriberPortalSync {
       for (final (request, end) in renewalsToComplete(renewals, byId)) {
         await client.complete(request.id, end);
       }
-      openRequests.value = renewals.where((r) => r.status == 'pending').length;
+      final tickets = await client.supportTickets(status: 'open');
+      openRequests.value =
+          renewals.where((r) => r.status == 'pending').length + tickets.length;
     } on PortalException catch (e) {
       if (e.code == 'portal_disabled' || e.code == 'forbidden') {
         _pausedUntil = _now().add(const Duration(minutes: 30));
@@ -394,9 +495,12 @@ class SubscriberPortalSync {
 
 /// التجربة مع حساب المدير فقط (D11)، حتى يُفتح للوكلاء بعد نجاحها.
 class SubscriberPortalFeature {
+  /// متاحة لكل وكيل ولحساب المدير. البوابة نفسها ترفض الوكيل غير الفعّال
+  /// (قاعدة R1)، فتتوقف المزامنة عنده وتشرح الواجهة السبب.
   static Future<bool> isEnabled() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return false;
-    return await UserRoleService.resolveRole(uid: uid) == UserRoleService.adminRole;
+    final role = await UserRoleService.resolveRole(uid: uid);
+    return role == UserRoleService.adminRole || role == UserRoleService.agentRole;
   }
 }
