@@ -18,6 +18,8 @@ void main() {
     expect(text, contains('ABCD-EFGH'));
     expect(text, contains('مكتب النور'));
     expect(text, contains('48 ساعة'));
+    expect(text, contains('https://mushtarak-net.onrender.com'));
+    expect(text, contains('قريباً على Google Play'));
     expect(portalInviteMessage(subscriberName: 'x', officeName: ' ', code: 'C'), contains('مكتبنا'));
   });
 

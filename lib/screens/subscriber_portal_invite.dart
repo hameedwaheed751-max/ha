@@ -15,8 +15,14 @@ String portalInviteMessage({
   return 'مرحباً ${subscriberName.trim()}،\n'
       '$office يدعوك لتطبيق «مشترك نت» لمتابعة اشتراكك وطلب التجديد.\n'
       'رمز الدعوة: $code\n'
-      'الرمز صالح 48 ساعة ولمرة واحدة.';
+      'الرمز صالح 48 ساعة ولمرة واحدة.\n'
+      'افتح مشترك نت من هنا واختر «الانضمام باشتراك موجود»:\n'
+      '$mushtarakNetWebUrl\n'
+      'تطبيق مشترك نت قريباً على Google Play.';
 }
+
+/// نسخة الويب من مشترك نت (Render).
+const mushtarakNetWebUrl = 'https://mushtarak-net.onrender.com';
 
 /// رقم بصيغة wa.me (964…)، أو null إن لم يصلح. نقيّة.
 String? whatsappNumber(String phone) {
