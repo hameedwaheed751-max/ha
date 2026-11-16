@@ -2599,9 +2599,13 @@ class SasApiService implements VoucherApi {
   }
 
   /// سلاسل الكروت المملوكة (admin API المشفّر: POST index/series).
+  /// لوحة nbtel ترسل الفئة بفاصل آلاف نقطة ("1.500"=1500)، فنحلّلها كتجميع؛
+  /// otto يرسلها عشرية ("23000.000"=23000) فتبقى على التحليل الافتراضي.
   @override
-  Future<List<CardSeries>> fetchCardSeries() async =>
-      CardSeries.parseList(await _post('index/series', cardSeriesQuery()));
+  Future<List<CardSeries>> fetchCardSeries() async => CardSeries.parseList(
+    await _post('index/series', cardSeriesQuery()),
+    groupedThousands: _isResellerServer,
+  );
 
   /// كروت سلسلة معيّنة مع أرقام الـ PIN (admin API: POST index/card/{series}).
   @override

@@ -33,6 +33,14 @@ int _toInt(dynamic v) {
       0;
 }
 
+/// فئة بفاصل آلاف نقطة/فاصلة كما ترسلها لوحة nbtel: "1.500"=1500،
+/// "1.000"=1000، "1.000.000"=1000000. (otto يرسلها عشرية فيُستخدم [_toInt].)
+int _toIntGrouped(dynamic v) {
+  if (v is num) return v.toInt();
+  final s = '${v ?? ''}'.replaceAll(RegExp(r'[.,\s]'), '').trim();
+  return int.tryParse(s) ?? 0;
+}
+
 /// سلسلة كروت (دفعة) كما يعيدها index/series.
 class CardSeries {
   const CardSeries({
@@ -55,14 +63,18 @@ class CardSeries {
 
   int get available => (qty - used).clamp(0, qty);
 
-  static CardSeries? fromMap(dynamic raw) {
+  /// [groupedThousands] لفئة nbtel النصّية بفاصل آلاف نقطة ("1.500"=1500).
+  /// الكمية والمستخدَم أعداد صحيحة بلا فواصل فتُحلَّل كالمعتاد في الحالتين.
+  static CardSeries? fromMap(dynamic raw, {bool groupedThousands = false}) {
     if (raw is! Map) return null;
     final series = '${raw['series'] ?? ''}'.trim();
     if (series.isEmpty) return null;
     final profile = raw['profile_details'];
     return CardSeries(
       series: series,
-      value: _toInt(raw['value']),
+      value: groupedThousands
+          ? _toIntGrouped(raw['value'])
+          : _toInt(raw['value']),
       qty: _toInt(raw['qty']),
       used: _toInt(raw['used']),
       profileName: profile is Map
@@ -73,13 +85,16 @@ class CardSeries {
     );
   }
 
-  static List<CardSeries> parseList(dynamic response) {
+  static List<CardSeries> parseList(
+    dynamic response, {
+    bool groupedThousands = false,
+  }) {
     dynamic data = response;
     if (response is Map) data = response['data'];
     if (data is! List) return const [];
     final out = <CardSeries>[];
     for (final item in data) {
-      final s = fromMap(item);
+      final s = fromMap(item, groupedThousands: groupedThousands);
       if (s != null) out.add(s);
     }
     return out;

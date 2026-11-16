@@ -164,13 +164,13 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.dispose();
   }
 
-  /// يبحث عن حساب SAS يدعم متجر الكروت (otto-isp) لإظهار العنصر في القائمة.
-  /// التفعيل بالبطاقة وحده (nbtel) لا يُظهر المتجر — يظهر خياره في التفعيل فقط.
+  /// يبحث عن حساب SAS يدعم الكروت (otto-isp أو nbtel) لإظهار العنصر في القائمة.
+  /// otto يُظهر المتجر كاملاً؛ nbtel يُظهر سلاسل الكروت وأرقامها فقط.
   Future<void> _checkCardsAccount() async {
     try {
       final accounts = await SasSettings.loadAll();
       final match = accounts
-          .where((a) => SasApiService.supportsCardStore(a.serverUrl))
+          .where((a) => SasApiService.supportsCardActivation(a.serverUrl))
           .cast<SasSettings?>()
           .firstWhere((a) => true, orElse: () => null);
       if (mounted && match != null) setState(() => _cardsAccount = match);
@@ -191,6 +191,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         builder: (_) => CardsScreen(
           api: SasApiService(account),
           companyLabel: label,
+          showStore: SasApiService.supportsCardStore(account.serverUrl),
         ),
       ),
     );

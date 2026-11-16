@@ -5,13 +5,23 @@ import '../models.dart';
 import '../sas_api_service.dart';
 import '../services/voucher_store.dart';
 
-/// شاشة الكروت (otto-isp): رصيد المكتب، شراء كروت جديدة، وسجل الشراء.
-/// الشراء يخصم من الرصيد ويولّد كروتاً بأرقام PIN جديدة في SAS.
+/// شاشة الكروت. مع [showStore] (otto-isp): رصيد المكتب وشراء كروت جديدة وسجل
+/// الشراء عبر VoucherStore، إضافةً إلى سلاسل الكروت وأرقام الـ PIN. وبدونه
+/// (nbtel الذي لا يملك VoucherStore): سلاسل الكروت وأرقامها فقط من الـ API الإداري.
 class CardsScreen extends StatefulWidget {
-  const CardsScreen({super.key, required this.api, this.companyLabel = ''});
+  const CardsScreen({
+    super.key,
+    required this.api,
+    this.companyLabel = '',
+    this.showStore = true,
+  });
 
   final VoucherApi api;
   final String companyLabel;
+
+  /// يُظهر رصيد المكتب والشراء وسجل الشراء (VoucherStore). nbtel يمرّره false
+  /// فيعرض سلاسل الكروت وأرقامها فقط.
+  final bool showStore;
 
   @override
   State<CardsScreen> createState() => _CardsScreenState();
@@ -47,13 +57,21 @@ class _CardsScreenState extends State<CardsScreen> {
       _error = null;
     });
     try {
-      final balance = await widget.api.fetchVoucherBalance();
-      final purchases = await widget.api.fetchVoucherPurchases();
-      // السلاسل عبر admin API؛ لا نُفشل الشاشة كلها إن تعذّرت وحدها.
-      List<CardSeries> series = const [];
-      try {
+      double? balance;
+      List<VoucherPurchase> purchases = const [];
+      List<CardSeries> series;
+      if (widget.showStore) {
+        balance = await widget.api.fetchVoucherBalance();
+        purchases = await widget.api.fetchVoucherPurchases();
+        // السلاسل عبر admin API؛ لا نُفشل شاشة المتجر كلها إن تعذّرت وحدها.
+        series = const [];
+        try {
+          series = await widget.api.fetchCardSeries();
+        } catch (_) {}
+      } else {
+        // nbtel: السلاسل هي المحتوى الوحيد، فنُظهر خطأها إن فشلت.
         series = await widget.api.fetchCardSeries();
-      } catch (_) {}
+      }
       if (!mounted) return;
       setState(() {
         _balance = balance;
@@ -165,9 +183,11 @@ class _CardsScreenState extends State<CardsScreen> {
                   padding: const EdgeInsets.all(16),
                   children: [
                     if (_error != null) _errorBanner(_error!),
-                    _balanceCard(),
-                    const SizedBox(height: 16),
-                    _buyCard(),
+                    if (widget.showStore) ...[
+                      _balanceCard(),
+                      const SizedBox(height: 16),
+                      _buyCard(),
+                    ],
                     if (_series.isNotEmpty) ...[
                       const SizedBox(height: 20),
                       const Text(
@@ -184,20 +204,28 @@ class _CardsScreenState extends State<CardsScreen> {
                       ),
                       const SizedBox(height: 8),
                       ..._series.map(_seriesTile),
+                    ] else if (!widget.showStore && _error == null) ...[
+                      const SizedBox(height: 40),
+                      const Center(child: Text('لا توجد كروت في الساس')),
                     ],
-                    const SizedBox(height: 20),
-                    const Text(
-                      'سجل الشراء',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 8),
-                    if (_purchases.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 24),
-                        child: Center(child: Text('لا توجد عمليات شراء بعد')),
-                      )
-                    else
-                      ..._purchases.map(_purchaseTile),
+                    if (widget.showStore) ...[
+                      const SizedBox(height: 20),
+                      const Text(
+                        'سجل الشراء',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (_purchases.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Center(child: Text('لا توجد عمليات شراء بعد')),
+                        )
+                      else
+                        ..._purchases.map(_purchaseTile),
+                    ],
                   ],
                 ),
               ),

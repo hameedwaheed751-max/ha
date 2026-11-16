@@ -107,6 +107,32 @@ void main() {
         isEmpty,
       );
     });
+
+    test('otto decimal value is parsed by default (dot = decimal)', () {
+      // 23000.000 = 23000، لا 23000000.
+      final list = CardSeries.parseList({
+        'data': [
+          {'series': 's', 'value': '23000.000', 'qty': 1, 'used': 0},
+        ],
+      });
+      expect(list.single.value, 23000);
+    });
+
+    test('nbtel grouped value uses the dot as a thousands separator', () {
+      // "1.500"=1500، "1.000"=1000، "1.000.000"=1000000.
+      final list = CardSeries.parseList({
+        'data': [
+          {'series': 'a', 'value': '1.500', 'qty': 1, 'used': 1},
+          {'series': 'b', 'value': '1.000', 'qty': 19, 'used': 18},
+          {'series': 'c', 'value': '1.000.000', 'qty': 2, 'used': 0},
+        ],
+      }, groupedThousands: true);
+      expect(list[0].value, 1500);
+      expect(list[1].value, 1000);
+      expect(list[1].qty, 19); // الكمية تبقى صحيحة بلا فاصل
+      expect(list[1].used, 18);
+      expect(list[2].value, 1000000);
+    });
   });
 
   group('CardPin.parseList', () {

@@ -21,6 +21,7 @@ class _FakeVoucherApi implements VoucherApi {
   Map<String, List<CardPin>> cardsBySeries;
   bool buyThrows;
   final List<({int cardValue, int quantity})> buys = [];
+  int voucherStoreCalls = 0;
 
   @override
   Future<List<CardSeries>> fetchCardSeries() async => series;
@@ -37,10 +38,16 @@ class _FakeVoucherApi implements VoucherApi {
   ];
 
   @override
-  Future<double?> fetchVoucherBalance() async => balance;
+  Future<double?> fetchVoucherBalance() async {
+    voucherStoreCalls++;
+    return balance;
+  }
 
   @override
-  Future<List<VoucherPurchase>> fetchVoucherPurchases() async => purchases;
+  Future<List<VoucherPurchase>> fetchVoucherPurchases() async {
+    voucherStoreCalls++;
+    return purchases;
+  }
 
   @override
   Future<String> buyVouchers({
@@ -186,5 +193,63 @@ void main() {
     expect(find.text('99990000111122'), findsOneWidget);
     expect(find.text('غير مستعمل'), findsOneWidget);
     expect(find.text('55556666777788'), findsOneWidget);
+  });
+
+  testWidgets('nbtel mode (showStore=false) shows series but hides the store', (
+    tester,
+  ) async {
+    final api = _FakeVoucherApi(
+      balance: 999000,
+      purchases: [
+        const VoucherPurchase(
+          cardValue: 20000,
+          qty: 5,
+          status: 2,
+          createdAt: '2026-11-13',
+        ),
+      ],
+      series: const [
+        CardSeries(
+          series: '2026-700700',
+          value: 25000,
+          qty: 3,
+          used: 0,
+          profileName: 'Gold',
+          seriesDate: '2026-11-14',
+          expiration: '2027-12-31',
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CardsScreen(api: api, companyLabel: 'nbtel', showStore: false),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // السلاسل ظاهرة.
+    expect(find.byKey(const Key('series-2026-700700')), findsOneWidget);
+    expect(find.text('الكروت المتوفرة'), findsOneWidget);
+    // المتجر مخفيّ تماماً ولم تُستدعَ نقاط VoucherStore.
+    expect(find.byKey(const Key('cards-balance')), findsNothing);
+    expect(find.byKey(const Key('cards-buy')), findsNothing);
+    expect(find.text('سجل الشراء'), findsNothing);
+    expect(api.voucherStoreCalls, 0);
+    expect(api.buys, isEmpty);
+  });
+
+  testWidgets('nbtel mode with no series shows an empty message', (
+    tester,
+  ) async {
+    final api = _FakeVoucherApi(series: const []);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CardsScreen(api: api, companyLabel: 'nbtel', showStore: false),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('لا توجد كروت في الساس'), findsOneWidget);
+    expect(api.voucherStoreCalls, 0);
   });
 }
