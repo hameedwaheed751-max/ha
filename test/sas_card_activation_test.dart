@@ -14,6 +14,22 @@ void main() {
       );
     });
 
+    test('true for the reseller.nbtel.iq panel host', () {
+      expect(
+        SasApiService.supportsCardActivation('https://reseller.nbtel.iq'),
+        isTrue,
+      );
+      expect(
+        SasApiService.supportsCardActivation('reseller.nbtel.iq/admin'),
+        isTrue,
+      );
+      // المتغيّر الإملائي الذي يعالجه الكود في مواضع أخرى.
+      expect(
+        SasApiService.supportsCardActivation('https://reseller.nbtle.iq'),
+        isTrue,
+      );
+    });
+
     test('false for other companies and for empty input', () {
       expect(
         SasApiService.supportsCardActivation('https://pro.mysvcs.net'),
@@ -32,6 +48,38 @@ void main() {
         SasApiService.supportsCardActivation('https://evil.com/otto-isp.com'),
         isFalse,
       );
+      expect(
+        SasApiService.supportsCardActivation('https://evil.com/reseller.nbtel.iq'),
+        isFalse,
+      );
+    });
+  });
+
+  group('supportsCardStore', () {
+    test('true for otto-isp (has the VoucherStore app)', () {
+      expect(
+        SasApiService.supportsCardStore('https://sas.otto-isp.com/admin'),
+        isTrue,
+      );
+    });
+
+    test('false for reseller.nbtel.iq (no store, activation only)', () {
+      expect(
+        SasApiService.supportsCardStore('https://reseller.nbtel.iq'),
+        isFalse,
+      );
+      expect(
+        SasApiService.supportsCardStore('https://reseller.nbtle.iq'),
+        isFalse,
+      );
+    });
+
+    test('false for other companies and for empty input', () {
+      expect(
+        SasApiService.supportsCardStore('https://pro.mysvcs.net'),
+        isFalse,
+      );
+      expect(SasApiService.supportsCardStore(''), isFalse);
     });
   });
 

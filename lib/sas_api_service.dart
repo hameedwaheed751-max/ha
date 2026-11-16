@@ -1710,14 +1710,30 @@ class SasApiService implements VoucherApi {
     return num.tryParse((v ?? '').toString().replaceAll(',', '').trim());
   }
 
-  /// التفعيل بالبطاقة مدعوم لشركة otto-isp فقط (كما اتُّفق مع المستخدم).
-  /// نقية وقابلة للاختبار: تعتمد مضيف رابط SAS لا نص الرابط كاملاً.
-  static bool supportsCardActivation(String serverUrl) {
+  /// مضيف رابط SAS بأحرف صغيرة، أو فارغ إن تعذّر تحليله. نقية وقابلة للاختبار:
+  /// تعتمد المضيف لا نص الرابط كاملاً فلا تنخدع بظهور الاسم في المسار.
+  static String _hostOf(String serverUrl) {
     final value = serverUrl.trim();
-    if (value.isEmpty) return false;
-    final withScheme =
-        value.contains('://') ? value : 'https://$value';
-    final host = (Uri.tryParse(withScheme)?.host ?? '').toLowerCase();
+    if (value.isEmpty) return '';
+    final withScheme = value.contains('://') ? value : 'https://$value';
+    return (Uri.tryParse(withScheme)?.host ?? '').toLowerCase();
+  }
+
+  /// التفعيل بالبطاقة (اختيار PIN غير مستخدم ثم method=card) مدعوم لـ otto-isp
+  /// ولوحة reseller.nbtel.iq — كلاهما من عائلة SAS4 ويؤكّد المستخدم عمله فيهما.
+  static bool supportsCardActivation(String serverUrl) {
+    final host = _hostOf(serverUrl);
+    if (host.isEmpty) return false;
+    return host == 'otto-isp.com' ||
+        host.endsWith('.otto-isp.com') ||
+        host == 'reseller.nbtel.iq' ||
+        host == 'reseller.nbtle.iq';
+  }
+
+  /// متجر الكروت (VoucherStore: رصيد المكتب وشراء كروت جديدة) تطبيق PHP منفصل
+  /// خاص بـ otto-isp. nbtel لا يملكه، فله التفعيل بالبطاقة فقط دون متجر.
+  static bool supportsCardStore(String serverUrl) {
+    final host = _hostOf(serverUrl);
     if (host.isEmpty) return false;
     return host == 'otto-isp.com' || host.endsWith('.otto-isp.com');
   }
