@@ -165,8 +165,8 @@ enum FtthPaymentMethod {
   const FtthPaymentMethod(this.label);
   final String label;
 
-  /// قيمة رصيد الوكيل لم تُسجَّل بعد من الموقع، فتبقى معطلة حتى نتأكد منها.
-  bool get available => this != FtthPaymentMethod.partnerWallet;
+  /// جميع الطرق متاحة؛ حمولة رصيد الوكيل أُكِّدت من HAR الموقع (walletSource: Partner).
+  bool get available => true;
 
   /// الدفع بالمحفظة يفعّل مباشرة، والبطاقة تنتظر إكمال الدفع خارج التطبيق.
   bool get waitsForPayment => this == FtthPaymentMethod.card;

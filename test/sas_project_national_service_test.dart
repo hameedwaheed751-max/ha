@@ -190,7 +190,8 @@ void main() {
     ]);
     expect(quote.canUse(FtthPaymentMethod.customerWallet), isTrue);
     expect(quote.canUse(FtthPaymentMethod.card), isTrue);
-    // معطل حتى نتأكد من قيمة الموقع، وأيضاً الرصيد غير كافٍ.
+    // الطريقة متاحة الآن، لكن canUse يرفض هنا لأن رصيد الوكيل (3834) أقل من السعر.
+    expect(FtthPaymentMethod.partnerWallet.available, isTrue);
     expect(quote.canUse(FtthPaymentMethod.partnerWallet), isFalse);
 
     final price = fake.last('/api/subscriptions/calculate-price').url;
@@ -307,22 +308,27 @@ void main() {
     },
   );
 
-  test('partner wallet is never sent until confirmed', () async {
+  test('partner wallet sends the confirmed payload and activates immediately', () async {
+    // مؤكَّد من admin.ftth.iq55.har: paymentDetails={Wallet,Partner} والرد null/null.
     final fake = _Fake();
     final service = fake.service();
     final detail = await service.fetchSubscription(
       subscriptionId: '8010490',
       customerId: '2276234',
     );
-    await expectLater(
-      service.activateSubscription(
-        detail: detail,
-        price: 29000,
-        method: FtthPaymentMethod.partnerWallet,
-      ),
-      throwsA(isA<SasProjectNationalException>()),
+    final result = await service.activateSubscription(
+      detail: detail,
+      price: 35000,
+      method: FtthPaymentMethod.partnerWallet,
     );
-    expect(fake.requests.where((r) => r.url.path.endsWith('/change')), isEmpty);
+
+    expect(result.paymentUrl, isEmpty);
+    expect(result.orderNumber, isEmpty);
+    final body = jsonDecode(fake.last('/api/subscriptions/8010490/change').body);
+    expect(body['paymentDetails'], {
+      'paymentMethod': 'Wallet',
+      'walletSource': 'Partner',
+    });
   });
 
   test('a 401 logs in again and repeats the request once', () async {
