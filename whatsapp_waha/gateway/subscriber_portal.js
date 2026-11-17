@@ -140,6 +140,8 @@ function createSubscriberPortal({
   // يتطلب مفتاح خدمة mushtarak-net: { setPassword(phone, password) → bool,
   // sendPush(tokens, {title, body, data}) → {invalidTokens} }. بدونه: لا استعادة ولا إشعار فوري.
   accountAdmin = null,
+  // إشعار الوكيل الفوري (agent_notifications.notify): لا يرمي أبداً.
+  notifyAgent = async () => {},
 }) {
   if (typeof pepper !== 'string' || pepper.length < 32) {
     throw new Error('SUBSCRIBER_PORTAL_PEPPER must be at least 32 characters.');
@@ -603,6 +605,11 @@ function createSubscriberPortal({
     return null;
   }
 
+  const preview = (value, max = 80) => {
+    const t = String(value || '').replace(/s+/g, ' ').trim();
+    return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+  };
+
   // --- استعادة كلمة المرور بدعوة من الوكيل ---
 
   async function resetPasswordWithInvitation({ code, phone, newPassword }) {
@@ -785,6 +792,11 @@ function createSubscriberPortal({
       body: `طلبك ${request.number} لباقة ${request.packageName} وصل إلى ${subscription.agent.office_name}.`,
       subscriptionId: link.linkId,
       target: { kind: 'renewal', id },
+    });
+    await notifyAgent(link.agentUid, {
+      title: 'طلب تجديد جديد',
+      body: `${request.subscriberName} طلب تجديد ${request.packageName} (${request.number}).`,
+      data: { kind: 'renewal', id },
     });
     return renewalView(id, request);
   }
@@ -983,6 +995,11 @@ function createSubscriberPortal({
       [`agents/${link.agentUid}/tickets/${id}`]: ticket,
       [`ticketsByAccount/${accountId}/${id}`]: { agentUid: link.agentUid },
     });
+    await notifyAgent(link.agentUid, {
+      title: 'تذكرة دعم جديدة',
+      body: `${ticket.subscriberName}: ${preview(text0)}`,
+      data: { kind: 'ticket', id },
+    });
     return ticketView(id, ticket);
   }
 
@@ -1027,7 +1044,13 @@ function createSubscriberPortal({
   async function subscriberReply(accountId, idInput, textInput) {
     const { id, agentUid, ticket } = await accountTicket(accountId, idInput);
     const message = { from_subscriber: true, author: ticket.subscriberName, text: messageText(textInput), at: iso() };
-    return ticketView(id, await appendMessage(agentUid, id, message, 'open'));
+    const updated = await appendMessage(agentUid, id, message, 'open');
+    await notifyAgent(agentUid, {
+      title: 'رد جديد من مشترك',
+      body: `${ticket.subscriberName} (${ticket.number}): ${preview(message.text)}`,
+      data: { kind: 'ticket', id },
+    });
+    return ticketView(id, updated);
   }
 
   async function listAgentTickets(agentUid, status) {

@@ -195,6 +195,13 @@ class SubscriberPortalClient {
     return {for (final l in data) '${(l as Map)['subscriber_id']}'};
   }
 
+  /// رمز إشعارات هذا الجهاز: تصله طلبات التجديد وتذاكر الدعم فوراً.
+  Future<void> registerDevice(String token, {String platform = 'android'}) =>
+      _send('POST', '/devices', body: {'token': token, 'platform': platform});
+
+  Future<void> unregisterDevice(String token) =>
+      _send('POST', '/devices/unregister', body: {'token': token});
+
   Future<void> unlink(String subscriberId) =>
       _send('DELETE', '/subscriber-links/${Uri.encodeComponent(subscriberId)}');
 

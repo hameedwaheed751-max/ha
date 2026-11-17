@@ -43,7 +43,7 @@ function seed() {
   };
 }
 
-function setup({ eligible = () => true, withAuth = true, accountAdmin } = {}) {
+function setup({ eligible = () => true, withAuth = true, accountAdmin, notifyAgent } = {}) {
   const db = new MemoryDb(seed());
   let clock = START;
   const portal = createSubscriberPortal({
@@ -52,6 +52,7 @@ function setup({ eligible = () => true, withAuth = true, accountAdmin } = {}) {
     now: () => clock,
     isAgentEligible: async (uid) => eligible(uid),
     accountAdmin,
+    notifyAgent,
   });
   const app = express();
   app.use(express.json());
@@ -866,5 +867,50 @@ test('deleting an account with no links still deletes the sign-in, and needs a s
     const res = await call('DELETE', '/subscriber/account', { account: 'acc-9' });
     assert.equal(res.status, 200);
     assert.deepEqual(deleted, ['acc-9']);
+  });
+});
+
+// --- إشعار الوكيل الفوري (عبر agent_notifications) ---
+
+function recordAgentPushes({ fail = false } = {}) {
+  const pushes = [];
+  return {
+    pushes,
+    notifyAgent: async (uid, message) => {
+      if (fail) throw new Error('should never be called with a throwing notifier');
+      pushes.push({ uid, ...message });
+    },
+  };
+}
+
+test('the agent is notified of a new renewal, a new ticket and a subscriber reply', async () => {
+  const recorder = recordAgentPushes();
+  const { app } = setup({ notifyAgent: recorder.notifyAgent });
+  await withServer(app, async (call) => {
+    const sub = await linkAccount(call);
+    const renewal = await call('POST', '/subscriber/renewals', {
+      account: 'acc-1',
+      key: 'key-11111111',
+      body: { subscription_id: sub.id, package_id: sub.package_id },
+    });
+    assert.equal(renewal.status, 200);
+    const [first] = recorder.pushes;
+    assert.equal(first.uid, 'agent-a');
+    assert.equal(first.title, 'طلب تجديد جديد');
+    assert.match(first.body, /علي حسن/);
+    assert.deepEqual(first.data, { kind: 'renewal', id: renewal.json.data.id });
+
+    const ticket = await openTicket(call, sub);
+    assert.equal(recorder.pushes[1].title, 'تذكرة دعم جديدة');
+    assert.match(recorder.pushes[1].body, /الإنترنت ينقطع مساءً/);
+    assert.deepEqual(recorder.pushes[1].data, { kind: 'ticket', id: ticket.json.data.id });
+
+    await call('POST', `/subscriber/support/tickets/${ticket.json.data.id}/messages`, {
+      account: 'acc-1',
+      body: { text: 'ما زال ينقطع' },
+    });
+    assert.equal(recorder.pushes[2].title, 'رد جديد من مشترك');
+    assert.equal(recorder.pushes.length, 3);
+    assert.ok(recorder.pushes.every((p) => p.uid === 'agent-a'));
   });
 });

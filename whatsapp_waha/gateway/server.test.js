@@ -946,3 +946,62 @@ test('account admin resets by phone id and reports dead push tokens', async () =
   assert.equal(sent[0].notification.title, 'T');
   assert.equal(sent[0].data.kind, 'k');
 });
+
+test('the agent push sender sends high-priority multicast and reports only dead tokens', async () => {
+  const { createPushSender } = require('./server');
+  const sent = [];
+  const sender = createPushSender({
+    sendEachForMulticast: async (message) => {
+      sent.push(message);
+      return {
+        responses: [
+          { success: false, error: { code: 'messaging/invalid-registration-token' } },
+          { success: true },
+        ],
+      };
+    },
+  });
+  assert.deepEqual(await sender.sendPush([], { title: 'T', body: 'B' }), { invalidTokens: [] });
+  assert.equal(sent.length, 0);
+  const result = await sender.sendPush(['x', 'y'], { title: 'T', body: 'B', data: { id: 7 } });
+  assert.deepEqual(result.invalidTokens, ['x']);
+  assert.equal(sent[0].android.priority, 'high');
+  assert.equal(sent[0].data.id, '7');
+});
+
+test('agent device routes register and unregister for eligible agents only', async () => {
+  const { MemoryDb } = require('./portal_db');
+  const { createAgentNotifier } = require('./agent_notifications');
+  const temp = createTempStore();
+  const db = new MemoryDb({});
+  const agentNotifier = createAgentNotifier({ db, adminUid: 'uid-admin' });
+  const eligible = new Set(['uid-agent-a']);
+  const app = createApp({
+    config: testConfig(temp.filePath),
+    verifyIdToken: async (token) => ({ uid: token }),
+    authorizeAccount: async (uid) => eligible.has(uid),
+    fetchImpl: createWahaStub().fetchImpl,
+    agentNotifier,
+  });
+  try {
+    await withServer(app, async (baseUrl) => {
+      const post = (token, route, body) =>
+        fetch(`${baseUrl}/api/v1${route}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      const device = { token: 'fcm-token-aaaaaaaaaaaaaaaaaaaaaaaa', platform: 'android' };
+      assert.equal((await post('uid-expired', '/agent/devices', device)).status, 403);
+      const bad = await post('uid-agent-a', '/agent/devices', { token: 'x' });
+      assert.equal(bad.status, 400);
+      assert.equal((await bad.json()).error, 'validation_failed');
+      assert.equal((await post('uid-agent-a', '/agent/devices', device)).status, 200);
+      assert.equal(Object.keys(await db.get('agentPush/devices/uid-agent-a')).length, 1);
+      assert.equal((await post('uid-agent-a', '/agent/devices/unregister', device)).status, 200);
+      assert.equal(Object.keys((await db.get('agentPush/devices/uid-agent-a')) || {}).length, 0);
+    });
+  } finally {
+    temp.cleanup();
+  }
+});

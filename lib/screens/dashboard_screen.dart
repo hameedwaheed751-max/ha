@@ -47,6 +47,7 @@ import 'speed_test_screen.dart';
 import 'ping_screen.dart';
 import 'accounting_reports_screen.dart';
 import 'subscriber_portal_requests_screen.dart';
+import '../services/agent_push_service.dart';
 import '../services/subscriber_portal_service.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -153,7 +154,78 @@ class _DashboardScreenState extends State<DashboardScreen>
       _handleSubscriptionGuardTick();
       _handleMonthlyRollover();
       unawaited(_enforceOnboardingAndReminder());
+      unawaited(_startAgentPush());
     });
+  }
+
+  /// الإشعارات الفورية (Android والويب): مشترك نت، والدردشة، وطلبات الاشتراك،
+  /// وتذكير اشتراك الوكيل، والملخص الصباحي.
+  Future<void> _startAgentPush() async {
+    await AgentPush.instance.start(
+      onOpen: _openPushTarget,
+      onForeground: _showPushBanner,
+    );
+    // الويب: المتصفح يشترط ضغطة من المستخدم قبل طلب الإذن.
+    if (!await AgentPush.instance.takeWebOffer() || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+          'فعّل الإشعارات لتصلك طلبات المشتركين ورسائل الإدارة فوراً.',
+        ),
+        duration: const Duration(seconds: 15),
+        action: SnackBarAction(
+          label: 'تفعيل',
+          onPressed: () async {
+            final ok = await AgentPush.instance.enableOnWeb();
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  ok
+                      ? 'تم تفعيل الإشعارات على هذا المتصفح.'
+                      : 'لم تُفعَّل الإشعارات. يمكنك السماح بها من إعدادات الموقع في المتصفح.',
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showPushBanner(AgentPushTarget target, String title, String body) {
+    if (!mounted) return;
+    final screen = _pushTargetScreen(target);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(body.isEmpty ? title : '$title\n$body'),
+        duration: const Duration(seconds: 6),
+        action: screen == null
+            ? null
+            : SnackBarAction(label: 'عرض', onPressed: () => _pushDashboard(screen)),
+      ),
+    );
+  }
+
+  /// الشاشة التي يفتحها الإشعار، أو null للبقاء في الرئيسية.
+  Widget? _pushTargetScreen(AgentPushTarget target) => switch (target) {
+    AgentPushTarget.renewals => const SubscriberPortalRequestsScreen(),
+    AgentPushTarget.tickets => const SubscriberPortalRequestsScreen(initialTab: 1),
+    AgentPushTarget.chat => const ChatScreen(),
+    // طلبات اشتراك الوكلاء للمدير فقط.
+    AgentPushTarget.agentRequests =>
+      widget.isAgentMode ? null : const SubscriptionRequestsAdminScreen(),
+    AgentPushTarget.expiringSubscribers =>
+      const SubscribersScreen(filter: 'expiring3Days'),
+    AgentPushTarget.home => null,
+  };
+
+  void _openPushTarget(AgentPushTarget target) {
+    if (!mounted) return;
+    final screen = _pushTargetScreen(target);
+    if (screen == null) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    _pushDashboard(screen);
   }
 
   @override
@@ -287,6 +359,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     final expiredPhone = AppStore.officePhone.trim();
 
     try {
+      await AgentPush.instance.stop();
       await AppStore.clearForAccountSwitch(clearStorage: false);
       await FirebaseAuth.instance.signOut();
       if (!mounted) return;
@@ -1936,6 +2009,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   icon: Icons.logout,
                   title: 'تسجيل الخروج',
                   onTap: () async {
+                    await AgentPush.instance.stop();
                     await AppStore.clearForAccountSwitch(clearStorage: false);
                     await FirebaseAuth.instance.signOut();
                     if (!mounted) return;

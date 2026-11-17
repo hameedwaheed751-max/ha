@@ -22,10 +22,16 @@ case "$WAHA_GATEWAY_URL" in
     ;;
 esac
 
+# مفتاح Web Push (VAPID) عام؛ إن غاب تعمل النسخة بلا إشعارات فورية.
+if [ -z "${FIREBASE_WEB_VAPID_KEY:-}" ]; then
+  echo "WARNING: FIREBASE_WEB_VAPID_KEY is not set; web push notifications are disabled." >&2
+fi
+
 flutter build web --release --pwa-strategy=none \
   --base-href / \
   --dart-define=NETAGENT_WHATSAPP_PROVIDER=meta \
-  --dart-define=WAHA_GATEWAY_URL="${WAHA_GATEWAY_URL}"
+  --dart-define=WAHA_GATEWAY_URL="${WAHA_GATEWAY_URL}" \
+  --dart-define=FIREBASE_WEB_VAPID_KEY="${FIREBASE_WEB_VAPID_KEY:-}"
 
 if [ -z "${SAS_PROXY_TOKEN:-}" ]; then
   echo "SAS_PROXY_TOKEN must be set in the Render environment." >&2
@@ -51,7 +57,8 @@ fi
 if [ ! -s build/web/index.html ] ||
   [ ! -s build/web/flutter_bootstrap.js ] ||
   [ ! -s build/web/runtime_config.js ] ||
-  [ ! -s build/web/main.dart.js ]; then
+  [ ! -s build/web/main.dart.js ] ||
+  [ ! -s build/web/firebase-messaging-sw.js ]; then
   echo "ERROR: Required Flutter web build output is missing or empty." >&2
   exit 1
 fi

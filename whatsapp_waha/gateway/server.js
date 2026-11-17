@@ -548,6 +548,7 @@ function createApp({
   wahaSender,
   subscriberPortal,
   authenticateSubscriber,
+  agentNotifier,
 }) {
   const app = express();
   const sender = wahaSender || createWahaSender({ config, fetchImpl, idempotencyStore });
@@ -850,6 +851,12 @@ function createApp({
     return res.status(result.status).json(result.body);
   });
 
+  // أجهزة الوكلاء والمدير للإشعارات الفورية (وكيل نت على Android).
+  if (agentNotifier) {
+    const { createAgentNotificationsRouter } = require('./agent_notifications');
+    app.use('/api/v1', createAgentNotificationsRouter({ notifier: agentNotifier, requireAgent }));
+  }
+
   // «مشترك نت»: يُركَّب فقط عند تمرير الخدمة (SUBSCRIBER_PORTAL_ENABLED=true).
   if (subscriberPortal) {
     const { createSubscriberPortalRouter } = require('./subscriber_portal');
@@ -899,27 +906,9 @@ function readSubscriberServiceAccount(file, expectedProjectId) {
   return parsed;
 }
 
-// استعادة كلمة المرور والإشعار الفوري لمشتركي مشترك نت (Admin SDK للمشروع المستقل).
-function createSubscriberAccountAdmin({ auth, messaging }) {
+// إرسال إشعار فوري لعدة أجهزة؛ يعيد الرموز الميتة فقط ليحذفها المستدعي.
+function createPushSender(messaging) {
   return {
-    async setPassword(phone, password) {
-      let user;
-      try {
-        user = await auth.getUserByEmail(`${phone}@phone.mushtarak.net`);
-      } catch (error) {
-        if (error?.code === 'auth/user-not-found') return false;
-        throw error;
-      }
-      await auth.updateUser(user.uid, { password });
-      return true;
-    },
-    async deleteUser(uid) {
-      try {
-        await auth.deleteUser(uid);
-      } catch (error) {
-        if (error?.code !== 'auth/user-not-found') throw error;
-      }
-    },
     async sendPush(tokens, { title, body, data = {} }) {
       if (tokens.length === 0) return { invalidTokens: [] };
       const result = await messaging.sendEachForMulticast({
@@ -938,6 +927,31 @@ function createSubscriberAccountAdmin({ auth, messaging }) {
           .map((r, i) => (!r.success && dead.has(r.error?.code) ? tokens[i] : null))
           .filter(Boolean),
       };
+    },
+  };
+}
+
+// استعادة كلمة المرور والإشعار الفوري لمشتركي مشترك نت (Admin SDK للمشروع المستقل).
+function createSubscriberAccountAdmin({ auth, messaging }) {
+  return {
+    ...createPushSender(messaging),
+    async setPassword(phone, password) {
+      let user;
+      try {
+        user = await auth.getUserByEmail(`${phone}@phone.mushtarak.net`);
+      } catch (error) {
+        if (error?.code === 'auth/user-not-found') return false;
+        throw error;
+      }
+      await auth.updateUser(user.uid, { password });
+      return true;
+    },
+    async deleteUser(uid) {
+      try {
+        await auth.deleteUser(uid);
+      } catch (error) {
+        if (error?.code !== 'auth/user-not-found') throw error;
+      }
     },
   };
 }
@@ -968,11 +982,21 @@ function start() {
     },
   });
   const wahaSender = createWahaSender({ config });
+  const { firebaseDb } = require('./portal_db');
+  const { createAgentNotifier, watchAgentEvents } = require('./agent_notifications');
+  // إشعارات الوكلاء والمدير الفورية: عبر مشروع وكيل نت نفسه (نفس مفتاح البوابة).
+  const agentNotifier = createAgentNotifier({
+    db: firebaseDb(database),
+    sender: createPushSender(require('firebase-admin/messaging').getMessaging(firebaseApp)),
+    adminUid: config.adminUid,
+    subscriptionEnd: async (uid) =>
+      subscriptionEndMs((await database.ref(`agents/${uid}/subscription`).once('value')).val()),
+    isEligible: authorizeAccount,
+  });
   let subscriberPortal;
   let authenticateSubscriber;
   if (config.subscriberPortal.enabled) {
     const { createSubscriberPortal } = require('./subscriber_portal');
-    const { firebaseDb } = require('./portal_db');
     const portalConfig = config.subscriberPortal;
     let subscriberApp = null;
     let accountAdmin = null;
@@ -1002,6 +1026,8 @@ function start() {
       // الوكيل المنتهي لا يستقبل طلبات تجديد ولا تذكيرات (نفس قاعدة R1).
       isAgentEligible: authorizeAccount,
       accountAdmin,
+      // إشعار الوكيل عند طلب تجديد أو تذكرة دعم أو رد من مشترك.
+      notifyAgent: agentNotifier.notify,
     });
     if (subscriberApp) {
       const subscriberAuth = getAuth(subscriberApp);
@@ -1033,6 +1059,7 @@ function start() {
     wahaSender,
     subscriberPortal,
     authenticateSubscriber,
+    agentNotifier,
   });
   // Docker publishes only a loopback-bound host port in the local pilot compose file.
   const server = app.listen(config.port, '0.0.0.0', () => {
@@ -1070,6 +1097,21 @@ function start() {
     console.log(`Expiry scheduler enabled every ${config.expiryScheduler.intervalMs / 1000}s`);
   }
 
+  // مراقبة الدردشة وطلبات الاشتراك، وتذكير اشتراك الوكيل والملخص الصباحي كل ساعة.
+  let stopAgentWatch = () => {};
+  watchAgentEvents({ database, notifier: agentNotifier })
+    .then((stop) => {
+      stopAgentWatch = stop;
+      console.log('Agent push notifications enabled (chat, subscription requests, schedule)');
+    })
+    .catch((error) => console.error('Agent push watchers failed:', error?.message || error));
+  const runAgentSchedule = () =>
+    agentNotifier.runScheduled().catch((error) => console.error('Agent push schedule failed:', error?.message || error));
+  const agentScheduleFirst = setTimeout(runAgentSchedule, 90 * 1000);
+  const agentScheduleTimer = setInterval(runAgentSchedule, 60 * 60 * 1000);
+  agentScheduleFirst.unref();
+  agentScheduleTimer.unref();
+
   let stopImageCleanup = () => {};
   if (config.imageCleanup.enabled) {
     const { getDatabase } = require('firebase-admin/database');
@@ -1094,6 +1136,9 @@ function start() {
 
   const shutdown = () => {
     stopImageCleanup();
+    stopAgentWatch();
+    clearTimeout(agentScheduleFirst);
+    clearInterval(agentScheduleTimer);
     // Let a notice being sent finish and be saved, within Docker's 10 second
     // stop timeout, so it is not left for manual review.
     const timeout = new Promise((resolve) => setTimeout(resolve, 8000).unref());
@@ -1125,6 +1170,7 @@ module.exports = {
   createAgentAuthorizer,
   readSubscriberServiceAccount,
   createSubscriberAccountAdmin,
+  createPushSender,
   isAllowedEventType,
   loadConfig,
   normalizePhone,

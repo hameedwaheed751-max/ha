@@ -8,7 +8,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
-COPY server.js expiry_scheduler.js image_cleanup.js subscriber_portal.js portal_db.js ./
+COPY server.js expiry_scheduler.js image_cleanup.js subscriber_portal.js portal_db.js agent_notifications.js ./
 USER node
 EXPOSE 3001
 CMD ["node", "server.js"]
