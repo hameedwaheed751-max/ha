@@ -28,6 +28,7 @@ class PortalException implements Exception {
     'forbidden' => 'خدمة مشترك نت متاحة للوكلاء ذوي الاشتراك الفعّال',
     'invalid_state' => 'تغيّرت حالة الطلب، حدّث القائمة',
     'rate_limited' => 'محاولات كثيرة، انتظر قليلاً',
+    'too_many_announcements' => 'وصلت إلى حد ثلاثة إعلانات في اليوم، حاول غداً',
     'network' => 'تعذر الاتصال بالخادم',
     _ => 'تعذر تنفيذ الطلب ($code)',
   };
@@ -73,6 +74,8 @@ class PortalRenewal {
     required this.createdAt,
     this.previousEndDate,
     this.rejectReason = '',
+    this.currentPackageName = '',
+    this.packageChange = false,
   });
 
   final String id;
@@ -85,6 +88,15 @@ class PortalRenewal {
   final DateTime createdAt;
   final DateTime? previousEndDate;
   final String rejectReason;
+
+  /// باقة المشترك وقت الطلب؛ تختلف عن [packageName] إن طلب تغيير الباقة.
+  final String currentPackageName;
+  final bool packageChange;
+
+  /// سطر الباقة في بطاقة الطلب.
+  String get packageLine => packageChange
+      ? 'تغيير الباقة: $currentPackageName ← $packageName'
+      : packageName;
 
   bool get isOpen => status == 'pending' || status == 'approved';
 
@@ -111,7 +123,32 @@ class PortalRenewal {
         ? null
         : DateTime.tryParse('${j['previous_end_date']}'),
     rejectReason: '${j['reject_reason'] ?? ''}',
+    currentPackageName: '${j['current_package_name'] ?? ''}',
+    packageChange: j['package_change'] == true,
   );
+}
+
+/// إعدادات مشترك نت لدى الوكيل.
+class PortalSettings {
+  const PortalSettings({required this.showDebt, required this.allowPackageChange});
+
+  final bool showDebt;
+  final bool allowPackageChange;
+
+  factory PortalSettings.fromJson(Map<String, dynamic> j) => PortalSettings(
+    showDebt: j['show_debt'] == true,
+    allowPackageChange: j['allow_package_change'] == true,
+  );
+}
+
+/// باقات الوكيل كما يراها المشترك عند طلب تغيير الباقة: الاسم والسعر فقط، بلا تكرار.
+List<Map<String, dynamic>> buildPortalCatalog(Iterable<PackagePlan> packages) {
+  final seen = <String>{};
+  return [
+    for (final p in packages)
+      if (p.name.trim().isNotEmpty && seen.add(p.name.trim().toLowerCase()))
+        {'name': p.name.trim(), 'price': p.price},
+  ];
 }
 
 class SubscriberPortalClient {
@@ -217,6 +254,23 @@ class SubscriberPortalClient {
 
   Future<void> setShowDebt(bool value) =>
       _send('PUT', '/portal-settings', body: {'show_debt': value});
+
+  Future<PortalSettings> settings() async => PortalSettings.fromJson(
+    Map<String, dynamic>.from(await _send('GET', '/portal-settings') as Map),
+  );
+
+  /// يسمح للمشترك بطلب باقة أخرى من باقات المكتب عند التجديد.
+  Future<void> setAllowPackageChange(bool value) =>
+      _send('PUT', '/portal-settings', body: {'allow_package_change': value});
+
+  Future<void> putCatalog(List<Map<String, dynamic>> packages) =>
+      _send('PUT', '/portal-packages', body: {'packages': packages});
+
+  /// إعلان لكل المشتركين المربوطين؛ يعيد عدد من وصلهم.
+  Future<int> announce(String text) async {
+    final data = await _send('POST', '/announcements', body: {'text': text.trim()});
+    return ((data as Map)['recipients'] as num?)?.toInt() ?? 0;
+  }
 
   Future<List<PortalRenewal>> renewals({String status = ''}) async {
     final query = status.isEmpty ? '' : '?status=$status';
@@ -423,14 +477,20 @@ class SubscriberPortalSync {
     required this.subscribers,
     required this.lastSasSync,
     required this.isEnabled,
+    this.packages = _noPackages,
     this.debounce = const Duration(seconds: 4),
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now;
+
+  static List<PackagePlan> _noPackages() => const [];
 
   final SubscriberPortalClient client;
   final List<Subscriber> Function() subscribers;
   final DateTime? Function() lastSasSync;
   final Future<bool> Function() isEnabled;
+
+  /// باقات المكتب، تُنشر ليختار منها المشترك عند السماح بتغيير الباقة.
+  final List<PackagePlan> Function() packages;
   final Duration debounce;
   final DateTime Function() _now;
 
@@ -438,6 +498,7 @@ class SubscriberPortalSync {
   final ValueNotifier<int> openRequests = ValueNotifier(0);
 
   final Map<String, String> _published = {};
+  String? _publishedCatalog;
   Set<String>? _links;
   DateTime? _linksAt;
   DateTime? _pausedUntil;
@@ -450,6 +511,7 @@ class SubscriberPortalSync {
     subscribers: () => AppStore.subscribers,
     lastSasSync: () => AppStore.lastSasSync,
     isEnabled: SubscriberPortalFeature.isEnabled,
+    packages: () => AppStore.packages,
   );
 
   void schedule() {
@@ -481,6 +543,12 @@ class SubscriberPortalSync {
         if (_published[id] == fingerprint) continue;
         await client.putSummary(id, summary);
         _published[id] = fingerprint;
+      }
+      final catalog = buildPortalCatalog(packages());
+      final catalogPrint = jsonEncode(catalog);
+      if (_publishedCatalog != catalogPrint) {
+        await client.putCatalog(catalog);
+        _publishedCatalog = catalogPrint;
       }
       final renewals = await client.renewals();
       for (final (request, end) in renewalsToComplete(renewals, byId)) {

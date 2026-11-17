@@ -264,4 +264,57 @@ void main() {
     ));
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
   });
+  testWidgets('the agent allows package changes, sees a change request, and sends an announcement', (tester) async {
+    var allowChange = false;
+    final puts = <String>[];
+    final announced = <String>[];
+    final client = SubscriberPortalClient(
+      gatewayUrl: 'https://gw.test',
+      getIdToken: () async => 'token',
+      client: MockClient((r) async {
+        Object? data = [];
+        if (r.url.path.endsWith('/portal-settings')) {
+          if (r.method == 'PUT') {
+            puts.add(r.body);
+            allowChange = (jsonDecode(r.body) as Map)['allow_package_change'] == true;
+          }
+          data = {'show_debt': false, 'allow_package_change': allowChange};
+        } else if (r.url.path.endsWith('/announcements')) {
+          announced.add((jsonDecode(r.body) as Map)['text'] as String);
+          data = {'recipients': 4};
+        } else if (r.url.path.endsWith('/renewal-requests')) {
+          data = [
+            {
+              'id': 'r2',
+              'number': 'R-1002',
+              'subscriber_id': 's1',
+              'subscriber_name': 'علي حسن',
+              'package_name': 'Fiber 100',
+              'current_package_name': 'Fiber 50',
+              'package_change': true,
+              'quoted_price': 50000,
+              'status': 'pending',
+              'created_at': '2026-11-20T00:00:00Z',
+            },
+          ];
+        }
+        return http.Response.bytes(utf8.encode(jsonEncode({'success': true, 'data': data})), 200);
+      }),
+    );
+    await tester.pumpWidget(MaterialApp(home: SubscriberPortalRequestsScreen(client: client)));
+    await tester.pumpAndSettle();
+    expect(find.text('تغيير الباقة: Fiber 50 ← Fiber 100 — 50000 د.ع'), findsOneWidget);
+
+    await tester.tap(find.text('السماح بطلب تغيير الباقة'));
+    await tester.pumpAndSettle();
+    expect(puts.single, '{"allow_package_change":true}');
+
+    await tester.tap(find.byTooltip('إعلان للمشتركين'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'صيانة الليلة من 2 إلى 4');
+    await tester.tap(find.text('إرسال'));
+    await tester.pumpAndSettle();
+    expect(announced.single, 'صيانة الليلة من 2 إلى 4');
+    expect(find.text('أُرسل الإعلان إلى 4 مشتركين.'), findsOneWidget);
+  });
 }

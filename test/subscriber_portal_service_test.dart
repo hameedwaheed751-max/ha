@@ -146,15 +146,15 @@ void main() {
       isEnabled: () async => true,
     );
     await sync.run();
-    expect(calls.where((c) => c.startsWith('PUT')), hasLength(1));
+    expect(calls.where((c) => c.contains('/subscriber-summaries/')), hasLength(1));
     expect(calls.where((c) => c.endsWith('/r1/result')), hasLength(1));
     // طلب تجديد بانتظار الرد + تذكرة بانتظار الرد.
     expect(sync.openRequests.value, 2);
     await sync.run();
-    expect(calls.where((c) => c.startsWith('PUT')), hasLength(1));
+    expect(calls.where((c) => c.contains('/subscriber-summaries/')), hasLength(1));
     s.name = 'علي حسن';
     await sync.run();
-    expect(calls.where((c) => c.startsWith('PUT')), hasLength(2));
+    expect(calls.where((c) => c.contains('/subscriber-summaries/')), hasLength(2));
   });
 
   test('sync does nothing for non-pilot accounts and pauses when the service is off', () async {
@@ -180,5 +180,82 @@ void main() {
     await pilot.run();
     await pilot.run();
     expect(hits, 1);
+  });
+  test('the package catalog keeps named packages with their price, once each', () {
+    final catalog = buildPortalCatalog([
+      PackagePlan(name: ' Fiber 50 ', price: 35000),
+      PackagePlan(name: 'fiber 50', price: 1),
+      PackagePlan(name: '', price: 9),
+      PackagePlan(name: 'Fiber 100', price: 50000),
+    ]);
+    expect(catalog, [
+      {'name': 'Fiber 50', 'price': 35000.0},
+      {'name': 'Fiber 100', 'price': 50000.0},
+    ]);
+  });
+
+  test('sync publishes the package catalog only when it changes', () async {
+    final calls = <String>[];
+    final packages = [PackagePlan(name: 'Fiber 50', price: 35000)];
+    final client = _client((r) async {
+      calls.add('${r.method} ${r.url.path}');
+      if (r.url.path.endsWith('/subscriber-links')) return _ok([]);
+      if (r.url.path.endsWith('/renewal-requests')) return _ok([]);
+      if (r.url.path.endsWith('/support-tickets')) return _ok([]);
+      return _ok({'count': 1});
+    });
+    final sync = SubscriberPortalSync(
+      client: client,
+      subscribers: () => [],
+      lastSasSync: () => null,
+      isEnabled: () async => true,
+      packages: () => packages,
+    );
+    await sync.run();
+    await sync.run();
+    expect(calls.where((c) => c.endsWith('/portal-packages')), hasLength(1));
+    packages.add(PackagePlan(name: 'Fiber 100', price: 50000));
+    await sync.run();
+    expect(calls.where((c) => c.endsWith('/portal-packages')), hasLength(2));
+  });
+
+  test('a package change request shows both packages', () {
+    final r = PortalRenewal.fromJson({
+      'id': 'r9',
+      'package_name': 'Fiber 100',
+      'current_package_name': 'Fiber 50',
+      'package_change': true,
+      'status': 'pending',
+      'created_at': '2026-11-20T00:00:00Z',
+    });
+    expect(r.packageChange, isTrue);
+    expect(r.packageLine, 'تغيير الباقة: Fiber 50 ← Fiber 100');
+    final same = PortalRenewal.fromJson({'package_name': 'Fiber 50', 'created_at': '2026-11-20T00:00:00Z'});
+    expect(same.packageChange, isFalse);
+    expect(same.packageLine, 'Fiber 50');
+  });
+
+  test('announce sends the text and returns how many subscribers it reached', () async {
+    late Map<String, dynamic> sent;
+    final client = _client((r) async {
+      expect(r.url.path, '/api/v1/agent/announcements');
+      sent = jsonDecode(r.body) as Map<String, dynamic>;
+      return _ok({'recipients': 7});
+    });
+    expect(await client.announce(' صيانة الليلة '), 7);
+    expect(sent, {'text': 'صيانة الليلة'});
+  });
+
+  test('portal settings read both switches, and each switch saves alone', () async {
+    final bodies = <Map<String, dynamic>>[];
+    final client = _client((r) async {
+      if (r.method == 'PUT') bodies.add(jsonDecode(r.body) as Map<String, dynamic>);
+      return _ok({'show_debt': true, 'allow_package_change': false});
+    });
+    final settings = await client.settings();
+    expect(settings.showDebt, isTrue);
+    expect(settings.allowPackageChange, isFalse);
+    await client.setAllowPackageChange(true);
+    expect(bodies.single, {'allow_package_change': true});
   });
 }

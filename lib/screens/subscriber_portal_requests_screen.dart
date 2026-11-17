@@ -24,7 +24,7 @@ class _SubscriberPortalRequestsScreenState
   late final SubscriberPortalClient _client =
       widget.client ?? SubscriberPortalSync.instance.client;
   List<PortalRenewal>? _items;
-  bool? _showDebt;
+  PortalSettings? _settings;
   String? _error;
   final Set<String> _busy = {};
 
@@ -37,11 +37,11 @@ class _SubscriberPortalRequestsScreenState
   Future<void> _load() async {
     setState(() => _error = null);
     try {
-      final results = await Future.wait([_client.renewals(), _client.showDebt()]);
+      final results = await Future.wait([_client.renewals(), _client.settings()]);
       if (!mounted) return;
       setState(() {
         _items = results[0] as List<PortalRenewal>;
-        _showDebt = results[1] as bool;
+        _settings = results[1] as PortalSettings;
       });
       // يرسل «تم التجديد» لما فُعّل منذ آخر حفظ.
       if (widget.client == null) SubscriberPortalSync.instance.schedule();
@@ -93,6 +93,31 @@ class _SubscriberPortalRequestsScreenState
     );
   }
 
+  /// إعلان يصل كإشعار لكل المشتركين المربوطين (انقطاع، صيانة، عرض…).
+  Future<void> _announce() async {
+    final text = await showDialog<String>(
+      context: context,
+      builder: (_) => const _AnnouncementDialog(),
+    );
+    if (text == null || text.isEmpty || !mounted) return;
+    try {
+      final count = await _client.announce(text);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            count == 0
+                ? 'لا يوجد مشتركون مربوطون بمشترك نت بعد.'
+                : 'أُرسل الإعلان إلى $count مشتركين.',
+          ),
+        ),
+      );
+    } on PortalException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   Widget _card(PortalRenewal r) {
     final busy = _busy.contains(r.id);
     final scheme = Theme.of(context).colorScheme;
@@ -115,7 +140,7 @@ class _SubscriberPortalRequestsScreenState
               ],
             ),
             const SizedBox(height: 4),
-            Text('${r.packageName} — ${r.quotedPrice.toStringAsFixed(0)} د.ع'),
+            Text('${r.packageLine} — ${r.quotedPrice.toStringAsFixed(0)} د.ع'),
             const SizedBox(height: 4),
             Text(
               r.statusLabel,
@@ -206,8 +231,15 @@ class _SubscriberPortalRequestsScreenState
           SwitchListTile(
             title: const Text('إظهار المستحقات للمشتركين'),
             subtitle: const Text('يرى المشترك المتبقي عليه ودفعاته في التطبيق'),
-            value: _showDebt ?? false,
+            value: _settings?.showDebt ?? false,
             onChanged: (value) => _act('settings', () => _client.setShowDebt(value)),
+          ),
+          SwitchListTile(
+            title: const Text('السماح بطلب تغيير الباقة'),
+            subtitle: const Text('يختار المشترك باقة أخرى من باقات المكتب عند طلب التجديد'),
+            value: _settings?.allowPackageChange ?? false,
+            onChanged: (value) =>
+                _act('settings', () => _client.setAllowPackageChange(value)),
           ),
           const Divider(),
           if (open.isEmpty)
@@ -234,6 +266,13 @@ class _SubscriberPortalRequestsScreenState
           appBar: AppBar(
             title: const Text('طلبات مشترك نت'),
             centerTitle: true,
+            actions: [
+              IconButton(
+                tooltip: 'إعلان للمشتركين',
+                icon: const Icon(Icons.campaign_outlined),
+                onPressed: _announce,
+              ),
+            ],
             // الشريط أخضر: التسميات بيضاء لتُقرأ، والمؤشر أبيض تحت المحدد.
             bottom: const TabBar(
               labelColor: Colors.white,
@@ -255,4 +294,56 @@ class _SubscriberPortalRequestsScreenState
       ),
     );
   }
+}
+
+/// نافذة كتابة الإعلان؛ تملك حقل النص وتتخلص منه بعد إغلاقها.
+class _AnnouncementDialog extends StatefulWidget {
+  const _AnnouncementDialog();
+
+  @override
+  State<_AnnouncementDialog> createState() => _AnnouncementDialogState();
+}
+
+class _AnnouncementDialogState extends State<_AnnouncementDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Directionality(
+    textDirection: TextDirection.rtl,
+    child: AlertDialog(
+      title: const Text('إعلان للمشتركين'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('يصل كإشعار لكل مشتركيك المربوطين بمشترك نت. ثلاثة إعلانات في اليوم كحد أقصى.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            maxLength: 500,
+            minLines: 3,
+            maxLines: 6,
+            decoration: const InputDecoration(
+              hintText: 'مثال: انقطاع للصيانة الليلة من 2 إلى 4 فجراً',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: const Text('إرسال'),
+        ),
+      ],
+    ),
+  );
 }

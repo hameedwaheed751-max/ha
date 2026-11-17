@@ -914,3 +914,117 @@ test('the agent is notified of a new renewal, a new ticket and a subscriber repl
     assert.ok(recorder.pushes.every((p) => p.uid === 'agent-a'));
   });
 });
+
+// --- إعلان الوكيل لمشتركيه ---
+
+test('an agent announcement reaches every linked subscriber, with limits', async () => {
+  const accountAdmin = fakeAccountAdmin();
+  const { app, advance } = setup({ accountAdmin });
+  await withServer(app, async (call) => {
+    const none = await call('POST', '/agent/announcements', { agent: 'agent-a', body: { text: 'صيانة الليلة' } });
+    assert.equal(none.status, 200);
+    assert.equal(none.json.data.recipients, 0);
+    await linkAccount(call);
+    await call('POST', '/subscriber/devices', {
+      account: 'acc-1',
+      body: { token: 'token-aaaaaaaaaaaaaaaaaaaaaaaa', platform: 'android' },
+    });
+    const empty = await call('POST', '/agent/announcements', { agent: 'agent-a', body: { text: '  ' } });
+    assert.equal(empty.json.error, 'validation_failed');
+    const long = await call('POST', '/agent/announcements', { agent: 'agent-a', body: { text: 'x'.repeat(501) } });
+    assert.equal(long.json.error, 'validation_failed');
+    const sent = await call('POST', '/agent/announcements', {
+      agent: 'agent-a',
+      body: { text: 'انقطاع للصيانة من 2 إلى 4 فجراً' },
+    });
+    assert.equal(sent.status, 200, JSON.stringify(sent.json));
+    assert.equal(sent.json.data.recipients, 1);
+    const list = await call('GET', '/subscriber/notifications', { account: 'acc-1' });
+    const message = list.json.data.find((n) => n.kind === 'agentMessage');
+    assert.equal(message.title, 'مكتب النور');
+    assert.equal(message.body, 'انقطاع للصيانة من 2 إلى 4 فجراً');
+    assert.equal(message.important, true);
+    assert.equal(accountAdmin.pushes.at(-1).title, 'مكتب النور');
+    // مشتركو الوكيل الآخر لا يصلهم شيء.
+    const other = await call('POST', '/agent/announcements', { agent: 'agent-b', body: { text: 'عرض' } });
+    assert.equal(other.json.data.recipients, 0);
+    // ثلاثة إعلانات في اليوم كحد أقصى.
+    await call('POST', '/agent/announcements', { agent: 'agent-a', body: { text: 'ثانٍ' } });
+    const limited = await call('POST', '/agent/announcements', { agent: 'agent-a', body: { text: 'رابع' } });
+    assert.equal(limited.status, 429);
+    assert.equal(limited.json.error, 'too_many_announcements');
+    advance(25 * HOUR);
+    const tomorrow = await call('POST', '/agent/announcements', { agent: 'agent-a', body: { text: 'غداً' } });
+    assert.equal(tomorrow.status, 200);
+    const history = await call('GET', '/agent/announcements', { agent: 'agent-a' });
+    assert.equal(history.json.data[0].text, 'غداً');
+    assert.equal(history.json.data.length, 4);
+  });
+});
+
+// --- تغيير الباقة ---
+
+test('subscribers see the agent catalog and may request another package only when allowed', async () => {
+  const recorder = recordAgentPushes();
+  const { app } = setup({ notifyAgent: recorder.notifyAgent });
+  await withServer(app, async (call) => {
+    const sub = await linkAccount(call);
+    const badCatalog = await call('PUT', '/agent/portal-packages', { agent: 'agent-a', body: { packages: 'x' } });
+    assert.equal(badCatalog.json.error, 'validation_failed');
+    const catalog = await call('PUT', '/agent/portal-packages', {
+      agent: 'agent-a',
+      body: {
+        packages: [
+          { name: 'Fiber 50', price: 35000 },
+          { name: 'Fiber 100', price: 50000 },
+          { name: '  ', price: 1 },
+        ],
+      },
+    });
+    assert.equal(catalog.status, 200, JSON.stringify(catalog.json));
+
+    let packages = (await call('GET', `/subscriber/packages?subscription_id=${sub.id}`, { account: 'acc-1' })).json.data;
+    assert.deepEqual(packages.map((p) => [p.name, p.is_current, p.requestable]), [
+      ['Fiber 50', true, true],
+      ['Fiber 100', false, false],
+    ]);
+    const other = packages.find((p) => p.name === 'Fiber 100');
+    const refused = await call('POST', '/subscriber/renewals', {
+      account: 'acc-1',
+      key: 'key-11111111',
+      body: { subscription_id: sub.id, package_id: other.id },
+    });
+    assert.equal(refused.json.error, 'validation_failed');
+
+    const settings = await call('PUT', '/agent/portal-settings', { agent: 'agent-a', body: { allow_package_change: true } });
+    assert.deepEqual(settings.json.data, { show_debt: false, allow_package_change: true });
+    const me = await call('GET', '/me', { account: 'acc-1' });
+    assert.equal(me.json.data.subscriptions[0].agent.allow_package_change, true);
+    packages = (await call('GET', `/subscriber/packages?subscription_id=${sub.id}`, { account: 'acc-1' })).json.data;
+    assert.equal(packages.find((p) => p.name === 'Fiber 100').requestable, true);
+
+    const changed = await call('POST', '/subscriber/renewals', {
+      account: 'acc-1',
+      key: 'key-22222222',
+      body: { subscription_id: sub.id, package_id: other.id },
+    });
+    assert.equal(changed.status, 200, JSON.stringify(changed.json));
+    assert.equal(changed.json.data.package_name, 'Fiber 100');
+    assert.equal(changed.json.data.quoted_price, 50000);
+    const inbox = await call('GET', '/agent/renewal-requests', { agent: 'agent-a' });
+    assert.equal(inbox.json.data[0].current_package_name, 'Fiber 50');
+    assert.equal(inbox.json.data[0].package_change, true);
+    assert.equal(recorder.pushes.at(-1).title, 'طلب تغيير باقة');
+    assert.match(recorder.pushes.at(-1).body, /Fiber 50.*Fiber 100/);
+  });
+});
+
+test('the old settings call with only show_debt still works', async () => {
+  const { app } = setup();
+  await withServer(app, async (call) => {
+    const res = await call('PUT', '/agent/portal-settings', { agent: 'agent-a', body: { show_debt: true } });
+    assert.deepEqual(res.json.data, { show_debt: true, allow_package_change: false });
+    const bad = await call('PUT', '/agent/portal-settings', { agent: 'agent-a', body: {} });
+    assert.equal(bad.json.error, 'validation_failed');
+  });
+});

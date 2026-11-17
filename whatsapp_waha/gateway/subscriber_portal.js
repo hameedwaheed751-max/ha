@@ -17,6 +17,9 @@ const OPEN_RENEWAL = new Set(['pending', 'approved', 'processing']);
 const LEDGER_TYPES = new Set(['subscription', 'renewal', 'payment', 'debt', 'settlement', 'discount', 'addition']);
 const CONNECTIONS = new Set(['online', 'offline', 'unknown']);
 const MAX_LEDGER_ENTRIES = 40;
+const MAX_CATALOG_PACKAGES = 60;
+const MAX_ANNOUNCEMENTS_PER_DAY = 3;
+const MAX_ANNOUNCEMENT_LENGTH = 500;
 
 class PortalError extends Error {
   constructor(status, code, message = '') {
@@ -198,6 +201,8 @@ function createSubscriberPortal({
     agentTickets: (agentUid) => `${PORTAL}/agents/${agentUid}/tickets`,
     ticketCounter: (agentUid) => `${PORTAL}/agents/${agentUid}/ticketCounter`,
     accountTickets: (accountId) => `${PORTAL}/ticketsByAccount/${accountId}`,
+    catalog: (agentUid) => `${PORTAL}/agents/${agentUid}/packages`,
+    announcements: (agentUid) => `${PORTAL}/agents/${agentUid}/announcements`,
   };
 
   async function findRecord(agentUid, subscriberId) {
@@ -218,7 +223,7 @@ function createSubscriberPortal({
       // حساب الماستر الذي يكتبه الوكيل في «إعدادات المكتب» ليدفع عليه مشتركوه.
       master_account: text(settings?.masterAccount, 60),
       show_debt: portalSettings?.showDebt === true,
-      allow_package_change: false,
+      allow_package_change: portalSettings?.allowPackageChange === true,
       lastSasSync: isoOrNull(settings?.lastSasSync),
     };
   }
@@ -522,21 +527,58 @@ function createSubscriberPortal({
     return { items: page, next_cursor: start + size < items.length ? String(start + size) : null };
   }
 
-  async function packages(accountId, subscriptionId) {
-    const { subscription } = await subscriptionFor(accountId, subscriptionId);
-    // D6-أ: نفس الباقة فقط في الإصدار الأول.
-    return [
-      {
-        id: subscription.package_id,
-        name: subscription.package_name,
-        speed_label: subscription.speed_label,
+  // باقات الوكيل كما ينشرها تطبيقه (الاسم والسعر فقط).
+  async function catalogOf(agentUid) {
+    return listOf(await db.get(paths.catalog(agentUid))).filter((p) => p && p.name);
+  }
+
+  async function putCatalog(agentUid, body) {
+    if (!body || !Array.isArray(body.packages)) fail(400, 'validation_failed');
+    const seen = new Set();
+    const items = [];
+    for (const p of body.packages.slice(0, MAX_CATALOG_PACKAGES * 2)) {
+      const name = text(p?.name, 60);
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) continue;
+      seen.add(key);
+      items.push({ name, price: amount(p?.price) });
+      if (items.length >= MAX_CATALOG_PACKAGES) break;
+    }
+    await db.set(paths.catalog(agentUid), items);
+    return { count: items.length };
+  }
+
+  // الباقة الحالية دائماً، ثم باقات الوكيل الأخرى؛ تُطلب فقط إن سمح الوكيل بالتغيير.
+  async function packageOptions(link, subscription) {
+    const current = {
+      id: subscription.package_id,
+      name: subscription.package_name,
+      speed_label: subscription.speed_label,
+      duration_days: 30,
+      price: subscription.price,
+      description: '',
+      is_current: true,
+      requestable: true,
+    };
+    const allowChange = subscription.agent.allow_package_change === true;
+    const others = (await catalogOf(link.agentUid))
+      .filter((p) => packageIdFor(p.name) !== current.id)
+      .map((p) => ({
+        id: packageIdFor(p.name),
+        name: p.name,
+        speed_label: '',
         duration_days: 30,
-        price: subscription.price,
+        price: p.price,
         description: '',
-        is_current: true,
-        requestable: true,
-      },
-    ];
+        is_current: false,
+        requestable: allowChange,
+      }));
+    return [current, ...others];
+  }
+
+  async function packages(accountId, subscriptionId) {
+    const { link, subscription } = await subscriptionFor(accountId, subscriptionId);
+    return packageOptions(link, subscription);
   }
 
   // --- الإشعارات ---
@@ -731,6 +773,8 @@ function createSubscriberPortal({
       subscriber_name: r.subscriberName,
       // تطبيق الوكيل يعتبر التجديد منفّذاً حين يتقدّم تاريخ الانتهاء عن هذا.
       previous_end_date: r.previousEndDate || null,
+      current_package_name: r.currentPackageName || r.packageName,
+      package_change: r.packageChange === true,
     };
   }
 
@@ -749,7 +793,12 @@ function createSubscriberPortal({
     if (existing) return existing;
 
     const { link, subscription } = await subscriptionFor(accountId, requireId(subscriptionId));
-    if (String(packageId || '') !== subscription.package_id) fail(400, 'validation_failed');
+    // الاسم والسعر من بيانات الوكيل، وأي سعر يرسله التطبيق يُتجاهل.
+    const chosen = (await packageOptions(link, subscription)).find(
+      (p) => p.id === String(packageId || '') && p.requestable,
+    );
+    if (!chosen) fail(400, 'validation_failed');
+    const packageChange = !chosen.is_current;
     if (!(await isAgentEligible(link.agentUid))) fail(409, 'agent_unavailable');
 
     const id = newId();
@@ -769,10 +818,11 @@ function createSubscriberPortal({
       linkId: link.linkId,
       subscriberId: link.subscriberId,
       subscriberName: subscription.subscriber_name,
-      packageId: subscription.package_id,
-      packageName: subscription.package_name,
-      // السعر من بيانات الوكيل، وأي سعر يرسله التطبيق يُتجاهل.
-      quotedPrice: subscription.price,
+      packageId: chosen.id,
+      packageName: chosen.name,
+      quotedPrice: chosen.price,
+      currentPackageName: subscription.package_name,
+      packageChange,
       previousEndDate: subscription.end_date,
       status: 'pending',
       createdAt: at,
@@ -794,8 +844,10 @@ function createSubscriberPortal({
       target: { kind: 'renewal', id },
     });
     await notifyAgent(link.agentUid, {
-      title: 'طلب تجديد جديد',
-      body: `${request.subscriberName} طلب تجديد ${request.packageName} (${request.number}).`,
+      title: packageChange ? 'طلب تغيير باقة' : 'طلب تجديد جديد',
+      body: packageChange
+        ? `${request.subscriberName}: من ${request.currentPackageName} إلى ${request.packageName} (${request.number}).`
+        : `${request.subscriberName} طلب تجديد ${request.packageName} (${request.number}).`,
       data: { kind: 'renewal', id },
     });
     return renewalView(id, request);
@@ -1176,13 +1228,57 @@ function createSubscriberPortal({
 
   async function getSettings(agentUid) {
     const settings = await db.get(paths.settings(agentUid));
-    return { show_debt: settings?.showDebt === true };
+    return {
+      show_debt: settings?.showDebt === true,
+      allow_package_change: settings?.allowPackageChange === true,
+    };
   }
 
+  // كل حقل اختياري (الإصدارات القديمة ترسل show_debt وحده)، لكن واحد على الأقل.
   async function putSettings(agentUid, body) {
-    if (!body || typeof body.show_debt !== 'boolean') fail(400, 'validation_failed');
-    await db.update(paths.settings(agentUid), { showDebt: body.show_debt });
+    const patch = {};
+    if (typeof body?.show_debt === 'boolean') patch.showDebt = body.show_debt;
+    if (typeof body?.allow_package_change === 'boolean') patch.allowPackageChange = body.allow_package_change;
+    if (Object.keys(patch).length === 0) fail(400, 'validation_failed');
+    await db.update(paths.settings(agentUid), patch);
     return getSettings(agentUid);
+  }
+
+  // --- إعلان الوكيل لكل مشتركيه المربوطين ---
+
+  async function announce(agentUid, body) {
+    const message = typeof body?.text === 'string' ? body.text.trim() : '';
+    if (!message || message.length > MAX_ANNOUNCEMENT_LENGTH) fail(400, 'validation_failed');
+    const dayAgo = new Date(now() - 24 * 60 * 60 * 1000).toISOString();
+    const recent = entriesOf(await db.get(paths.announcements(agentUid))).filter(([, a]) => a.at > dayAgo);
+    if (recent.length >= MAX_ANNOUNCEMENTS_PER_DAY) fail(429, 'too_many_announcements');
+    const office = await officeOf(agentUid);
+    // حساب واحد قد يربط أكثر من اشتراك لدى نفس الوكيل: إشعار واحد له.
+    const accounts = new Map();
+    for (const [subscriberId, record] of entriesOf(await db.get(paths.agentRecords(agentUid)))) {
+      if (record?.accountId && !accounts.has(record.accountId)) {
+        accounts.set(record.accountId, linkIdFor(agentUid, subscriberId));
+      }
+    }
+    const at = iso();
+    await db.set(`${paths.announcements(agentUid)}/${newId()}`, { text: message, at, recipients: accounts.size });
+    for (const [accountId, subscriptionId] of accounts) {
+      await notify(accountId, {
+        kind: 'agentMessage',
+        title: office.office_name,
+        body: message,
+        important: true,
+        subscriptionId,
+      });
+    }
+    return { recipients: accounts.size };
+  }
+
+  async function listAnnouncements(agentUid) {
+    return entriesOf(await db.get(paths.announcements(agentUid)))
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .slice(0, 20)
+      .map(([id, a]) => ({ id, text: a.text, at: a.at, recipients: a.recipients || 0 }));
   }
 
   async function home(accountId, subscriptionId) {
@@ -1223,6 +1319,9 @@ function createSubscriberPortal({
     unlink,
     getSettings,
     putSettings,
+    putCatalog,
+    announce,
+    listAnnouncements,
     registerDevice,
     deleteAccount,
     resetPasswordWithInvitation,
@@ -1299,6 +1398,12 @@ function createSubscriberPortalRouter({
     portal.getSettings(req.agentUid)));
   router.put('/agent/portal-settings', requireAgent, handle((req) =>
     portal.putSettings(req.agentUid, req.body)));
+  router.put('/agent/portal-packages', requireAgent, handle((req) =>
+    portal.putCatalog(req.agentUid, req.body)));
+  router.post('/agent/announcements', requireAgent, handle((req) =>
+    portal.announce(req.agentUid, req.body)));
+  router.get('/agent/announcements', requireAgent, handle((req) =>
+    portal.listAnnouncements(req.agentUid)));
   router.get('/agent/renewal-requests', requireAgent, handle((req) =>
     portal.listAgentRenewals(req.agentUid, typeof req.query.status === 'string' ? req.query.status : '')));
   router.post('/agent/renewal-requests/:id/decision', requireAgent, handle((req) =>
