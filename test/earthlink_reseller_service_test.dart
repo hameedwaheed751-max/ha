@@ -355,6 +355,50 @@ void main() {
     });
   });
 
+  group('parseSubscriberGrid', () {
+    const grid = '''
+      <table class="rgMasterTable">
+      <tr class="rgRow">
+        <td>Refill Extend Change</td>
+        <td>001@zox ابو فاطمه Affiliate: x</td>
+        <td>ابو فاطمه 001 zafranea</td>
+        <td>Last Refill : 385 days ago | Payment : All Paid</td>
+        <td>27/11/2025 12:46 PM</td>
+        <td>Acc. Name : Plus | Acc. Status : Suspended | Days : 0</td>
+        <td>Status : Offline</td>
+        <td>Mobile : 07700000000 | User Notes :</td>
+      </tr>
+      <tr class="rgAltRow">
+        <td>Refill</td>
+        <td>077@zox مشترك ثاني</td>
+        <td>مشترك ثاني</td>
+        <td>Payment : Paid</td>
+        <td>01/01/2026 10:00 AM</td>
+        <td>Acc. Name : Standard | Acc. Status : Active</td>
+        <td>Status : Online</td>
+        <td>Mobile : 07800000000</td>
+      </tr>
+      </table>
+    ''';
+
+    test('reads uid, plan, status, expiration and mobile per row', () {
+      final users = parseSubscriberGrid(grid);
+      expect(users.length, 2);
+      expect(users[0].userId, '001@zox');
+      expect(users[0].planName, 'Plus');
+      expect(users[0].status, 'Suspended');
+      expect(users[0].expiration, '27/11/2025 12:46 PM');
+      expect(users[0].mobile, '07700000000');
+      expect(users[1].userId, '077@zox');
+      expect(users[1].planName, 'Standard');
+      expect(users[1].status, 'Active');
+    });
+
+    test('empty when there are no grid rows', () {
+      expect(parseSubscriberGrid('<html>no grid</html>'), isEmpty);
+    });
+  });
+
   group('parsePlans', () {
     test('reads id/name options and drops dups and blanks', () {
       final plans = parsePlans('''

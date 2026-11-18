@@ -283,6 +283,86 @@ class EarthlinkActionResult {
   final String? newExpiration;
 }
 
+/// مشترك في جدول المستخدمين (UserManagement.aspx RadGrid)، لمزامنته للقائمة.
+class EarthlinkListUser {
+  const EarthlinkListUser({
+    required this.userId,
+    required this.name,
+    required this.planName,
+    required this.status,
+    required this.expiration,
+    required this.mobile,
+  });
+
+  final String userId;
+  final String name;
+  final String planName;
+  final String status; // Active / Suspended ...
+  final String expiration;
+  final String mobile;
+}
+
+String _stripTags(String html) => html
+    .replaceAll(RegExp(r'<[^>]+>'), ' ')
+    .replaceAll('&nbsp;', ' ')
+    .replaceAll('&#39;', "'")
+    .replaceAll('&amp;', '&')
+    .replaceAll(RegExp(r'[ \t\r\n]+'), ' ')
+    .trim();
+
+String _after(String text, String label) {
+  final i = text.indexOf(label);
+  if (i < 0) return '';
+  final rest = text.substring(i + label.length).trimLeft();
+  // حتى الفاصل التالي (علامة حقل آخر أو نهاية).
+  final m = RegExp(r'^[^:|]+').firstMatch(rest);
+  return (m?.group(0) ?? '').trim();
+}
+
+/// يحلّل صفوف جدول المستخدمين إلى مشتركين. يعتمد على أعمدة RadGrid الثابتة
+/// (اسم المستخدم، تاريخ الانتهاء، Acc. Name/Status، الموبايل).
+List<EarthlinkListUser> parseSubscriberGrid(String html) {
+  final out = <EarthlinkListUser>[];
+  final seen = <String>{};
+  final rows = RegExp(
+    r'<tr[^>]*class="[^"]*rg(?:Row|AltRow)[^"]*"[^>]*>([\s\S]*?)</tr>',
+    caseSensitive: false,
+  ).allMatches(html);
+  for (final row in rows) {
+    final cells = RegExp(
+      r'<td[^>]*>([\s\S]*?)</td>',
+      caseSensitive: false,
+    ).allMatches(row.group(1) ?? '').map((m) => _stripTags(m.group(1)!)).toList();
+    if (cells.length < 6) continue;
+    final uidText = cells.firstWhere(
+      (c) => RegExp(r'\S+@\S+').hasMatch(c),
+      orElse: () => '',
+    );
+    final uid = RegExp(r'(\S+@\S+)').firstMatch(uidText)?.group(1) ?? '';
+    if (uid.isEmpty || !seen.add(uid)) continue;
+    final accInfo = cells.firstWhere(
+      (c) => c.contains('Acc. Name') || c.contains('Acc. Status'),
+      orElse: () => '',
+    );
+    final exp = cells.firstWhere(
+      (c) => RegExp(r'^\d{1,2}/\d{1,2}/\d{4}').hasMatch(c),
+      orElse: () => '',
+    );
+    final mob = cells.firstWhere((c) => c.contains('Mobile'), orElse: () => '');
+    out.add(
+      EarthlinkListUser(
+        userId: uid,
+        name: _after(uidText, uid).replaceFirst(RegExp(r'^[\s|]+'), '').trim(),
+        planName: _after(accInfo, 'Acc. Name :'),
+        status: _after(accInfo, 'Acc. Status :'),
+        expiration: exp.trim(),
+        mobile: _after(mob, 'Mobile :'),
+      ),
+    );
+  }
+  return out;
+}
+
 /// باقة (نوع اشتراك) كما في قائمة AccountTypes بصفحة تغيير الباقة.
 class EarthlinkPlan {
   const EarthlinkPlan({required this.id, required this.name});
@@ -505,6 +585,32 @@ class EarthlinkResellerService {
     } catch (_) {
       throw const EarthlinkException('رد غير مقروء من إيرثلنك');
     }
+  }
+
+  /// قائمة مشتركي الوكيل من جدول UserManagement (لمزامنتهم في قائمة التطبيق).
+  /// الوسائط الافتراضية مطابقة لما يظهر في HAR.
+  Future<List<EarthlinkListUser>> fetchSubscribers({
+    int userst = 6,
+    int t = 5,
+  }) async {
+    _guardWeb();
+    final page = await _client.get(
+      _uri('/UserManagement.aspx', {'userst': userst, 't': t}),
+      headers: _headers(),
+    );
+    _absorb(page);
+    if (page.statusCode != 200) {
+      throw EarthlinkException(
+        'تعذّر جلب قائمة المشتركين',
+        statusCode: page.statusCode,
+      );
+    }
+    final users = parseSubscriberGrid(page.body);
+    // صفحة دخول بدل الجدول = جلسة منتهية.
+    if (users.isEmpty && !page.body.contains('rgMasterTable')) {
+      throw const EarthlinkException('انتهت جلسة إيرثلنك. سجّل الدخول.');
+    }
+    return users;
   }
 
   /// قائمة الباقات المتاحة للمشترك (من صفحة تغيير الباقة). تُعرض في منتقي
