@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// خدمة وكيل إيرثلنك عبر لوحة الوكلاء الويب admin.earthlink.iq.
 ///
@@ -18,6 +22,117 @@ class EarthlinkException implements Exception {
   final int? statusCode;
   @override
   String toString() => 'EarthlinkException($message)';
+}
+
+/// إعدادات حساب وكيل إيرثلنك، تُحفظ كما تُحفظ إعدادات FTTH: اسم المستخدم
+/// والرابط في SharedPreferences وفي Firebase (agents/{uid}/earthlink_reseller،
+/// مسموح به بقواعد agents)، وكلمة المرور في التخزين الآمن على الجهاز فقط.
+class EarthlinkResellerSettings {
+  const EarthlinkResellerSettings({
+    required this.username,
+    required this.password,
+    this.baseUrl = 'https://admin.earthlink.iq',
+  });
+
+  final String username;
+  final String password;
+  final String baseUrl;
+
+  static const _baseUrlKey = 'earthlink_base_url';
+  static const _usernameKey = 'earthlink_username';
+  static const _passwordKey = 'earthlink_password';
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
+
+  static DatabaseReference? _remoteRef() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return uid == null
+        ? null
+        : FirebaseDatabase.instance.ref('agents/$uid/earthlink_reseller');
+  }
+
+  static Future<bool> _pullFromFirebase(SharedPreferences prefs) async {
+    final ref = _remoteRef();
+    if (ref == null) return true;
+    final value = (await ref.get().timeout(const Duration(seconds: 5))).value;
+    if (value is! Map) return false;
+    final username = (value['username'] ?? '').toString().trim();
+    if (username.isEmpty) return false;
+    final baseUrl = (value['baseUrl'] ?? '').toString().trim();
+    if (baseUrl.isNotEmpty) await prefs.setString(_baseUrlKey, baseUrl);
+    await prefs.setString(_usernameKey, username);
+    final password = (value['password'] ?? '').toString();
+    if (password.isNotEmpty && (await _loadLocal(prefs)).password.isEmpty) {
+      await _storePassword(prefs, password);
+    }
+    return true;
+  }
+
+  static Future<void> _storePassword(
+    SharedPreferences prefs,
+    String password,
+  ) async {
+    try {
+      await _secureStorage.write(key: _passwordKey, value: password);
+      await prefs.remove(_passwordKey);
+    } catch (_) {
+      await prefs.setString(_passwordKey, password);
+    }
+  }
+
+  static Future<EarthlinkResellerSettings> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    var foundRemote = true;
+    try {
+      foundRemote = await _pullFromFirebase(prefs);
+    } catch (error) {
+      debugPrint('[Earthlink] settings pull failed: $error');
+    }
+    final settings = await _loadLocal(prefs);
+    if (!foundRemote && settings.isComplete) await settings.save();
+    return settings;
+  }
+
+  static Future<EarthlinkResellerSettings> _loadLocal(
+    SharedPreferences prefs,
+  ) async {
+    String password = '';
+    try {
+      password = await _secureStorage.read(key: _passwordKey) ?? '';
+    } catch (_) {
+      password = prefs.getString(_passwordKey) ?? '';
+    }
+    return EarthlinkResellerSettings(
+      baseUrl: prefs.getString(_baseUrlKey) ?? 'https://admin.earthlink.iq',
+      username: prefs.getString(_usernameKey) ?? '',
+      password: password,
+    );
+  }
+
+  Future<void> save() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_baseUrlKey, baseUrl.trim());
+    await prefs.setString(_usernameKey, username.trim());
+    await _storePassword(prefs, password);
+    try {
+      await _remoteRef()
+          ?.update({
+            'baseUrl': baseUrl.trim(),
+            'username': username.trim(),
+            'updatedAt': ServerValue.timestamp,
+          })
+          .timeout(const Duration(seconds: 8));
+    } catch (error) {
+      debugPrint('[Earthlink] settings save to Firebase failed: $error');
+    }
+  }
+
+  bool get isComplete => username.trim().isNotEmpty && password.isNotEmpty;
+
+  bool get needsPassword => username.trim().isNotEmpty && password.isEmpty;
+
+  static const missingPasswordMessage =
+      'أدخل كلمة مرور وكيل إيرثلنك على هذا الجهاز ثم احفظ. '
+      'تُحفظ على الجهاز فقط.';
 }
 
 /// حقل مخفي في صفحة ASP.NET (مثل __VIEWSTATE) كما يظهر في وسم input.
@@ -268,6 +383,14 @@ class EarthlinkResellerService {
     http.Client? client,
     this.baseUrl = 'https://admin.earthlink.iq',
   }) : _client = client ?? http.Client();
+
+  EarthlinkResellerService.fromSettings(
+    EarthlinkResellerSettings settings, {
+    http.Client? client,
+  }) : username = settings.username,
+       password = settings.password,
+       baseUrl = settings.baseUrl,
+       _client = client ?? http.Client();
 
   final String username;
   final String password;

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../earthlink_reseller_service.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
@@ -19,6 +20,14 @@ class _NationalProjectPick {
 }
 
 const _nationalProjectPick = _NationalProjectPick();
+
+/// قيمة تُرجعها قائمة الدليل حين يختار الوكيل «إيرثلنك»، فله شاشة ربط خاصة
+/// (لوحة وكلاء admin.earthlink.iq) بدل ربط ساس radius العادي.
+class _EarthlinkPick {
+  const _EarthlinkPick();
+}
+
+const _earthlinkPick = _EarthlinkPick();
 
 /// ربط SAS Radius: كل الساسات، الأساسي والإضافية، بطاقات بنفس الخيارات.
 class SasSettingsScreen extends StatefulWidget {
@@ -731,6 +740,9 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
   /// المشروع الوطني: نفس الواجهة لكن محرّك ربط FTTH خاص بدل ساس radius.
   bool _national = false;
 
+  /// إيرثلنك: نفس الواجهة لكن محرّك لوحة وكلاء admin.earthlink.iq.
+  bool _earthlink = false;
+
   /// اسم مضيف الشركة المختارة، يظهر في ترويسة «رابط محفوظ».
   String _pickedHost = '';
 
@@ -751,6 +763,7 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
       _pickedHost = company.host;
       _picked = true;
       _national = false;
+      _earthlink = false;
       _error = null;
     });
   }
@@ -764,6 +777,7 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
       _label.text = 'المشروع الوطني';
       _pickedHost = 'admin.ftth.iq';
       _national = true;
+      _earthlink = false;
       _picked = true;
       _error = null;
     });
@@ -778,11 +792,36 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
     }
   }
 
+  /// «إيرثلنك» شركة في الدليل بمحرّك لوحة الوكلاء الخاص. نفس الواجهة (اسم
+  /// مستخدم + كلمة مرور) ونملأ اليوزر المحفوظ إن وُجد.
+  Future<void> _pickEarthlink() async {
+    setState(() {
+      _company.text = 'إيرثلنك';
+      _server.text = 'https://admin.earthlink.iq';
+      _label.text = 'إيرثلنك';
+      _pickedHost = 'admin.earthlink.iq';
+      _earthlink = true;
+      _national = false;
+      _picked = true;
+      _error = null;
+    });
+    try {
+      final saved = await EarthlinkResellerSettings.load();
+      if (!mounted || !_earthlink) return;
+      if (saved.username.trim().isNotEmpty && _user.text.trim().isEmpty) {
+        setState(() => _user.text = saved.username.trim());
+      }
+    } catch (_) {
+      // تعذّر تحميل الإعدادات المحفوظة لا يمنع الإدخال اليدوي.
+    }
+  }
+
   /// العودة من وضع الاختيار إلى الإدخال اليدوي واختيار شركة أخرى.
   void _resetPick() {
     setState(() {
       _picked = false;
       _national = false;
+      _earthlink = false;
       _pickedHost = '';
       _company.clear();
       _server.clear();
@@ -835,9 +874,41 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
     }
   }
 
+  /// ربط إيرثلنك: يتحقق من الدخول للوحة الوكلاء ويحفظ الإعدادات.
+  /// لا يُنشئ كارت ساس؛ العمليات تتم من شاشة إيرثلنك بالبحث عن المشترك.
+  Future<void> _saveEarthlink() async {
+    if (_user.text.trim().isEmpty || _pass.text.isEmpty) {
+      setState(() => _error = 'أدخل اسم المستخدم وكلمة المرور');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final settings = EarthlinkResellerSettings(
+      username: _user.text.trim(),
+      password: _pass.text,
+    );
+    final service = EarthlinkResellerService.fromSettings(settings);
+    try {
+      await service.login().timeout(const Duration(seconds: 45));
+      await settings.save();
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      service.dispose();
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _save() async {
     if (_national) {
       await _saveNational();
+      return;
+    }
+    if (_earthlink) {
+      await _saveEarthlink();
       return;
     }
     if (_label.text.trim().isEmpty ||
@@ -933,6 +1004,7 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
                   directory: _directory,
                   onPicked: _pickCompany,
                   onNationalProject: _pickNationalProject,
+                  onEarthlink: _pickEarthlink,
                 ),
                 const SizedBox(height: 10),
                 TextField(
@@ -1073,6 +1145,7 @@ class _CompanyPickerButton extends StatelessWidget {
     required this.directory,
     required this.onPicked,
     required this.onNationalProject,
+    required this.onEarthlink,
   });
 
   final Future<List<DirectoryCompany>>? directory;
@@ -1080,6 +1153,9 @@ class _CompanyPickerButton extends StatelessWidget {
 
   /// عند اختيار «المشروع الوطني» من القائمة (شاشة ربط خاصة).
   final VoidCallback onNationalProject;
+
+  /// عند اختيار «إيرثلنك» من القائمة (شاشة ربط خاصة).
+  final VoidCallback onEarthlink;
 
   Future<void> _open(BuildContext context, List<DirectoryCompany> all) async {
     final picked = await showModalBottomSheet<Object>(
@@ -1089,6 +1165,8 @@ class _CompanyPickerButton extends StatelessWidget {
     );
     if (picked is _NationalProjectPick) {
       onNationalProject();
+    } else if (picked is _EarthlinkPick) {
+      onEarthlink();
     } else if (picked is DirectoryCompany) {
       onPicked(picked);
     }
@@ -1156,10 +1234,48 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
         'national'.contains(q);
   }
 
+  /// «إيرثلنك» مثبّت أعلى القائمة أيضاً؛ يظهر ما لم يستبعده البحث.
+  bool get _showEarthlink {
+    final q = _search.text.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return 'إيرثلنك'.contains(q) ||
+        'ايرثلنك'.contains(q) ||
+        'earthlink'.contains(q) ||
+        'earthlink.iq'.contains(q);
+  }
+
+  /// بطاقات العناصر المثبّتة أعلى القائمة (المشروع الوطني ثم إيرثلنك).
+  List<Widget> _pinnedTiles(BuildContext context) => [
+    if (_showNational)
+      ListTile(
+        key: const ValueKey('directory-national-project'),
+        leading: CircleAvatar(
+          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+          child: const Icon(Icons.account_tree_outlined),
+        ),
+        title: const Text('المشروع الوطني'),
+        subtitle: const Text('admin.ftth.iq — شاشة ربط خاصة'),
+        trailing: const Icon(Icons.verified, size: 18),
+        onTap: () => Navigator.pop(context, _nationalProjectPick),
+      ),
+    if (_showEarthlink)
+      ListTile(
+        key: const ValueKey('directory-earthlink'),
+        leading: CircleAvatar(
+          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+          child: const Icon(Icons.router_outlined),
+        ),
+        title: const Text('إيرثلنك'),
+        subtitle: const Text('admin.earthlink.iq — شاشة ربط خاصة'),
+        trailing: const Icon(Icons.verified, size: 18),
+        onTap: () => Navigator.pop(context, _earthlinkPick),
+      ),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final filtered = _filtered;
-    final showNational = _showNational;
+    final pinned = _pinnedTiles(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -1197,35 +1313,14 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
                 ),
               ),
               Expanded(
-                child: (filtered.isEmpty && !showNational)
+                child: (filtered.isEmpty && pinned.isEmpty)
                     ? const Center(child: Text('لا توجد شركة مطابقة'))
                     : ListView.builder(
                         controller: controller,
-                        itemCount: filtered.length + (showNational ? 1 : 0),
+                        itemCount: filtered.length + pinned.length,
                         itemBuilder: (context, i) {
-                          if (showNational && i == 0) {
-                            return ListTile(
-                              key: const ValueKey(
-                                'directory-national-project',
-                              ),
-                              leading: CircleAvatar(
-                                backgroundColor: Theme.of(
-                                  context,
-                                ).colorScheme.primaryContainer,
-                                child: const Icon(Icons.account_tree_outlined),
-                              ),
-                              title: const Text('المشروع الوطني'),
-                              subtitle: const Text(
-                                'admin.ftth.iq — شاشة ربط خاصة',
-                              ),
-                              trailing: const Icon(Icons.verified, size: 18),
-                              onTap: () => Navigator.pop(
-                                context,
-                                _nationalProjectPick,
-                              ),
-                            );
-                          }
-                          final c = filtered[i - (showNational ? 1 : 0)];
+                          if (i < pinned.length) return pinned[i];
+                          final c = filtered[i - pinned.length];
                           return ListTile(
                             key: ValueKey('directory-${c.host}'),
                             leading: ClipRRect(
