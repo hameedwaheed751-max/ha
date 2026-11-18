@@ -893,6 +893,8 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
     try {
       await service.login().timeout(const Duration(seconds: 45));
       await settings.save();
+      // مزامنة أولى في الخلفية لتظهر مشتركوه دون انتظار إعادة الدخول.
+      unawaited(EarthlinkResellerService.syncSaved());
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');

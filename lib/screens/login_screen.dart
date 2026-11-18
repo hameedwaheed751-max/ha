@@ -7,6 +7,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models.dart';
+import '../earthlink_reseller_service.dart';
 import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
 import '../services/app_startup.dart';
@@ -211,6 +212,14 @@ class _LoginScreenState extends State<LoginScreen> {
           );
         } catch (error) {
           debugPrint('[FTTH SAS] startup sync failed: $error');
+        }
+        // إيرثلنك بعدهما، لنفس السبب (كتابة متسلسلة على قائمة المشتركين).
+        try {
+          await EarthlinkResellerService.syncSaved().timeout(
+            const Duration(minutes: 3),
+          );
+        } catch (error) {
+          debugPrint('[Earthlink] startup sync failed: $error');
         }
       });
     } catch (e) {

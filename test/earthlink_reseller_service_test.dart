@@ -355,6 +355,20 @@ void main() {
     });
   });
 
+  group('parseEarthlinkDate', () {
+    test('reads DD/MM/YYYY with 12-hour AM/PM', () {
+      final d = parseEarthlinkDate('27/11/2025 12:46 PM');
+      expect(d, DateTime(2025, 11, 27, 12, 46));
+      expect(parseEarthlinkDate('01/01/2026 12:00 AM'), DateTime(2026, 1, 1, 0));
+      expect(parseEarthlinkDate('05/03/2026 09:30 PM'), DateTime(2026, 3, 5, 21, 30));
+    });
+
+    test('date-only and junk', () {
+      expect(parseEarthlinkDate('15/06/2026'), DateTime(2026, 6, 15));
+      expect(parseEarthlinkDate('no date'), isNull);
+    });
+  });
+
   group('parseSubscriberGrid', () {
     const grid = '''
       <table class="rgMasterTable">

@@ -1,12 +1,15 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../earthlink_reseller_service.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
+import 'earthlink_refill_dialog.dart';
 import '../services/render_whatsapp_service.dart';
 import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
@@ -822,6 +825,54 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
   }
 
+  /// تعبئة/تجديد مشترك إيرثلنك عبر لوحة الوكلاء. تصرف مالاً، فالخدمة تسجّل
+  /// الدخول ثم يختار الوكيل البطاقة/الرصيد والباقة في الحوار.
+  Future<void> _openEarthlinkRefill(
+    Subscriber s, {
+    BuildContext? modalContext,
+  }) async {
+    if (modalContext != null && modalContext.mounted) {
+      Navigator.pop(modalContext);
+    }
+    final uid = (s.sasData['earthlink_uid'] ?? s.user).toString().trim();
+    if (uid.isEmpty) {
+      _showFtthMessage('❌ معرّف مشترك إيرثلنك غير موجود', color: Colors.red);
+      return;
+    }
+    final settings = await EarthlinkResellerSettings.load();
+    if (settings.needsPassword) {
+      _showFtthMessage(
+        '❌ ${EarthlinkResellerSettings.missingPasswordMessage}',
+        color: Colors.red,
+      );
+      return;
+    }
+    if (settings.username.trim().isEmpty) {
+      _showFtthMessage('❌ أكمل ربط إيرثلنك أولاً', color: Colors.red);
+      return;
+    }
+    if (!mounted) return;
+    final done = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => EarthlinkRefillDialog(
+        uid: uid,
+        subscriberName: s.name.isNotEmpty ? s.name : uid,
+        currentPlan: (s.sasData['plan'] ?? s.type ?? '').toString(),
+        serviceFactory: () async {
+          final service = EarthlinkResellerService.fromSettings(settings);
+          await service.login().timeout(const Duration(seconds: 45));
+          return service;
+        },
+      ),
+    );
+    // نجاح التعبئة يحدّث الانتهاء؛ نزامن لتحديث القائمة.
+    if (done == true) {
+      unawaited(EarthlinkResellerService.syncSaved());
+      if (mounted) setState(() {});
+    }
+  }
+
   ({String subscriptionId, String customerId}) _ftthIds(Subscriber s) {
     final subscriptionId = s.sasId.trim().isNotEmpty
         ? s.sasId.trim()
@@ -1469,15 +1520,24 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 _op(
                   Icons.check_circle,
                   Colors.green,
-                  s.source == 'ftth' && !s.expired ? 'تجديد' : 'تفعيل',
+                  (s.source == 'ftth' || s.source == 'earthlink') && !s.expired
+                      ? 'تجديد'
+                      : 'تفعيل',
                   () async {
                     if (s.source == 'ftth') {
                       _activateFtthSubscriber(s, modalContext: ctx);
+                    } else if (s.source == 'earthlink') {
+                      _openEarthlinkRefill(s, modalContext: ctx);
                     } else {
                       _activateSubscriber(s, modalContext: ctx);
                     }
                   },
                 ),
+                if (s.source == 'earthlink')
+                  _op(Icons.swap_horiz, Colors.purple, 'تغيير الباقة', () {
+                    // تغيير الباقة في إيرثلنك = التعبئة بباقة أخرى.
+                    _openEarthlinkRefill(s, modalContext: ctx);
+                  }),
                 if (isSas)
                   _op(Icons.calendar_month, Colors.orange, 'تمديد', () {
                     Navigator.pop(ctx);

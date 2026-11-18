@@ -8,6 +8,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'models.dart';
+
 /// خدمة وكيل إيرثلنك عبر لوحة الوكلاء الويب admin.earthlink.iq.
 ///
 /// ليست SAS4 ولا FTTH: إنها بوابة ASP.NET WebForms على IIS، المصادقة فيها
@@ -281,6 +283,25 @@ class EarthlinkActionResult {
   final bool success;
   final String message;
   final String? newExpiration;
+}
+
+/// يحلّل تاريخ إيرثلنك "DD/MM/YYYY hh:mm AM/PM" إلى DateTime محلي.
+DateTime? parseEarthlinkDate(String text) {
+  final m = RegExp(
+    r'(\d{1,2})/(\d{1,2})/(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*([AaPp][Mm])?)?',
+  ).firstMatch(text.trim());
+  if (m == null) return null;
+  var hour = int.tryParse(m.group(4) ?? '0') ?? 0;
+  final ap = (m.group(6) ?? '').toUpperCase();
+  if (ap == 'PM' && hour < 12) hour += 12;
+  if (ap == 'AM' && hour == 12) hour = 0;
+  return DateTime(
+    int.parse(m.group(3)!),
+    int.parse(m.group(2)!),
+    int.parse(m.group(1)!),
+    hour,
+    int.tryParse(m.group(5) ?? '0') ?? 0,
+  );
 }
 
 /// مشترك في جدول المستخدمين (UserManagement.aspx RadGrid)، لمزامنته للقائمة.
@@ -585,6 +606,73 @@ class EarthlinkResellerService {
     } catch (_) {
       throw const EarthlinkException('رد غير مقروء من إيرثلنك');
     }
+  }
+
+  /// مزامنة مشتركي إيرثلنك المحفوظين إلى قائمة التطبيق (بنفس نمط FTTH).
+  /// تُستدعى عند الدخول، بعد مزامنة SAS وFTTH لتجنّب تعارض الكتابة.
+  static Future<int?> syncSaved() async {
+    final settings = await EarthlinkResellerSettings.load();
+    if (!settings.isComplete) return null;
+    final service = EarthlinkResellerService.fromSettings(settings);
+    try {
+      await service.login();
+      final users = await service.fetchSubscribers();
+      return await service.syncSubscribers(users);
+    } finally {
+      service.dispose();
+    }
+  }
+
+  /// يكتب/يحدّث مشتركي إيرثلنك في AppStore، بالمطابقة على (source=earthlink, uid).
+  Future<int> syncSubscribers(List<EarthlinkListUser> users) async {
+    var changed = 0;
+    for (final u in users) {
+      final end = parseEarthlinkDate(u.expiration) ?? DateTime.now();
+      final active = u.status.toLowerCase() == 'active';
+      final sasData = <String, dynamic>{
+        'provider': 'إيرثلنك',
+        'earthlink_uid': u.userId,
+        'status': u.status,
+        'plan': u.planName,
+        'expiration': u.expiration,
+      };
+      final index = AppStore.subscribers.indexWhere(
+        (item) => item.source == 'earthlink' && item.sasId == u.userId,
+      );
+      if (index < 0) {
+        AppStore.subscribers.add(
+          Subscriber(
+            user: u.userId,
+            name: u.name.isNotEmpty ? u.name : u.userId,
+            phone: u.mobile,
+            address: '',
+            ip: '',
+            type: u.planName,
+            price: 0,
+            startDate: end,
+            endDate: end,
+            active: active,
+            source: 'earthlink',
+            sasId: u.userId,
+            sasOnline: false,
+            sasData: sasData,
+          ),
+        );
+        changed++;
+      } else {
+        AppStore.subscribers[index]
+          ..name = u.name.isNotEmpty ? u.name : u.userId
+          ..phone = u.mobile
+          ..type = u.planName
+          ..endDate = end
+          ..active = active
+          ..sasData = sasData;
+        changed++;
+      }
+    }
+    await AppStore.save();
+    _log('sync complete: $changed subscribers');
+    return changed;
   }
 
   /// قائمة مشتركي الوكيل من جدول UserManagement (لمزامنتهم في قائمة التطبيق).
