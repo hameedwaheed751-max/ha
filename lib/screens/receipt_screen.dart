@@ -69,12 +69,18 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   Future<void> _issueNumber() async {
     if (hasBoundInvoice) {
-      if (mounted)
+      if (mounted) {
         setState(() => receiptNumber = widget.invoice!.receiptNumber);
+      }
       return;
     }
-    final n = await AppStore.issueReceiptNumber();
-    if (mounted) setState(() => receiptNumber = n);
+    try {
+      final n = await AppStore.issueReceiptNumber();
+      if (mounted) setState(() => receiptNumber = n);
+    } catch (_) {
+      // حتى لو فشل الإصدار، لا نترك الوصل بلا رقم ولا أزراره معطّلة.
+      if (mounted) setState(() => receiptNumber = AppStore.nextReceiptNumber);
+    }
   }
 
   Future<Uint8List> buildPdf() async {

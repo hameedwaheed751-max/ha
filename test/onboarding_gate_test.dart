@@ -10,6 +10,8 @@ void main() {
     bool radiusSynced = false,
     bool ftthConfigured = false,
     bool ftthHasSubscribers = false,
+    bool earthlinkConfigured = false,
+    bool earthlinkHasSubscribers = false,
   }) => OnboardingGate.trialOnboardingNeeded(
     isAdmin: isAdmin,
     onFreeTrial: onFreeTrial,
@@ -18,6 +20,8 @@ void main() {
     radiusSynced: radiusSynced,
     ftthConfigured: ftthConfigured,
     ftthHasSubscribers: ftthHasSubscribers,
+    earthlinkConfigured: earthlinkConfigured,
+    earthlinkHasSubscribers: earthlinkHasSubscribers,
   );
 
   group('trialOnboardingNeeded', () {
@@ -51,6 +55,20 @@ void main() {
 
     test('ftth configured with subscribers passes', () {
       expect(needed(ftthConfigured: true, ftthHasSubscribers: true), isFalse);
+    });
+
+    test('earthlink configured but no subscribers yet is gated', () {
+      expect(
+        needed(earthlinkConfigured: true, earthlinkHasSubscribers: false),
+        isTrue,
+      );
+    });
+
+    test('earthlink configured with subscribers passes', () {
+      expect(
+        needed(earthlinkConfigured: true, earthlinkHasSubscribers: true),
+        isFalse,
+      );
     });
 
     test('either linked-and-synced side satisfies the gate', () {

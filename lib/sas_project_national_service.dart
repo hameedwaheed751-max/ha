@@ -127,6 +127,20 @@ class SasProjectNationalSettings {
   /// الحساب مربوط لكن كلمة المرور لم تُدخل على هذا الجهاز.
   bool get needsPassword => username.trim().isNotEmpty && password.isEmpty;
 
+  /// يفصل حساب المشروع الوطني: يمسح الإعدادات محلياً ومن Firebase.
+  static Future<void> clear() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_baseUrlKey);
+    await prefs.remove(_usernameKey);
+    await prefs.remove(_passwordKey);
+    try {
+      await _secureStorage.delete(key: _passwordKey);
+    } catch (_) {}
+    try {
+      await _remoteRef()?.remove().timeout(const Duration(seconds: 8));
+    } catch (_) {}
+  }
+
   static const missingPasswordMessage =
       'أدخل كلمة مرور ساس المشروع الوطني على هذا الجهاز ثم احفظ. '
       'تُحفظ على الجهاز فقط.';

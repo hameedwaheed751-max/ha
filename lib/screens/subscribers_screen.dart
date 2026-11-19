@@ -1224,6 +1224,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     if (s.source == 'ftth') {
       return _activateFtthSubscriber(s, modalContext: modalContext);
     }
+    // مشترك إيرثلنك يُفعَّل عبر لوحة إيرثلنك (بطاقة/رصيد)، لا SAS.
+    if (s.source == 'earthlink') {
+      return _openEarthlinkRefill(s, modalContext: modalContext);
+    }
     if (_blockFormer(s)) return;
     if (operationBusy) return;
     operationBusy = true;

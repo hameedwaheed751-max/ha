@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../earthlink_reseller_service.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_project_national_service.dart';
@@ -26,10 +27,14 @@ class OnboardingGate {
     required bool radiusSynced,
     required bool ftthConfigured,
     required bool ftthHasSubscribers,
+    bool earthlinkConfigured = false,
+    bool earthlinkHasSubscribers = false,
   }) {
     if (isAdmin || !onFreeTrial || alreadyFlagged) return false;
     final satisfied =
-        (hasRadius && radiusSynced) || (ftthConfigured && ftthHasSubscribers);
+        (hasRadius && radiusSynced) ||
+        (ftthConfigured && ftthHasSubscribers) ||
+        (earthlinkConfigured && earthlinkHasSubscribers);
     return !satisfied;
   }
 
@@ -53,6 +58,8 @@ class OnboardingGate {
       radiusSynced: AppStore.lastSasSync != null,
       ftthConfigured: await _ftthConfigured(),
       ftthHasSubscribers: _hasFtthSubscribers(),
+      earthlinkConfigured: await _earthlinkConfigured(),
+      earthlinkHasSubscribers: _hasEarthlinkSubscribers(),
     );
     if (!needed) {
       try {
@@ -82,7 +89,8 @@ class OnboardingGate {
     } catch (_) {}
     final satisfied =
         ((await _safeRadius()).isNotEmpty && AppStore.lastSasSync != null) ||
-        (await _ftthConfigured() && _hasFtthSubscribers());
+        (await _ftthConfigured() && _hasFtthSubscribers()) ||
+        (await _earthlinkConfigured() && _hasEarthlinkSubscribers());
     return !satisfied;
   }
 
@@ -96,6 +104,18 @@ class OnboardingGate {
 
   static bool _hasFtthSubscribers() =>
       AppStore.subscribers.any((s) => s.source == 'ftth');
+
+  static bool _hasEarthlinkSubscribers() =>
+      AppStore.subscribers.any((s) => s.source == 'earthlink');
+
+  static Future<bool> _earthlinkConfigured() async {
+    try {
+      final s = await EarthlinkResellerSettings.load();
+      return s.username.trim().isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
 
   static Future<List<SasSettings>> _safeRadius() async {
     try {

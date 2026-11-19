@@ -2002,6 +2002,23 @@ class _DashboardScreenState extends State<DashboardScreen>
                       applicationName: 'وكيل نت',
                       applicationVersion: info.version,
                       applicationLegalese: 'إدارة مشتركي الإنترنت',
+                      children: const [
+                        SizedBox(height: 14),
+                        Directionality(
+                          textDirection: TextDirection.rtl,
+                          child: Row(
+                            children: [
+                              Icon(Icons.call, size: 18),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: SelectableText(
+                                  'للتواصل والدعم اتصل على: 07731163883',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     );
                   },
                 ),

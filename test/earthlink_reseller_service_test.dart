@@ -58,6 +58,25 @@ class _FakeServer {
       return resp(_loginPage, 200); // بقي في صفحة الدخول = فشل.
     }
     final authed = (request.headers['cookie'] ?? '').contains('.ASPXFORMSDEMO');
+    if (path == '/UserManagement.aspx' && request.method == 'GET') {
+      if (!authed) return resp(_loginPage, 200);
+      // ps=<page>_50: صفحتان كاملتان (50) ثم صفحة أخيرة بصفّين.
+      final ps = request.url.queryParameters['ps'] ?? '1_50';
+      final page = int.tryParse(ps.split('_').first) ?? 1;
+      final count = page <= 2 ? 50 : (page == 3 ? 2 : 0);
+      final rows = StringBuffer('<table class="rgMasterTable">');
+      for (var i = 0; i < count; i++) {
+        final uid = 'p${page}u$i@zox';
+        rows.write(
+          '<tr class="rgRow"><td>Refill</td><td>$uid مشترك</td>'
+          '<td>مشترك</td><td>Paid</td><td>01/01/2026 10:00 AM</td>'
+          '<td>Acc. Name : Plus | Acc. Status : Active</td>'
+          '<td>Status : Offline</td><td>Mobile : 07700000000</td></tr>',
+        );
+      }
+      rows.write('</table>');
+      return resp(rows.toString(), 200);
+    }
     if (path == '/Users/ChangeAccount.aspx' && request.method == 'GET') {
       if (!authed) return resp(_loginPage, 200);
       return resp('''
@@ -423,6 +442,23 @@ void main() {
       ''');
       expect(plans.map((p) => p.id).toList(), ['108', '138']);
       expect(plans.first.name, 'Standard');
+    });
+  });
+
+  group('EarthlinkResellerService.fetchSubscribers (paging)', () {
+    test('walks all pages until a short page, de-duplicating', () async {
+      final server = _FakeServer();
+      final service = server.service();
+      await service.login();
+      final users = await service.fetchSubscribers();
+      // 50 + 50 + 2 = 102 مشترك عبر ثلاث صفحات.
+      expect(users.length, 102);
+      // طلب الصفحات بمعامل ps التصاعدي.
+      final pages = server.requests
+          .where((r) => r.url.path == '/UserManagement.aspx')
+          .map((r) => r.url.queryParameters['ps'])
+          .toList();
+      expect(pages, ['1_50', '2_50', '3_50']);
     });
   });
 

@@ -63,10 +63,17 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
   bool _syncingAll = false;
   String? _busyId;
 
+  /// مزوّدون خاصّون (إعداداتهم منفصلة عن ساس radius) يظهرون كبطاقات مربوطة.
+  bool _ftthLinked = false;
+  bool _earthlinkLinked = false;
+
   List<SasSettings> get _accounts => [
     if (_primary != null && _primary!.isLinked) _primary!,
     ..._extras,
   ];
+
+  int get _linkedCount =>
+      _accounts.length + (_ftthLinked ? 1 : 0) + (_earthlinkLinked ? 1 : 0);
 
   @override
   void initState() {
@@ -80,10 +87,24 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
     try {
       final primary = await (widget.loadPrimary ?? SasSettings.load)();
       final extras = await (widget.loadExtras ?? SasSettings.loadExtras)();
+      // المزوّدون الخاصّون: مربوطون إن حُفظ اسم مستخدمهم (كلمة المرور قد تكون
+      // على الجهاز فقط). فشل تحميلهم لا يمنع عرض ساسات radius.
+      var ftth = false;
+      var earthlink = false;
+      try {
+        ftth = (await SasProjectNationalSettings.load()).username.trim().isNotEmpty;
+      } catch (_) {}
+      try {
+        earthlink = (await EarthlinkResellerSettings.load()).username
+            .trim()
+            .isNotEmpty;
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _primary = primary;
         _extras = extras;
+        _ftthLinked = ftth;
+        _earthlinkLinked = earthlink;
       });
     } catch (_) {
     } finally {
@@ -91,9 +112,93 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
     }
   }
 
+  static const _ftthBusyId = '__ftth__';
+  static const _earthlinkBusyId = '__earthlink__';
+
   void _snack(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// مزامنة مزوّد خاص (FTTH/إيرثلنك) من بطاقته، مع إظهار النتيجة.
+  Future<void> _syncProvider(
+    String busyId,
+    Future<Object?> Function() sync,
+  ) async {
+    setState(() => _busyId = busyId);
+    try {
+      await sync().timeout(const Duration(minutes: 3));
+      if (mounted) {
+        _snack('تمت المزامنة');
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) _snack('فشلت المزامنة: $e');
+    } finally {
+      if (mounted) setState(() => _busyId = null);
+    }
+  }
+
+  /// تعديل مزوّد خاص: يفتح شاشة الربط مع اختياره مسبقاً لإعادة إدخال الاعتماد.
+  Future<void> _editProvider(String provider) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => SasAccountDialog(
+        primary: false,
+        others: _accounts,
+        proxyUrl: _primary?.webProxyUrl.trim().isNotEmpty == true
+            ? _primary!.webProxyUrl
+            : _defaultProxyUrl,
+        initialProvider: provider,
+      ),
+    );
+    if (mounted) await _reload();
+  }
+
+  /// يفصل مزوّداً خاصاً: يمسح إعداداته ويحذف مشتركيه من التطبيق، بعد تأكيد.
+  Future<void> _unlinkProvider({
+    required String title,
+    required String busyId,
+    required String source,
+    required Future<void> Function() clear,
+  }) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: Text('فصل $title'),
+          content: Text('سيُحذف $title من القائمة ويُزال مشتركوه من التطبيق.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('فصل'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirm != true) return;
+    setState(() => _busyId = busyId);
+    try {
+      await clear();
+      AppStore.subscribers.removeWhere((s) => s.source == source);
+      await AppStore.save();
+      if (mounted) _snack('تم فصل $title');
+      await _reload();
+    } catch (e) {
+      if (mounted) _snack('فشل الفصل: $e');
+    } finally {
+      if (mounted) setState(() => _busyId = null);
+    }
   }
 
   int _countIn(SasSettings account) => AppStore.subscribers
@@ -328,7 +433,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              'الساسات المربوطة (${accounts.length})',
+                              'الساسات المربوطة ($_linkedCount)',
                               style: const TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
@@ -358,7 +463,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                         style: TextStyle(color: colors.onSurfaceVariant),
                       ),
                       const SizedBox(height: 10),
-                      if (accounts.isEmpty)
+                      if (_linkedCount == 0)
                         Card(
                           child: Padding(
                             padding: const EdgeInsets.all(18),
@@ -401,6 +506,50 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                               unlink: true,
                             ),
                           },
+                        ),
+                      if (_ftthLinked)
+                        _ProviderCard(
+                          title: 'المشروع الوطني',
+                          host: 'admin.ftth.iq',
+                          icon: Icons.account_tree_outlined,
+                          count: AppStore.subscribers
+                              .where((s) => s.source == 'ftth')
+                              .length,
+                          busy: _busyId == _ftthBusyId,
+                          enabled: !busy,
+                          onSync: () => _syncProvider(
+                            _ftthBusyId,
+                            SasProjectNationalService.syncSaved,
+                          ),
+                          onEdit: () => _editProvider('ftth'),
+                          onUnlink: () => _unlinkProvider(
+                            title: 'المشروع الوطني',
+                            busyId: _ftthBusyId,
+                            source: 'ftth',
+                            clear: SasProjectNationalSettings.clear,
+                          ),
+                        ),
+                      if (_earthlinkLinked)
+                        _ProviderCard(
+                          title: 'إيرثلنك',
+                          host: 'admin.earthlink.iq',
+                          icon: Icons.router_outlined,
+                          count: AppStore.subscribers
+                              .where((s) => s.source == 'earthlink')
+                              .length,
+                          busy: _busyId == _earthlinkBusyId,
+                          enabled: !busy,
+                          onSync: () => _syncProvider(
+                            _earthlinkBusyId,
+                            EarthlinkResellerService.syncSaved,
+                          ),
+                          onEdit: () => _editProvider('earthlink'),
+                          onUnlink: () => _unlinkProvider(
+                            title: 'إيرثلنك',
+                            busyId: _earthlinkBusyId,
+                            source: 'earthlink',
+                            clear: EarthlinkResellerSettings.clear,
+                          ),
                         ),
                       const SizedBox(height: 8),
                       SizedBox(
@@ -707,12 +856,16 @@ class SasAccountDialog extends StatefulWidget {
     this.primary = false,
     this.others = const [],
     this.proxyUrl = _defaultProxyUrl,
+    this.initialProvider,
   });
 
   final SasSettings? existing;
   final bool primary;
   final List<SasSettings> others;
   final String proxyUrl;
+
+  /// 'ftth' أو 'earthlink': يفتح الحوار على شاشة ربط هذا المزوّد مباشرة.
+  final String? initialProvider;
 
   @override
   State<SasAccountDialog> createState() => _SasAccountDialogState();
@@ -751,6 +904,17 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
     super.initState();
     // دليل الشركات للاختيار السريع؛ فشله لا يمنع الإدخال اليدوي.
     _directory = SasDirectoryService.load();
+    // تعديل مزوّد خاص: افتح شاشة ربطه مباشرة.
+    switch (widget.initialProvider) {
+      case 'ftth':
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _pickNationalProject();
+        });
+      case 'earthlink':
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _pickEarthlink();
+        });
+    }
   }
 
   /// شركة من الدليل: رابطها محفوظ، فنُبقي اسم المستخدم وكلمة المرور فقط.
@@ -893,9 +1057,29 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
     try {
       await service.login().timeout(const Duration(seconds: 45));
       await settings.save();
-      // مزامنة أولى في الخلفية لتظهر مشتركوه دون انتظار إعادة الدخول.
-      unawaited(EarthlinkResellerService.syncSaved());
-      if (mounted) Navigator.pop(context);
+      // مزامنة أولى فوراً، ونُظهر نتيجتها (عدد المشتركين) أو خطأها بدل الصمت.
+      int? count;
+      String? syncError;
+      try {
+        final users = await service.fetchSubscribers().timeout(
+          const Duration(seconds: 60),
+        );
+        count = await service.syncSubscribers(users);
+      } catch (e) {
+        syncError = '$e';
+      }
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.pop(context);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            syncError == null
+                ? 'تم ربط إيرثلنك ومزامنة ${count ?? 0} مشترك'
+                : 'رُبط إيرثلنك، لكن فشلت المزامنة: $syncError',
+          ),
+        ),
+      );
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     } finally {
@@ -1519,4 +1703,96 @@ Future<SasSettings?> pickSasAccount(
       ),
     ),
   );
+}
+
+/// بطاقة مزوّد خاص (FTTH/إيرثلنك) في قائمة الساسات المربوطة: الاسم والمضيف
+/// وعدد مشتركيه وزر مزامنة. إعداداته منفصلة، فلا يملك خيارات بطاقة ساس كاملة.
+class _ProviderCard extends StatelessWidget {
+  const _ProviderCard({
+    required this.title,
+    required this.host,
+    required this.icon,
+    required this.count,
+    required this.busy,
+    required this.enabled,
+    required this.onSync,
+    required this.onEdit,
+    required this.onUnlink,
+  });
+
+  final String title;
+  final String host;
+  final IconData icon;
+  final int count;
+  final bool busy;
+  final bool enabled;
+  final VoidCallback onSync;
+  final VoidCallback onEdit;
+  final VoidCallback onUnlink;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: colors.primaryContainer,
+          child: Icon(icon, color: colors.onPrimaryContainer),
+        ),
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text('$host • $count مشترك'),
+        trailing: busy
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : PopupMenuButton<String>(
+                enabled: enabled,
+                icon: const Icon(Icons.more_vert),
+                onSelected: (v) => switch (v) {
+                  'sync' => onSync(),
+                  'edit' => onEdit(),
+                  'unlink' => onUnlink(),
+                  _ => null,
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'sync',
+                    child: Row(
+                      children: [
+                        Icon(Icons.sync, size: 20),
+                        SizedBox(width: 8),
+                        Text('مزامنة'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_outlined, size: 20),
+                        SizedBox(width: 8),
+                        Text('تعديل'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'unlink',
+                    child: Row(
+                      children: [
+                        Icon(Icons.link_off, color: colors.error, size: 20),
+                        const SizedBox(width: 8),
+                        const Text('فصل'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
 }

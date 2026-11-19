@@ -3999,7 +3999,11 @@ class AppStore {
     final number = nextReceiptNumber;
     nextReceiptNumber++;
     if (persist) {
-      await save();
+      // الرقم يُحفظ محلياً في بداية save؛ لا نترك فشل/تعلّق الحفظ السحابي
+      // يمنع إصدار الرقم (وإلا يبقى الوصل بلا رقم وأزراره معطّلة).
+      try {
+        await save().timeout(const Duration(seconds: 8));
+      } catch (_) {}
     }
     return number;
   }

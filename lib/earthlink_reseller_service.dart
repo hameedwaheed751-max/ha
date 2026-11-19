@@ -132,6 +132,20 @@ class EarthlinkResellerSettings {
 
   bool get needsPassword => username.trim().isNotEmpty && password.isEmpty;
 
+  /// يفصل حساب إيرثلنك: يمسح الإعدادات محلياً ومن Firebase.
+  static Future<void> clear() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_baseUrlKey);
+    await prefs.remove(_usernameKey);
+    await prefs.remove(_passwordKey);
+    try {
+      await _secureStorage.delete(key: _passwordKey);
+    } catch (_) {}
+    try {
+      await _remoteRef()?.remove().timeout(const Duration(seconds: 8));
+    } catch (_) {}
+  }
+
   static const missingPasswordMessage =
       'أدخل كلمة مرور وكيل إيرثلنك على هذا الجهاز ثم احفظ. '
       'تُحفظ على الجهاز فقط.';
@@ -186,7 +200,9 @@ Map<String, String> earthlinkLoginBody({
   required String password,
   required AspxTokens tokens,
   String loginCount = '0',
+  String scriptManagerTsm = '',
 }) => {
+  'RadScriptManager1_TSM': scriptManagerTsm,
   '__LASTFOCUS': '',
   '__EVENTTARGET': '',
   '__EVENTARGUMENT': '',
@@ -196,7 +212,8 @@ Map<String, String> earthlinkLoginBody({
   'Logincountf': loginCount,
   'Login1\$UserName': username,
   'Login1\$Password': password,
-  'Login1\$LoginButton': 'تسجيل الدخول',
+  // قيمة الزر كما في HAR الموقع (لا تُترجم).
+  'Login1\$LoginButton': 'Login',
 };
 
 /// يحلّل ترويسة Set-Cookie (أو عدة ترويسات مدموجة بفاصلة من حزمة http)
@@ -563,18 +580,22 @@ class EarthlinkResellerService {
         username: username,
         password: password,
         tokens: tokens,
+        scriptManagerTsm: extractHiddenField(page.body, 'RadScriptManager1_TSM') ?? '',
       );
     final streamed = await _client.send(request);
     final response = await http.Response.fromStream(streamed);
     _absorb(response);
 
-    final location = response.headers['location'] ?? '';
-    final ok =
-        response.statusCode == 302 && location.toLowerCase().contains('home');
+    // النجاح = تحويل بعيداً عن صفحة الدخول (home أو غيرها). البقاء في
+    // Login.aspx (200، أو 302 يعيد إلى login) = فشل اعتماد.
+    final location = (response.headers['location'] ?? '').toLowerCase();
+    final redirected = response.statusCode == 302 || response.statusCode == 303;
+    final ok = redirected && location.isNotEmpty && !location.contains('login');
     if (!ok) {
-      // 200 يعني بقي في صفحة الدخول: اعتماد خاطئ.
-      throw const EarthlinkException(
-        'فشل تسجيل الدخول إلى إيرثلنك: تحقق من اسم المستخدم وكلمة المرور.',
+      _log('login failed: status=${response.statusCode} location="$location"');
+      throw EarthlinkException(
+        'فشل تسجيل الدخول إلى إيرثلنك: تحقق من اسم المستخدم وكلمة المرور.'
+        ' (رمز ${response.statusCode})',
       );
     }
     if (!isAuthenticated) {
@@ -675,27 +696,44 @@ class EarthlinkResellerService {
     return changed;
   }
 
-  /// قائمة مشتركي الوكيل من جدول UserManagement (لمزامنتهم في قائمة التطبيق).
-  /// الوسائط الافتراضية مطابقة لما يظهر في HAR.
-  Future<List<EarthlinkListUser>> fetchSubscribers({
-    int userst = 6,
-    int t = 5,
-  }) async {
+  /// كل مشتركي الوكيل من جدول UserManagement، عبر كل الصفحات.
+  /// الترقيم بمعامل ps=<الصفحة>_<الحجم> (مؤكَّد من HAR: ps=2_50 ... ps=5_50).
+  /// نتوقف عند صفحة أقل من الحجم، أو إن توقّف الخادم عن إضافة جديد (حماية).
+  static const _pageSize = 50;
+  Future<List<EarthlinkListUser>> fetchSubscribers({int maxPages = 60}) async {
     _guardWeb();
-    final page = await _client.get(
-      _uri('/UserManagement.aspx', {'userst': userst, 't': t}),
+    final byId = <String, EarthlinkListUser>{};
+    for (var page = 1; page <= maxPages; page++) {
+      final users = await _fetchSubscriberPage(page);
+      if (users.isEmpty) break;
+      final before = byId.length;
+      for (final u in users) {
+        byId[u.userId] = u;
+      }
+      // لم يُضف جديد = الخادم تجاهل الترقيم (نتجنّب حلقة لا نهائية)؛
+      // أقل من حجم الصفحة = هذه آخر صفحة.
+      if (byId.length == before || users.length < _pageSize) break;
+    }
+    return byId.values.toList();
+  }
+
+  Future<List<EarthlinkListUser>> _fetchSubscriberPage(int page) async {
+    final response = await _client.get(
+      _uri('/UserManagement.aspx', {'ps': '${page}_$_pageSize'}),
       headers: _headers(),
     );
-    _absorb(page);
-    if (page.statusCode != 200) {
+    _absorb(response);
+    if (response.statusCode != 200) {
       throw EarthlinkException(
         'تعذّر جلب قائمة المشتركين',
-        statusCode: page.statusCode,
+        statusCode: response.statusCode,
       );
     }
-    final users = parseSubscriberGrid(page.body);
-    // صفحة دخول بدل الجدول = جلسة منتهية.
-    if (users.isEmpty && !page.body.contains('rgMasterTable')) {
+    final users = parseSubscriberGrid(response.body);
+    // صفحة دخول بدل الجدول = جلسة منتهية (الصفحة الأولى فقط تعنينا للتحقق).
+    if (page == 1 &&
+        users.isEmpty &&
+        !response.body.contains('rgMasterTable')) {
       throw const EarthlinkException('انتهت جلسة إيرثلنك. سجّل الدخول.');
     }
     return users;
