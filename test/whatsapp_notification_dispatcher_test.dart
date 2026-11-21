@@ -303,7 +303,7 @@ void main() {
   );
 
   test(
-    'four specific event types always use WAHA even with meta provider',
+    'five specific event types always use WAHA even with meta provider',
     () async {
       final sent =
           <
@@ -329,7 +329,7 @@ void main() {
             },
       );
 
-      // اختبار الأنواع الأربعة التي يجب أن تستخدم WAHA دائمًا
+      // اختبار الأنواع الخمسة التي يجب أن تستخدم WAHA دائمًا
       await dispatcher.notifySubscriptionActivated(
         _subscriber(),
         eventId: 'test-activation',
@@ -347,78 +347,24 @@ void main() {
         _subscriber(),
         eventId: 'test-expired',
       );
+      await dispatcher.notifyDebtPaid(
+        _subscriber(),
+        amountPaid: 20000,
+        remainingBalance: 0,
+        eventId: 'test-paid',
+      );
 
-      // التحقق من أن جميع الأنواع الأربعة تم إرسالها عبر WAHA
-      expect(sent.length, 4);
+      // التحقق من أن جميع الأنواع الخمسة تم إرسالها عبر WAHA
+      expect(sent.length, 5);
       expect(sent.map((entry) => entry.eventType), [
         'subscription_activated',
         'debt_reminder',
         'expiry_3days',
         'subscription_expired',
+        'debt_paid',
       ]);
     },
   );
-
-  test('other event types respect provider setting (meta)', () async {
-    var wahaCallCount = 0;
-
-    final dispatcher = WhatsAppNotificationDispatcher(
-      provider: WhatsAppProvider.meta,
-      preferences: _InMemoryWhatsAppNotificationPreferences(),
-      wahaSender:
-          ({
-            required to,
-            required text,
-            required eventType,
-            required idempotencyKey,
-          }) async {
-            wahaCallCount++;
-            return const WahaSendResult(success: true);
-          },
-    );
-
-    // هذا النوع يجب أن يستخدم meta لأن provider=meta وليس من الأنواع الأربعة
-    // نحن نختبر أن WAHA لم يتم استدعاؤها (لأن provider=meta)
-    await dispatcher.notifyDebtPaid(
-      _subscriber(),
-      amountPaid: 20000,
-      remainingBalance: 0,
-      eventId: 'test-paid',
-    );
-
-    // التحقق من أن WAHA لم يتم استدعاؤها
-    expect(wahaCallCount, 0);
-  });
-
-  test('other event types respect provider setting (waha)', () async {
-    var wahaCallCount = 0;
-
-    final dispatcher = WhatsAppNotificationDispatcher(
-      provider: WhatsAppProvider.waha,
-      preferences: _InMemoryWhatsAppNotificationPreferences(),
-      wahaSender:
-          ({
-            required to,
-            required text,
-            required eventType,
-            required idempotencyKey,
-          }) async {
-            wahaCallCount++;
-            return const WahaSendResult(success: true);
-          },
-    );
-
-    // هذا النوع ليس من الأربعة ولكن provider=waha
-    await dispatcher.notifyDebtPaid(
-      _subscriber(),
-      amountPaid: 20000,
-      remainingBalance: 0,
-      eventId: 'test-paid-waha',
-    );
-
-    // التحقق من أن WAHA تم استدعاؤها مرة واحدة
-    expect(wahaCallCount, 1);
-  });
 
   test(
     'disabled events are suppressed and independent events still send',
@@ -459,6 +405,45 @@ void main() {
       expect(sendCount, 1);
     },
   );
+
+  test('debt_paid is a configurable event that can be disabled', () async {
+    // الحدث مُسجَّل ضمن الأنواع القابلة للتفعيل.
+    expect(
+      FirebaseWhatsAppNotificationPreferences.eventTypes,
+      contains('debt_paid'),
+    );
+
+    final preferences = _InMemoryWhatsAppNotificationPreferences();
+    await preferences.save(
+      'debt_paid',
+      const WhatsAppNotificationEventPreference(enabled: false),
+    );
+    var sendCount = 0;
+    final dispatcher = WhatsAppNotificationDispatcher(
+      preferences: preferences,
+      wahaSender:
+          ({
+            required to,
+            required text,
+            required eventType,
+            required idempotencyKey,
+          }) async {
+            sendCount++;
+            return const WahaSendResult(success: true);
+          },
+    );
+
+    final blocked = await dispatcher.notifyDebtPaid(
+      _subscriber(),
+      amountPaid: 10000,
+      remainingBalance: 0,
+      eventId: 'disabled-paid',
+    );
+
+    expect(blocked.success, isFalse);
+    expect(blocked.error, 'notification_disabled');
+    expect(sendCount, 0);
+  });
 
   group('message text', () {
     Future<String?> sentText({

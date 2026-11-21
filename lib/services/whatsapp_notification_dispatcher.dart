@@ -205,6 +205,7 @@ class WhatsAppNotificationDispatcher {
       'debt_reminder' => WhatsAppProvider.waha,
       'expiry_3days' => WhatsAppProvider.waha,
       'subscription_expired' => WhatsAppProvider.waha,
+      'debt_paid' => WhatsAppProvider.waha,
       _ => provider, // باقي الرسائل تستخدم الـ Provider المحدد في الإعدادات
     };
 
@@ -317,6 +318,7 @@ class WhatsAppNotificationDispatcher {
       'debt_reminder' => WhatsAppProvider.waha,
       'expiry_3days' => WhatsAppProvider.waha,
       'subscription_expired' => WhatsAppProvider.waha,
+      'debt_paid' => WhatsAppProvider.waha,
       _ => provider, // باقي الرسائل تستخدم الـ Provider المحدد في الإعدادات
     };
 

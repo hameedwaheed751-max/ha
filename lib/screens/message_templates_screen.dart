@@ -56,7 +56,6 @@ class _MessageTemplatesScreenState extends State<MessageTemplatesScreen> {
   Widget build(BuildContext context) {
     final items = <String, String>{
       'extension': 'رسالة التمديد',
-      'debtPaid': 'رسالة استلام دين سابق',
     };
 
     return Directionality(
@@ -82,7 +81,7 @@ class _MessageTemplatesScreenState extends State<MessageTemplatesScreen> {
               child: Padding(
                 padding: EdgeInsets.all(12),
                 child: Text(
-                  'رسائل التفعيل وقرب الانتهاء وانتهاء الاشتراك وتذكير الدين تُعدَّل من "أحداث رسائل واتساب" في الشاشة السابقة.',
+                  'رسائل التفعيل وقرب الانتهاء وانتهاء الاشتراك وتذكير الدين واستلام الدين تُعدَّل من "أحداث رسائل واتساب" في الشاشة السابقة.',
                 ),
               ),
             ),

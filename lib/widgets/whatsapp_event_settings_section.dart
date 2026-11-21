@@ -18,6 +18,7 @@ class _WhatsAppEventSettingsSectionState
     'debt_reminder': 'تذكير بالدين',
     'expiry_3days': 'انتهاء الاشتراك بعد 3 أيام',
     'subscription_expired': 'انتهاء الاشتراك',
+    'debt_paid': 'استلام دين سابق',
   };
 
   final _preferences = FirebaseWhatsAppNotificationPreferences();
@@ -88,6 +89,8 @@ class _WhatsAppEventSettingsSectionState
     'subscription_expired' =>
       AppStore.messageTemplates['expired'] ??
           'مرحباً {{customer_name}}، اشتراكك لدى {{agent_name}} منتهي.',
+    'debt_paid' =>
+      AppStore.messageTemplates['debtPaid'] ?? AppStore.debtPaidTemplate,
     _ => '',
   };
 
@@ -173,7 +176,7 @@ class _WhatsAppEventSettingsSectionState
         ),
       ),
       const Text(
-        'إعدادات مستقلة لهذا الحساب للأحداث الأربعة ورسائلها.',
+        'إعدادات مستقلة لهذا الحساب للأحداث الخمسة ورسائلها.',
       ),
       const SizedBox(height: 10),
       if (_loading)

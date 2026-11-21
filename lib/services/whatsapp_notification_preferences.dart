@@ -33,6 +33,7 @@ class FirebaseWhatsAppNotificationPreferences
     'debt_reminder',
     'expiry_3days',
     'subscription_expired',
+    'debt_paid',
   };
 
   final FirebaseAuth? _auth;
