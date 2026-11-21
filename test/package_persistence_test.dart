@@ -44,6 +44,60 @@ void main() {
     expect(AppStore.packages.map((e) => e.name), ['أساسي', 'برو']);
   });
 
+  test('keeps local packages when the cloud revision is not newer', () {
+    // انحدار: نسخة الجهاز = نسخة السحابة (بعد حفظ ناجح). يجب إبقاء المحلي
+    // بأسعاره بدل تطبيق السحابة الأقدم/المساوية ومحو الأسعار المكتوبة.
+    expect(
+      AppStore.shouldAcceptRemotePackages(
+        hasRemotePayload: true,
+        allowBootstrap: false,
+        remoteRevision: 100,
+        localRevision: 100,
+      ),
+      isFalse,
+    );
+    expect(
+      AppStore.shouldAcceptRemotePackages(
+        hasRemotePayload: true,
+        allowBootstrap: false,
+        remoteRevision: 90,
+        localRevision: 100,
+      ),
+      isFalse,
+    );
+  });
+
+  test('accepts cloud packages only when newer or bootstrapping', () {
+    expect(
+      AppStore.shouldAcceptRemotePackages(
+        hasRemotePayload: true,
+        allowBootstrap: false,
+        remoteRevision: 200,
+        localRevision: 100,
+      ),
+      isTrue,
+    );
+    expect(
+      AppStore.shouldAcceptRemotePackages(
+        hasRemotePayload: true,
+        allowBootstrap: true,
+        remoteRevision: 0,
+        localRevision: 100,
+      ),
+      isTrue,
+    );
+    // لا حمولة في السحابة → لا شيء يُقبل مهما كانت النسخة.
+    expect(
+      AppStore.shouldAcceptRemotePackages(
+        hasRemotePayload: false,
+        allowBootstrap: true,
+        remoteRevision: 999,
+        localRevision: 0,
+      ),
+      isFalse,
+    );
+  });
+
   test('add and remove package operations update the store list', () async {
     AppStore.addPackage(PackagePlan(name: 'أساسي', price: 10000));
     AppStore.addPackage(PackagePlan(name: 'برو', price: 20000));

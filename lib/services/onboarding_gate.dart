@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../earthlink_reseller_service.dart';
+import '../fiberx_service.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_project_national_service.dart';
@@ -29,12 +30,15 @@ class OnboardingGate {
     required bool ftthHasSubscribers,
     bool earthlinkConfigured = false,
     bool earthlinkHasSubscribers = false,
+    bool fiberxConfigured = false,
+    bool fiberxHasSubscribers = false,
   }) {
     if (isAdmin || !onFreeTrial || alreadyFlagged) return false;
     final satisfied =
         (hasRadius && radiusSynced) ||
         (ftthConfigured && ftthHasSubscribers) ||
-        (earthlinkConfigured && earthlinkHasSubscribers);
+        (earthlinkConfigured && earthlinkHasSubscribers) ||
+        (fiberxConfigured && fiberxHasSubscribers);
     return !satisfied;
   }
 
@@ -60,6 +64,8 @@ class OnboardingGate {
       ftthHasSubscribers: _hasFtthSubscribers(),
       earthlinkConfigured: await _earthlinkConfigured(),
       earthlinkHasSubscribers: _hasEarthlinkSubscribers(),
+      fiberxConfigured: await _fiberxConfigured(),
+      fiberxHasSubscribers: _hasFiberxSubscribers(),
     );
     if (!needed) {
       try {
@@ -90,7 +96,8 @@ class OnboardingGate {
     final satisfied =
         ((await _safeRadius()).isNotEmpty && AppStore.lastSasSync != null) ||
         (await _ftthConfigured() && _hasFtthSubscribers()) ||
-        (await _earthlinkConfigured() && _hasEarthlinkSubscribers());
+        (await _earthlinkConfigured() && _hasEarthlinkSubscribers()) ||
+        (await _fiberxConfigured() && _hasFiberxSubscribers());
     return !satisfied;
   }
 
@@ -108,9 +115,21 @@ class OnboardingGate {
   static bool _hasEarthlinkSubscribers() =>
       AppStore.subscribers.any((s) => s.source == 'earthlink');
 
+  static bool _hasFiberxSubscribers() =>
+      AppStore.subscribers.any((s) => s.source == 'fiberx');
+
   static Future<bool> _earthlinkConfigured() async {
     try {
       final s = await EarthlinkResellerSettings.load();
+      return s.username.trim().isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> _fiberxConfigured() async {
+    try {
+      final s = await FiberXSettings.load();
       return s.username.trim().isNotEmpty;
     } catch (_) {
       return false;

@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../earthlink_reseller_service.dart';
+import '../fiberx_service.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_project_national_service.dart';
@@ -254,6 +256,14 @@ class _SasOnboardingScreenState extends State<SasOnboardingScreen> {
       final ftth = await SasProjectNationalSettings.load();
       if (ftth.username.trim().isNotEmpty) return true;
     } catch (_) {}
+    try {
+      final earthlink = await EarthlinkResellerSettings.load();
+      if (earthlink.username.trim().isNotEmpty) return true;
+    } catch (_) {}
+    try {
+      final fiberx = await FiberXSettings.load();
+      if (fiberx.username.trim().isNotEmpty) return true;
+    } catch (_) {}
     return false;
   }
 
@@ -295,6 +305,37 @@ class _SasOnboardingScreenState extends State<SasOnboardingScreen> {
     } catch (e) {
       return (ok: false, message: 'تعذّرت مزامنة FTTH: $e');
     }
-    return (ok: false, message: 'اربط ساساً (RADIUS أو FTTH) أولاً ثم زامن.');
+    // إيرثلنك إن لم يكن هناك RADIUS/FTTH.
+    try {
+      final earthlink = await EarthlinkResellerSettings.load();
+      if (earthlink.username.trim().isNotEmpty) {
+        await EarthlinkResellerService.syncSaved().timeout(
+          const Duration(minutes: 3),
+        );
+        if (AppStore.subscribers.any((s) => s.source == 'earthlink')) {
+          return (ok: true, message: 'تمت مزامنة مشتركي إيرثلنك');
+        }
+        return (ok: false, message: 'لم تُرجع إيرثلنك مشتركين بعد. حاول مجدداً.');
+      }
+    } catch (e) {
+      return (ok: false, message: 'تعذّرت مزامنة إيرثلنك: $e');
+    }
+    // فايبر اكس إن لم يكن هناك غيرها.
+    try {
+      final fiberx = await FiberXSettings.load();
+      if (fiberx.username.trim().isNotEmpty) {
+        await FiberXService.syncSaved().timeout(const Duration(minutes: 3));
+        if (AppStore.subscribers.any((s) => s.source == 'fiberx')) {
+          return (ok: true, message: 'تمت مزامنة مشتركي فايبر اكس');
+        }
+        return (ok: false, message: 'لم تُرجع فايبر اكس مشتركين بعد. حاول مجدداً.');
+      }
+    } catch (e) {
+      return (ok: false, message: 'تعذّرت مزامنة فايبر اكس: $e');
+    }
+    return (
+      ok: false,
+      message: 'اربط ساساً (RADIUS أو FTTH أو إيرثلنك أو فايبر اكس) أولاً ثم زامن.',
+    );
   }
 }

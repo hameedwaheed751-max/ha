@@ -12,6 +12,8 @@ void main() {
     bool ftthHasSubscribers = false,
     bool earthlinkConfigured = false,
     bool earthlinkHasSubscribers = false,
+    bool fiberxConfigured = false,
+    bool fiberxHasSubscribers = false,
   }) => OnboardingGate.trialOnboardingNeeded(
     isAdmin: isAdmin,
     onFreeTrial: onFreeTrial,
@@ -22,6 +24,8 @@ void main() {
     ftthHasSubscribers: ftthHasSubscribers,
     earthlinkConfigured: earthlinkConfigured,
     earthlinkHasSubscribers: earthlinkHasSubscribers,
+    fiberxConfigured: fiberxConfigured,
+    fiberxHasSubscribers: fiberxHasSubscribers,
   );
 
   group('trialOnboardingNeeded', () {
@@ -67,6 +71,20 @@ void main() {
     test('earthlink configured with subscribers passes', () {
       expect(
         needed(earthlinkConfigured: true, earthlinkHasSubscribers: true),
+        isFalse,
+      );
+    });
+
+    test('fiberx configured but no subscribers yet is gated', () {
+      expect(
+        needed(fiberxConfigured: true, fiberxHasSubscribers: false),
+        isTrue,
+      );
+    });
+
+    test('fiberx configured with subscribers passes', () {
+      expect(
+        needed(fiberxConfigured: true, fiberxHasSubscribers: true),
         isFalse,
       );
     });

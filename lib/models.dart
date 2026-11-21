@@ -1987,18 +1987,29 @@ class AppStore {
       final packagesPayload = agentData['packages'];
       final packagesListPayload = agentData['packagesList'];
       final allowBootstrap = subscribersRevision == 0 && subscribers.isEmpty;
-      if (packagesPayload != null || packagesListPayload != null) {
+      final hasRemotePackages =
+          packagesPayload != null || packagesListPayload != null;
+      final remotePkgRevision = remotePackagesRevision(agentData, remoteRevision);
+      // مثل المشتركين تماماً: نطبّق السحابة فقط إن كانت أحدث، وإلا نحمّل
+      // الباقات المحلية بأسعارها. سابقاً كان الخروج المبكر يترك القائمة فارغة
+      // ثم يكتبها فوق ملف الجهاز فتُمحى الأسعار المكتوبة.
+      if (shouldAcceptRemotePackages(
+        hasRemotePayload: hasRemotePackages,
+        allowBootstrap: allowBootstrap,
+        remoteRevision: remotePkgRevision,
+        localRevision: packagesRevision,
+      )) {
         applyPackagesPayload(
           packagesListPayload ?? packagesPayload,
           fromRemote: true,
-          remoteRevision: remotePackagesRevision(agentData, remoteRevision),
+          remoteRevision: remotePkgRevision,
           allowBootstrap: allowBootstrap,
         );
         await p.setInt(packagesRevisionKey, packagesRevision);
         await p.setString('packages', jsonEncode(_packagesListPayload()));
       } else {
         final localP = p.getString('packages');
-        if (localP != null) {
+        if (localP != null && localP.isNotEmpty) {
           try {
             packages.applyPayload(jsonDecode(localP));
           } catch (_) {}
@@ -2707,6 +2718,19 @@ class AppStore {
     if (agentData is! Map || agentData['settings'] is! Map) return fallback;
     final value = (agentData['settings'] as Map)[packagesRevisionKey];
     return int.tryParse('${value ?? ''}') ?? fallback;
+  }
+
+  /// هل نطبّق باقات السحابة بدل المحلية؟ نعم فقط إذا وُجدت حمولة سحابية وكانت
+  /// أحدث من المحلي أو كنا في تهيئة أولى. خلاف ذلك نُبقي الباقات المحلية
+  /// بأسعارها المكتوبة يدوياً فلا تُمحى. نقي وقابل للاختبار بلا شبكة.
+  static bool shouldAcceptRemotePackages({
+    required bool hasRemotePayload,
+    required bool allowBootstrap,
+    required int remoteRevision,
+    required int localRevision,
+  }) {
+    if (!hasRemotePayload) return false;
+    return allowBootstrap || remoteRevision > localRevision;
   }
 
   static void applyPackagesPayload(

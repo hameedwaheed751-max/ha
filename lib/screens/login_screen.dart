@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models.dart';
 import '../earthlink_reseller_service.dart';
+import '../fiberx_service.dart';
 import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
 import '../services/app_startup.dart';
@@ -220,6 +221,12 @@ class _LoginScreenState extends State<LoginScreen> {
           );
         } catch (error) {
           debugPrint('[Earthlink] startup sync failed: $error');
+        }
+        // فايبر اكس أخيراً، لنفس السبب (كتابة متسلسلة على قائمة المشتركين).
+        try {
+          await FiberXService.syncSaved().timeout(const Duration(minutes: 3));
+        } catch (error) {
+          debugPrint('[FiberX] startup sync failed: $error');
         }
       });
     } catch (e) {

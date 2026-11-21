@@ -5,11 +5,13 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../earthlink_reseller_service.dart';
+import '../fiberx_service.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
 import 'earthlink_refill_dialog.dart';
+import 'fiberx_activation_dialog.dart';
 import '../services/render_whatsapp_service.dart';
 import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
@@ -873,6 +875,72 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
   }
 
+  /// يبني مشترك فايبر اكس من البيانات المحفوظة لفتح حوار العمليات.
+  FiberXSubscriber _fiberxSubscriberOf(Subscriber s) {
+    final data = s.sasData;
+    final uid = (data['fiberx_uid'] ?? s.sasId).toString().trim();
+    final expiration =
+        DateTime.tryParse((data['expiration'] ?? '').toString()) ?? s.endDate;
+    return FiberXSubscriber(
+      radiusUserId: uid.isNotEmpty ? uid : s.user,
+      username: (data['username'] ?? s.user).toString(),
+      name: s.name,
+      phone: s.phone,
+      planName: (data['plan'] ?? s.type).toString(),
+      billingProfileId: (data['billingProfileId'] ?? '').toString(),
+      radiusProfileId: (data['radiusProfileId'] ?? '').toString(),
+      balance: 0,
+      expiration: expiration,
+      remainingDays: 0,
+      enabled: s.active,
+      online: s.sasOnline,
+    );
+  }
+
+  /// عمليات مشترك فايبر اكس (تفعيل/تجديد/تغيير باقة) من محفظة الوكيل.
+  Future<void> _openFiberXActivation(
+    Subscriber s, {
+    BuildContext? modalContext,
+  }) async {
+    if (modalContext != null && modalContext.mounted) {
+      Navigator.pop(modalContext);
+    }
+    final subscriber = _fiberxSubscriberOf(s);
+    if (subscriber.radiusUserId.isEmpty) {
+      _showFtthMessage('❌ معرّف مشترك فايبر اكس غير موجود', color: Colors.red);
+      return;
+    }
+    final settings = await FiberXSettings.load();
+    if (settings.needsPassword) {
+      _showFtthMessage(
+        '❌ ${FiberXSettings.missingPasswordMessage}',
+        color: Colors.red,
+      );
+      return;
+    }
+    if (settings.username.trim().isEmpty) {
+      _showFtthMessage('❌ أكمل ربط فايبر اكس أولاً', color: Colors.red);
+      return;
+    }
+    if (!mounted) return;
+    final done = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => FiberXActivationDialog(
+        subscriber: subscriber,
+        serviceFactory: () async {
+          final service = FiberXService.fromSettings(settings);
+          await service.login().timeout(const Duration(seconds: 60));
+          return service;
+        },
+      ),
+    );
+    if (done == true) {
+      unawaited(FiberXService.syncSaved());
+      if (mounted) setState(() {});
+    }
+  }
+
   ({String subscriptionId, String customerId}) _ftthIds(Subscriber s) {
     final subscriptionId = s.sasId.trim().isNotEmpty
         ? s.sasId.trim()
@@ -1228,6 +1296,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     if (s.source == 'earthlink') {
       return _openEarthlinkRefill(s, modalContext: modalContext);
     }
+    // مشترك فايبر اكس يُفعَّل من منصّته (محفظة الوكيل)، لا SAS.
+    if (s.source == 'fiberx') {
+      return _openFiberXActivation(s, modalContext: modalContext);
+    }
     if (_blockFormer(s)) return;
     if (operationBusy) return;
     operationBusy = true;
@@ -1524,7 +1596,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 _op(
                   Icons.check_circle,
                   Colors.green,
-                  (s.source == 'ftth' || s.source == 'earthlink') && !s.expired
+                  (s.source == 'ftth' ||
+                              s.source == 'earthlink' ||
+                              s.source == 'fiberx') &&
+                          !s.expired
                       ? 'تجديد'
                       : 'تفعيل',
                   () async {
@@ -1532,6 +1607,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       _activateFtthSubscriber(s, modalContext: ctx);
                     } else if (s.source == 'earthlink') {
                       _openEarthlinkRefill(s, modalContext: ctx);
+                    } else if (s.source == 'fiberx') {
+                      _openFiberXActivation(s, modalContext: ctx);
                     } else {
                       _activateSubscriber(s, modalContext: ctx);
                     }
@@ -1541,6 +1618,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   _op(Icons.swap_horiz, Colors.purple, 'تغيير الباقة', () {
                     // تغيير الباقة في إيرثلنك = التعبئة بباقة أخرى.
                     _openEarthlinkRefill(s, modalContext: ctx);
+                  }),
+                if (s.source == 'fiberx')
+                  _op(Icons.swap_horiz, Colors.purple, 'تغيير الباقة', () {
+                    // تغيير الباقة في فايبر اكس = التفعيل بباقة أخرى.
+                    _openFiberXActivation(s, modalContext: ctx);
                   }),
                 if (isSas)
                   _op(Icons.calendar_month, Colors.orange, 'تمديد', () {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../earthlink_reseller_service.dart';
+import '../fiberx_service.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_sync_service.dart';
@@ -28,6 +29,14 @@ class _EarthlinkPick {
 }
 
 const _earthlinkPick = _EarthlinkPick();
+
+/// قيمة تُرجعها قائمة الدليل حين يختار الوكيل «فايبر اكس»، فله شاشة ربط خاصة
+/// (منصّة OpenRADIUS عبر Keycloak) بدل ربط ساس radius العادي.
+class _FiberXPick {
+  const _FiberXPick();
+}
+
+const _fiberxPick = _FiberXPick();
 
 /// ربط SAS Radius: كل الساسات، الأساسي والإضافية، بطاقات بنفس الخيارات.
 class SasSettingsScreen extends StatefulWidget {
@@ -66,6 +75,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
   /// مزوّدون خاصّون (إعداداتهم منفصلة عن ساس radius) يظهرون كبطاقات مربوطة.
   bool _ftthLinked = false;
   bool _earthlinkLinked = false;
+  bool _fiberxLinked = false;
 
   List<SasSettings> get _accounts => [
     if (_primary != null && _primary!.isLinked) _primary!,
@@ -73,7 +83,10 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
   ];
 
   int get _linkedCount =>
-      _accounts.length + (_ftthLinked ? 1 : 0) + (_earthlinkLinked ? 1 : 0);
+      _accounts.length +
+      (_ftthLinked ? 1 : 0) +
+      (_earthlinkLinked ? 1 : 0) +
+      (_fiberxLinked ? 1 : 0);
 
   @override
   void initState() {
@@ -91,6 +104,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
       // على الجهاز فقط). فشل تحميلهم لا يمنع عرض ساسات radius.
       var ftth = false;
       var earthlink = false;
+      var fiberx = false;
       try {
         ftth = (await SasProjectNationalSettings.load()).username.trim().isNotEmpty;
       } catch (_) {}
@@ -99,12 +113,16 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
             .trim()
             .isNotEmpty;
       } catch (_) {}
+      try {
+        fiberx = (await FiberXSettings.load()).username.trim().isNotEmpty;
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _primary = primary;
         _extras = extras;
         _ftthLinked = ftth;
         _earthlinkLinked = earthlink;
+        _fiberxLinked = fiberx;
       });
     } catch (_) {
     } finally {
@@ -114,6 +132,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
 
   static const _ftthBusyId = '__ftth__';
   static const _earthlinkBusyId = '__earthlink__';
+  static const _fiberxBusyId = '__fiberx__';
 
   void _snack(String text) {
     if (!mounted) return;
@@ -551,6 +570,28 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                             clear: EarthlinkResellerSettings.clear,
                           ),
                         ),
+                      if (_fiberxLinked)
+                        _ProviderCard(
+                          title: 'فايبر اكس',
+                          host: 'agentportal.fiberx-systems.net',
+                          icon: Icons.wifi_tethering,
+                          count: AppStore.subscribers
+                              .where((s) => s.source == 'fiberx')
+                              .length,
+                          busy: _busyId == _fiberxBusyId,
+                          enabled: !busy,
+                          onSync: () => _syncProvider(
+                            _fiberxBusyId,
+                            FiberXService.syncSaved,
+                          ),
+                          onEdit: () => _editProvider('fiberx'),
+                          onUnlink: () => _unlinkProvider(
+                            title: 'فايبر اكس',
+                            busyId: _fiberxBusyId,
+                            source: 'fiberx',
+                            clear: FiberXSettings.clear,
+                          ),
+                        ),
                       const SizedBox(height: 8),
                       SizedBox(
                         height: 50,
@@ -864,7 +905,7 @@ class SasAccountDialog extends StatefulWidget {
   final List<SasSettings> others;
   final String proxyUrl;
 
-  /// 'ftth' أو 'earthlink': يفتح الحوار على شاشة ربط هذا المزوّد مباشرة.
+  /// 'ftth' أو 'earthlink' أو 'fiberx': يفتح الحوار على شاشة ربط هذا المزوّد.
   final String? initialProvider;
 
   @override
@@ -896,6 +937,9 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
   /// إيرثلنك: نفس الواجهة لكن محرّك لوحة وكلاء admin.earthlink.iq.
   bool _earthlink = false;
 
+  /// فايبر اكس: نفس الواجهة لكن محرّك منصّة OpenRADIUS عبر Keycloak.
+  bool _fiberx = false;
+
   /// اسم مضيف الشركة المختارة، يظهر في ترويسة «رابط محفوظ».
   String _pickedHost = '';
 
@@ -914,6 +958,10 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _pickEarthlink();
         });
+      case 'fiberx':
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _pickFiberX();
+        });
     }
   }
 
@@ -928,6 +976,7 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
       _picked = true;
       _national = false;
       _earthlink = false;
+      _fiberx = false;
       _error = null;
     });
   }
@@ -942,6 +991,7 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
       _pickedHost = 'admin.ftth.iq';
       _national = true;
       _earthlink = false;
+      _fiberx = false;
       _picked = true;
       _error = null;
     });
@@ -966,6 +1016,7 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
       _pickedHost = 'admin.earthlink.iq';
       _earthlink = true;
       _national = false;
+      _fiberx = false;
       _picked = true;
       _error = null;
     });
@@ -980,12 +1031,38 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
     }
   }
 
+  /// «فايبر اكس» شركة في الدليل بمحرّك منصّة OpenRADIUS الخاص. نفس الواجهة
+  /// (اسم مستخدم + كلمة مرور) ونملأ اليوزر المحفوظ إن وُجد.
+  Future<void> _pickFiberX() async {
+    setState(() {
+      _company.text = 'فايبر اكس';
+      _server.text = 'https://agentportal.fiberx-systems.net';
+      _label.text = 'فايبر اكس';
+      _pickedHost = 'agentportal.fiberx-systems.net';
+      _fiberx = true;
+      _national = false;
+      _earthlink = false;
+      _picked = true;
+      _error = null;
+    });
+    try {
+      final saved = await FiberXSettings.load();
+      if (!mounted || !_fiberx) return;
+      if (saved.username.trim().isNotEmpty && _user.text.trim().isEmpty) {
+        setState(() => _user.text = saved.username.trim());
+      }
+    } catch (_) {
+      // تعذّر تحميل الإعدادات المحفوظة لا يمنع الإدخال اليدوي.
+    }
+  }
+
   /// العودة من وضع الاختيار إلى الإدخال اليدوي واختيار شركة أخرى.
   void _resetPick() {
     setState(() {
       _picked = false;
       _national = false;
       _earthlink = false;
+      _fiberx = false;
       _pickedHost = '';
       _company.clear();
       _server.clear();
@@ -1088,6 +1165,55 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
     }
   }
 
+  /// ربط فايبر اكس: يتحقق من الدخول لمنصّة OpenRADIUS ويحفظ الإعدادات.
+  /// لا يُنشئ كارت ساس؛ العمليات تتم من قائمة المشترك مثل FTTH/إيرثلنك.
+  Future<void> _saveFiberX() async {
+    if (_user.text.trim().isEmpty || _pass.text.isEmpty) {
+      setState(() => _error = 'أدخل اسم المستخدم وكلمة المرور');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final settings = FiberXSettings(
+      username: _user.text.trim(),
+      password: _pass.text,
+    );
+    final service = FiberXService.fromSettings(settings);
+    try {
+      await service.login().timeout(const Duration(seconds: 45));
+      await settings.save();
+      int? count;
+      String? syncError;
+      try {
+        final users = await service.fetchSubscribers().timeout(
+          const Duration(seconds: 90),
+        );
+        count = await service.syncSubscribers(users);
+      } catch (e) {
+        syncError = '$e';
+      }
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.pop(context);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            syncError == null
+                ? 'تم ربط فايبر اكس ومزامنة ${count ?? 0} مشترك'
+                : 'رُبط فايبر اكس، لكن فشلت المزامنة: $syncError',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      service.dispose();
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _save() async {
     if (_national) {
       await _saveNational();
@@ -1095,6 +1221,10 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
     }
     if (_earthlink) {
       await _saveEarthlink();
+      return;
+    }
+    if (_fiberx) {
+      await _saveFiberX();
       return;
     }
     if (_label.text.trim().isEmpty ||
@@ -1191,6 +1321,7 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
                   onPicked: _pickCompany,
                   onNationalProject: _pickNationalProject,
                   onEarthlink: _pickEarthlink,
+                  onFiberX: _pickFiberX,
                 ),
                 const SizedBox(height: 10),
                 TextField(
@@ -1332,6 +1463,7 @@ class _CompanyPickerButton extends StatelessWidget {
     required this.onPicked,
     required this.onNationalProject,
     required this.onEarthlink,
+    required this.onFiberX,
   });
 
   final Future<List<DirectoryCompany>>? directory;
@@ -1343,6 +1475,9 @@ class _CompanyPickerButton extends StatelessWidget {
   /// عند اختيار «إيرثلنك» من القائمة (شاشة ربط خاصة).
   final VoidCallback onEarthlink;
 
+  /// عند اختيار «فايبر اكس» من القائمة (شاشة ربط خاصة).
+  final VoidCallback onFiberX;
+
   Future<void> _open(BuildContext context, List<DirectoryCompany> all) async {
     final picked = await showModalBottomSheet<Object>(
       context: context,
@@ -1353,6 +1488,8 @@ class _CompanyPickerButton extends StatelessWidget {
       onNationalProject();
     } else if (picked is _EarthlinkPick) {
       onEarthlink();
+    } else if (picked is _FiberXPick) {
+      onFiberX();
     } else if (picked is DirectoryCompany) {
       onPicked(picked);
     }
@@ -1430,7 +1567,19 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
         'earthlink.iq'.contains(q);
   }
 
-  /// بطاقات العناصر المثبّتة أعلى القائمة (المشروع الوطني ثم إيرثلنك).
+  /// «فايبر اكس» مثبّت أعلى القائمة أيضاً؛ يظهر ما لم يستبعده البحث.
+  bool get _showFiberX {
+    final q = _search.text.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    return 'فايبر اكس'.contains(q) ||
+        'فايبر'.contains(q) ||
+        'فايبراكس'.contains(q) ||
+        'fiberx'.contains(q) ||
+        'fiber x'.contains(q) ||
+        'fiberx-systems'.contains(q);
+  }
+
+  /// بطاقات العناصر المثبّتة أعلى القائمة (المشروع الوطني ثم إيرثلنك ثم فايبر اكس).
   List<Widget> _pinnedTiles(BuildContext context) => [
     if (_showNational)
       ListTile(
@@ -1455,6 +1604,18 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
         subtitle: const Text('admin.earthlink.iq — شاشة ربط خاصة'),
         trailing: const Icon(Icons.verified, size: 18),
         onTap: () => Navigator.pop(context, _earthlinkPick),
+      ),
+    if (_showFiberX)
+      ListTile(
+        key: const ValueKey('directory-fiberx'),
+        leading: CircleAvatar(
+          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+          child: const Icon(Icons.wifi_tethering),
+        ),
+        title: const Text('فايبر اكس'),
+        subtitle: const Text('agentportal.fiberx-systems.net — شاشة ربط خاصة'),
+        trailing: const Icon(Icons.verified, size: 18),
+        onTap: () => Navigator.pop(context, _fiberxPick),
       ),
   ];
 
