@@ -144,7 +144,7 @@
       ".read": "auth != null && auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2'",
       "$kind": {
         ".indexOn": ["uid"],
-        ".validate": "$kind === 'phones' || $kind === 'sas' || $kind === 'ftth'",
+        ".validate": "$kind === 'phones' || $kind === 'sas' || $kind === 'ftth' || $kind === 'earthlink' || $kind === 'fiberx'",
         "$hash": {
           ".read": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || data.child('uid').val() === auth.uid)",
           ".write": "auth != null && (auth.uid === 'wE10WciDVudIOJziBurjhBxpDfO2' || (newData.exists() && newData.child('uid').val() === auth.uid && (!data.exists() || data.child('uid').val() === auth.uid)))",

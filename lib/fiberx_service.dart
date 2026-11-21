@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
+import 'services/trial_guard_service.dart';
 
 /// خدمة وكيل «فايبر اكس» عبر منصّة OpenRADIUS الحديثة.
 ///
@@ -776,6 +777,7 @@ class FiberXService {
 
   /// يكتب/يحدّث مشتركي فايبر اكس في AppStore (source=fiberx، المطابقة على uid).
   Future<int> syncSubscribers(List<FiberXSubscriber> users) async {
+    await TrialGuardService.ensureFiberxAllowed(username);
     var changed = 0;
     for (final u in users) {
       final end = u.expiration ?? DateTime.now();

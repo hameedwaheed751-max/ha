@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
+import 'services/trial_guard_service.dart';
 
 /// خدمة وكيل إيرثلنك عبر لوحة الوكلاء الويب admin.earthlink.iq.
 ///
@@ -646,6 +647,7 @@ class EarthlinkResellerService {
 
   /// يكتب/يحدّث مشتركي إيرثلنك في AppStore، بالمطابقة على (source=earthlink, uid).
   Future<int> syncSubscribers(List<EarthlinkListUser> users) async {
+    await TrialGuardService.ensureEarthlinkAllowed(username);
     var changed = 0;
     for (final u in users) {
       final end = parseEarthlinkDate(u.expiration) ?? DateTime.now();

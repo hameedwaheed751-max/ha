@@ -27,4 +27,31 @@ void main() {
     expect(empty.total, 0);
     expect(empty.sas, 0);
   });
+
+  test('counts earthlink and fiberx, and synced sums all SAS providers', () {
+    final counts = AgentSubscriberCounts.fromValue([
+      {'user': 'a', 'source': 'sas'},
+      {'user': 'b', 'source': 'ftth'},
+      {'user': 'c', 'source': 'earthlink'},
+      {'user': 'd', 'source': 'earthlink'},
+      {'user': 'e', 'source': 'fiberx'},
+      {'user': 'f', 'source': 'local'},
+    ]);
+    expect(counts.total, 6);
+    expect(counts.sas, 1);
+    expect(counts.ftth, 1);
+    expect(counts.earthlink, 2);
+    expect(counts.fiberx, 1);
+    // المجموع الموحّد يشمل كل المزوّدات ولا يحسب المحلي.
+    expect(counts.synced, 5);
+  });
+
+  test('a pure fiberx agent is not reported as zero-synced', () {
+    final counts = AgentSubscriberCounts.fromValue([
+      {'user': 'a', 'source': 'fiberx'},
+      {'user': 'b', 'source': 'fiberx'},
+    ]);
+    expect(counts.sas, 0);
+    expect(counts.synced, 2);
+  });
 }

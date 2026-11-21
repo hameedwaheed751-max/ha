@@ -47,7 +47,10 @@ class TrialClaimEntry {
   String get kindLabel => switch (kind) {
     TrialGuardService.phonesKind => 'رقم هاتف',
     TrialGuardService.sasKind => 'ساس RADIUS',
-    _ => 'ساس FTTH',
+    TrialGuardService.ftthKind => 'ساس FTTH',
+    TrialGuardService.earthlinkKind => 'ساس إيرثلنك',
+    TrialGuardService.fiberxKind => 'ساس فايبر اكس',
+    _ => 'ساس',
   };
 }
 
@@ -59,6 +62,8 @@ class TrialGuardService {
   static const phonesKind = 'phones';
   static const sasKind = 'sas';
   static const ftthKind = 'ftth';
+  static const earthlinkKind = 'earthlink';
+  static const fiberxKind = 'fiberx';
 
   static String _hash(String kind, String value) =>
       sha256.convert(utf8.encode('$_salt|$kind|$value')).toString();
@@ -89,6 +94,10 @@ class TrialGuardService {
       _hash(sasKind, normalizeSas(serverUrl, username));
   static String ftthHash(String username) =>
       _hash(ftthKind, username.trim().toLowerCase());
+  static String earthlinkHash(String username) =>
+      _hash(earthlinkKind, username.trim().toLowerCase());
+  static String fiberxHash(String username) =>
+      _hash(fiberxKind, username.trim().toLowerCase());
 
   static bool get _firebaseReady => Firebase.apps.isNotEmpty;
 
@@ -153,6 +162,12 @@ class TrialGuardService {
   static Future<void> ensureFtthAllowed(String username) =>
       _ensure(ftthKind, ftthHash(username), username);
 
+  static Future<void> ensureEarthlinkAllowed(String username) =>
+      _ensure(earthlinkKind, earthlinkHash(username), username);
+
+  static Future<void> ensureFiberxAllowed(String username) =>
+      _ensure(fiberxKind, fiberxHash(username), username);
+
   /// للوكلاء الذين سبقوا البصمات: يسجل رقم هاتفهم مرة عند فتح التطبيق حتى
   /// لا يُستخدم لتجربة مجانية بحساب جديد. لا يمنع الوكيل نفسه من أي شيء.
   static Future<void> claimExistingPhone() async {
@@ -215,9 +230,26 @@ class TrialGuardService {
     if (ftthUser.isNotEmpty) {
       candidates['$ftthKind/${ftthHash(ftthUser)}'] = ftthUser;
     }
+    final earthlink = await read('agents/$uid/earthlink_reseller');
+    final earthlinkUser = (earthlink?['username'] ?? '').toString().trim();
+    if (earthlinkUser.isNotEmpty) {
+      candidates['$earthlinkKind/${earthlinkHash(earthlinkUser)}'] =
+          earthlinkUser;
+    }
+    final fiberx = await read('agents/$uid/fiberx');
+    final fiberxUser = (fiberx?['username'] ?? '').toString().trim();
+    if (fiberxUser.isNotEmpty) {
+      candidates['$fiberxKind/${fiberxHash(fiberxUser)}'] = fiberxUser;
+    }
 
     final found = <String, Map>{};
-    for (final kind in const [phonesKind, sasKind, ftthKind]) {
+    for (final kind in const [
+      phonesKind,
+      sasKind,
+      ftthKind,
+      earthlinkKind,
+      fiberxKind,
+    ]) {
       final owned = await _claimsRef
           .child(kind)
           .orderByChild('uid')

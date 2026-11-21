@@ -582,10 +582,20 @@ class _SubscriptionRequestsAdminScreenState
       }
       final counts = snapshot.data;
       if (counts == null) return const Text('مشتركو الساس: —');
-      final using = counts.sas > 0;
+      final synced = counts.synced;
+      final using = synced > 0;
+      // تفصيل حسب المزوّد: يظهر فقط للمزوّدات التي لها مشتركون، وفقط إذا
+      // كان هناك أكثر من مزوّد واحد (وإلا فالرقم الموحّد يكفي).
+      final parts = <String>[
+        if (counts.sas > 0) 'RADIUS ${counts.sas}',
+        if (counts.ftth > 0) 'FTTH ${counts.ftth}',
+        if (counts.earthlink > 0) 'إيرثلنك ${counts.earthlink}',
+        if (counts.fiberx > 0) 'فايبر اكس ${counts.fiberx}',
+      ];
+      final breakdown = parts.length > 1 ? ' [${parts.join('، ')}]' : '';
       return Text(
-        'مشتركو الساس: ${counts.sas}'
-        '${counts.total > counts.sas ? ' (من ${counts.total} في التطبيق)' : ''}'
+        'مشتركو الساس: $synced$breakdown'
+        '${counts.total > synced ? ' (من ${counts.total} في التطبيق)' : ''}'
         '${using ? '' : ' — لم يزامن ساسه'}',
         style: TextStyle(
           fontWeight: FontWeight.w700,

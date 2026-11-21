@@ -30,14 +30,35 @@ void main() {
   });
 
   test('kinds never collide', () {
-    expect(
+    // نفس اسم المستخدم عبر كل المزوّدات يُنتج بصمات مختلفة (لا تضارب بين الأنواع).
+    final hashes = {
+      TrialGuardService.sasHash('', 'ali'),
       TrialGuardService.ftthHash('ali'),
-      isNot(TrialGuardService.sasHash('', 'ali')),
+      TrialGuardService.earthlinkHash('ali'),
+      TrialGuardService.fiberxHash('ali'),
+    };
+    expect(hashes, hasLength(4));
+  });
+
+  test('earthlink and fiberx fingerprints normalize case and spacing', () {
+    expect(
+      TrialGuardService.earthlinkHash('  Ali '),
+      TrialGuardService.earthlinkHash('ali'),
+    );
+    expect(
+      TrialGuardService.fiberxHash('Ali'),
+      TrialGuardService.fiberxHash('ali'),
+    );
+    expect(
+      TrialGuardService.earthlinkHash('ali'),
+      matches(RegExp(r'^[0-9a-f]{64}$')),
     );
   });
 
   test('without Firebase the guard never blocks', () async {
     await TrialGuardService.ensureSasAllowed('sas.example.iq', 'ali');
     await TrialGuardService.ensureFtthAllowed('ali');
+    await TrialGuardService.ensureEarthlinkAllowed('ali');
+    await TrialGuardService.ensureFiberxAllowed('ali');
   });
 }

@@ -1147,11 +1147,19 @@ class AgentSubscriberCounts {
     required this.total,
     required this.sas,
     required this.ftth,
+    this.earthlink = 0,
+    this.fiberx = 0,
   });
 
   final int total;
   final int sas;
   final int ftth;
+  final int earthlink;
+  final int fiberx;
+
+  /// كل المشتركين المزامَنين من أي ساس (RADIUS أو FTTH أو إيرثلنك أو فايبر اكس).
+  /// صفر يعني أن الوكيل لم يربط أي ساس أو لا يستخدم التطبيق فعلياً.
+  int get synced => sas + ftth + earthlink + fiberx;
 
   /// القائمة تُحفظ في Firebase كقائمة أو كخريطة حسب ترتيب الأرقام.
   factory AgentSubscriberCounts.fromValue(Object? value) {
@@ -1163,14 +1171,29 @@ class AgentSubscriberCounts {
     var total = 0;
     var sas = 0;
     var ftth = 0;
+    var earthlink = 0;
+    var fiberx = 0;
     for (final item in items) {
       if (item is! Map) continue;
       total++;
-      final source = '${item['source'] ?? ''}';
-      if (source == 'sas') sas++;
-      if (source == 'ftth') ftth++;
+      switch ('${item['source'] ?? ''}') {
+        case 'sas':
+          sas++;
+        case 'ftth':
+          ftth++;
+        case 'earthlink':
+          earthlink++;
+        case 'fiberx':
+          fiberx++;
+      }
     }
-    return AgentSubscriberCounts(total: total, sas: sas, ftth: ftth);
+    return AgentSubscriberCounts(
+      total: total,
+      sas: sas,
+      ftth: ftth,
+      earthlink: earthlink,
+      fiberx: fiberx,
+    );
   }
 }
 
