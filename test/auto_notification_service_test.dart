@@ -427,6 +427,56 @@ void main() {
     },
   );
 
+  group('debt payment notification decision', () {
+    test('any real payment with a phone triggers the message', () {
+      expect(
+        AutoNotificationService.shouldNotifyDebtPayment(
+          amountApplied: 5000,
+          phone: '07900000000',
+        ),
+        isTrue,
+      );
+    });
+
+    test('a partial payment (remaining still owed) also triggers it', () {
+      // لا يشترط التسديد الكامل؛ الدفعة الجزئية كافية.
+      expect(
+        AutoNotificationService.shouldNotifyDebtPayment(
+          amountApplied: 1,
+          phone: '07900000000',
+        ),
+        isTrue,
+      );
+    });
+
+    test('a zero or negative applied amount does not trigger it', () {
+      expect(
+        AutoNotificationService.shouldNotifyDebtPayment(
+          amountApplied: 0,
+          phone: '07900000000',
+        ),
+        isFalse,
+      );
+      expect(
+        AutoNotificationService.shouldNotifyDebtPayment(
+          amountApplied: -10,
+          phone: '07900000000',
+        ),
+        isFalse,
+      );
+    });
+
+    test('a missing phone number does not trigger it', () {
+      expect(
+        AutoNotificationService.shouldNotifyDebtPayment(
+          amountApplied: 5000,
+          phone: '   ',
+        ),
+        isFalse,
+      );
+    });
+  });
+
   test(
     'inactive and disabled subscriptions do not get near-expiry events',
     () async {

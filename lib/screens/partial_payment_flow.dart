@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models.dart';
+import '../services/auto_notification_service.dart';
 import '../services/subscriber_financial_ledger.dart';
 
 double? _parseAmount(String raw) {
@@ -159,6 +160,12 @@ Future<double> _savePayment(
       const SnackBar(content: Text('تم حفظ الدفعة محلياً، لكن تعذرت المزامنة')),
     );
   }
+  // رسالة "استلام دين سابق" عند أي دفعة فعلية خفّضت المتبقي.
+  await AutoNotificationService.notifyDebtPaymentReceived(
+    subscriber: s,
+    amountApplied: applied,
+    newRemaining: s.remaining,
+  );
   return applied;
 }
 

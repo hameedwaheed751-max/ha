@@ -644,24 +644,29 @@ class AutoNotificationService {
     );
   }
 
-  static Future<void> notifyDebtSettledIfNeeded({
+  /// هل تُرسَل رسالة استلام الدين لهذه الدفعة؟ تُرسَل عند أي دفعة فعلية
+  /// (جزئية أو كاملة) طالما لها رقم هاتف صالح.
+  static bool shouldNotifyDebtPayment({
+    required double amountApplied,
+    required String phone,
+  }) => amountApplied > 0.0001 && phone.trim().isNotEmpty;
+
+  /// يرسل رسالة "استلام دين سابق" عند أي دفعة فعلية خفّضت المتبقي.
+  /// يستدعى من مسار التسديد بعد تطبيق الدفعة.
+  static Future<void> notifyDebtPaymentReceived({
     required Subscriber subscriber,
-    required double oldRemaining,
+    required double amountApplied,
     required double newRemaining,
   }) async {
-    if (oldRemaining <= 0.0001 || newRemaining > 0.0001) {
-      return;
-    }
-
     final phone = RenderWhatsAppService.normalizePhone(subscriber.phone);
-    if (phone.isEmpty) {
+    if (!shouldNotifyDebtPayment(amountApplied: amountApplied, phone: phone)) {
       return;
     }
 
     RenderWhatsAppService.dispatchInBackground(
       WhatsAppNotificationDispatcher().notifyDebtPaid(
         subscriber,
-        amountPaid: oldRemaining,
+        amountPaid: amountApplied,
         remainingBalance: newRemaining,
         eventId:
             'settled_${subscriber.subscriberId}_${DateTime.now().microsecondsSinceEpoch}',
