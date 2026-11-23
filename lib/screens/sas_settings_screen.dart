@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../earthlink_mobile_service.dart';
 import '../earthlink_reseller_service.dart';
 import '../fiberx_service.dart';
 import '../models.dart';
@@ -560,7 +561,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                           enabled: !busy,
                           onSync: () => _syncProvider(
                             _earthlinkBusyId,
-                            EarthlinkResellerService.syncSaved,
+                            EarthlinkMobileService.syncSaved,
                           ),
                           onEdit: () => _editProvider('earthlink'),
                           onUnlink: () => _unlinkProvider(
@@ -1130,7 +1131,7 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
       username: _user.text.trim(),
       password: _pass.text,
     );
-    final service = EarthlinkResellerService.fromSettings(settings);
+    final service = EarthlinkMobileService.fromSettings(settings);
     try {
       await service.login().timeout(const Duration(seconds: 45));
       await settings.save();
@@ -1138,7 +1139,7 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
       int? count;
       String? syncError;
       try {
-        final users = await service.fetchSubscribers().timeout(
+        final users = await service.fetchAllSubscribers().timeout(
           const Duration(seconds: 60),
         );
         count = await service.syncSubscribers(users);
@@ -1589,7 +1590,6 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
           child: const Icon(Icons.account_tree_outlined),
         ),
         title: const Text('المشروع الوطني'),
-        subtitle: const Text('admin.ftth.iq — شاشة ربط خاصة'),
         trailing: const Icon(Icons.verified, size: 18),
         onTap: () => Navigator.pop(context, _nationalProjectPick),
       ),
@@ -1601,7 +1601,6 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
           child: const Icon(Icons.router_outlined),
         ),
         title: const Text('إيرثلنك'),
-        subtitle: const Text('admin.earthlink.iq — شاشة ربط خاصة'),
         trailing: const Icon(Icons.verified, size: 18),
         onTap: () => Navigator.pop(context, _earthlinkPick),
       ),
@@ -1613,7 +1612,6 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
           child: const Icon(Icons.wifi_tethering),
         ),
         title: const Text('فايبر اكس'),
-        subtitle: const Text('agentportal.fiberx-systems.net — شاشة ربط خاصة'),
         trailing: const Icon(Icons.verified, size: 18),
         onTap: () => Navigator.pop(context, _fiberxPick),
       ),

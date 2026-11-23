@@ -7,7 +7,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models.dart';
-import '../earthlink_reseller_service.dart';
+import '../earthlink_mobile_service.dart';
 import '../fiberx_service.dart';
 import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
@@ -216,7 +216,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
         // إيرثلنك بعدهما، لنفس السبب (كتابة متسلسلة على قائمة المشتركين).
         try {
-          await EarthlinkResellerService.syncSaved().timeout(
+          await EarthlinkMobileService.syncSaved().timeout(
             const Duration(minutes: 3),
           );
         } catch (error) {

@@ -17,6 +17,11 @@ import 'services/trial_guard_service.dart';
 /// العام: `{value, responseMessage, error:{message,errorCode}, isSuccessful}`.
 const String kEarthlinkMobileBase = 'https://rapi.earthlink.iq/api/reseller';
 
+/// `rapi.earthlink.iq` خلف Cloudflare وقد يحجب الـUser-Agent الافتراضي،
+/// فنطابق تطبيق الوكلاء (من الـHAR) لتفادي الحجب.
+const String kEarthlinkUserAgent =
+    'Resellers/4.1.0 (com.earthlink.reseller; build:5; iOS 27.0.1) Alamofire/5.4.4';
+
 /// باقة إيرثلنك من `/accounts/all` (accountIndex = معرّف الباقة للإجراءات).
 class EarthlinkMobilePlan {
   const EarthlinkMobilePlan({
@@ -335,6 +340,8 @@ class EarthlinkMobileService {
   Map<String, String> _authHeaders() => {
     'Authorization': 'Bearer ${_token ?? ''}',
     'Accept': 'application/json',
+    'User-Agent': kEarthlinkUserAgent,
+    'Accept-Language': 'ar-IQ;q=1.0, en-GB;q=0.9',
   };
 
   void _log(String message) => debugPrint('[EarthlinkMobile] $message');
@@ -346,6 +353,8 @@ class EarthlinkMobileService {
       headers: const {
         'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
         'Accept': 'application/json',
+        'User-Agent': kEarthlinkUserAgent,
+        'Accept-Language': 'ar-IQ;q=1.0, en-GB;q=0.9',
       },
       body: earthlinkLoginForm(username: username, password: password),
     );
@@ -493,8 +502,22 @@ class EarthlinkMobileService {
     }),
   );
 
-  /// يكتب/يحدّث مشتركي إيرثلنك في AppStore (source=earthlink, uid). لا يُستدعى
-  /// بعد — التبديل من خدمة الويب يتم في مرحلة لاحقة بموافقة المستخدم.
+  /// يسجّل الدخول عبر تطبيق إيرثلنك (بلا VPN) ويزامن كل المشتركين. يعيد العدد،
+  /// أو null إن لم تكتمل إعدادات الربط.
+  static Future<int?> syncSaved() async {
+    final settings = await EarthlinkResellerSettings.load();
+    if (!settings.isComplete) return null;
+    final service = EarthlinkMobileService.fromSettings(settings);
+    try {
+      await service.login();
+      final users = await service.fetchAllSubscribers();
+      return await service.syncSubscribers(users);
+    } finally {
+      service.dispose();
+    }
+  }
+
+  /// يكتب/يحدّث مشتركي إيرثلنك في AppStore (source=earthlink, uid).
   Future<int> syncSubscribers(List<EarthlinkMobileUser> users) async {
     await TrialGuardService.ensureEarthlinkAllowed(username);
     var changed = 0;

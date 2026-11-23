@@ -4,13 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../earthlink_mobile_service.dart';
 import '../earthlink_reseller_service.dart';
 import '../fiberx_service.dart';
 import '../models.dart';
 import '../sas_api_service.dart';
 import '../sas_project_national_service.dart';
 import '../sas_sync_service.dart';
-import 'earthlink_refill_dialog.dart';
 import 'fiberx_activation_dialog.dart';
 import '../services/render_whatsapp_service.dart';
 import '../services/subscriber_financial_ledger.dart';
@@ -827,8 +827,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     }
   }
 
-  /// تعبئة/تجديد مشترك إيرثلنك عبر لوحة الوكلاء. تصرف مالاً، فالخدمة تسجّل
-  /// الدخول ثم يختار الوكيل البطاقة/الرصيد والباقة في الحوار.
+  /// إيرثلنك: الدخول والعرض والمزامنة عبر واجهة تطبيق إيرثلنك (rapi، بلا VPN).
+  /// أما التعبئة/التفعيل فمؤجّلة حتى تأكيد عملية تعبئة ناجحة (راجع الذاكرة)،
+  /// فنُحدّث القائمة ونرشد لإجرائها من تطبيق إيرثلنك مؤقتاً.
   Future<void> _openEarthlinkRefill(
     Subscriber s, {
     BuildContext? modalContext,
@@ -836,68 +837,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     if (modalContext != null && modalContext.mounted) {
       Navigator.pop(modalContext);
     }
-    final uid = (s.sasData['earthlink_uid'] ?? s.user).toString().trim();
-    if (uid.isEmpty) {
-      _showFtthMessage('❌ معرّف مشترك إيرثلنك غير موجود', color: Colors.red);
-      return;
-    }
     final settings = await EarthlinkResellerSettings.load();
-    if (settings.needsPassword) {
-      _showFtthMessage(
-        '❌ ${EarthlinkResellerSettings.missingPasswordMessage}',
-        color: Colors.red,
-      );
-      return;
-    }
     if (settings.username.trim().isEmpty) {
       _showFtthMessage('❌ أكمل ربط إيرثلنك أولاً', color: Colors.red);
       return;
     }
-    if (!mounted) return;
-    // مبلغ الاشتراك واختيار الواصل/الجزئي/الدين قبل التعبئة، كبقية الساسات.
-    // إلغاء هذا الحوار يعني عدم التعبئة ولا صرف لأي مبلغ.
-    final payment = await _confirmActivation(s);
-    if (payment == null || !mounted) return;
-    final done = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => EarthlinkRefillDialog(
-        uid: uid,
-        subscriberName: s.name.isNotEmpty ? s.name : uid,
-        currentPlan: (s.sasData['plan'] ?? s.type ?? '').toString(),
-        serviceFactory: () async {
-          final service = EarthlinkResellerService.fromSettings(settings);
-          await service.login().timeout(const Duration(seconds: 45));
-          return service;
-        },
-      ),
-    );
-    if (done != true || !mounted) return;
-    // نجاح التعبئة يحدّث الانتهاء؛ نزامن لتحديث القائمة.
-    final at = DateTime.now();
-    unawaited(EarthlinkResellerService.syncSaved());
-    // لوحة إيرثلنك لا تُرجع المبلغ المخصوم، فالكلفة غير معروفة هنا (0).
-    final sale = await _recordActivationSale(
-      s,
-      payment: payment,
-      sasDeduction: 0,
-      at: at,
-      note: 'تفعيل إيرثلنك',
-    );
-    await AppStore.save();
-    await _recordActivationLedger(s, payment: payment, sale: sale, at: at);
-    if (!mounted) return;
-    setState(() {
-      selected = null;
-      _filteredSubscribers = _buildFilteredSubscribers();
-    });
-    // رسالة "تم التفعيل" للمشترك عبر واتساب الوكيل، كبقية الساسات.
-    RenderWhatsAppService.dispatchInBackground(
-      _sendActivationWhatsApp(s, paidAmount: sale.collected),
-    );
+    unawaited(EarthlinkMobileService.syncSaved());
     _showFtthMessage(
-      '✅ تم تفعيل إيرثلنك وتسجيل المبلغ',
-      color: Colors.green.shade600,
+      'تفعيل إيرثلنك عبر التطبيق قيد الإكمال — فعّل من تطبيق إيرثلنك مؤقتاً ثم '
+      'اضغط مزامنة. (العرض والمزامنة يعملان بلا VPN)',
+      color: Colors.orange.shade800,
     );
   }
 

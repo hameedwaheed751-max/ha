@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../earthlink_mobile_service.dart';
 import '../earthlink_reseller_service.dart';
 import '../fiberx_service.dart';
 import '../models.dart';
@@ -309,7 +310,7 @@ class _SasOnboardingScreenState extends State<SasOnboardingScreen> {
     try {
       final earthlink = await EarthlinkResellerSettings.load();
       if (earthlink.username.trim().isNotEmpty) {
-        await EarthlinkResellerService.syncSaved().timeout(
+        await EarthlinkMobileService.syncSaved().timeout(
           const Duration(minutes: 3),
         );
         if (AppStore.subscribers.any((s) => s.source == 'earthlink')) {
