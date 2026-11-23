@@ -854,6 +854,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       return;
     }
     if (!mounted) return;
+    // مبلغ الاشتراك واختيار الواصل/الجزئي/الدين قبل التعبئة، كبقية الساسات.
+    // إلغاء هذا الحوار يعني عدم التعبئة ولا صرف لأي مبلغ.
+    final payment = await _confirmActivation(s);
+    if (payment == null || !mounted) return;
     final done = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -868,11 +872,29 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         },
       ),
     );
+    if (done != true || !mounted) return;
     // نجاح التعبئة يحدّث الانتهاء؛ نزامن لتحديث القائمة.
-    if (done == true) {
-      unawaited(EarthlinkResellerService.syncSaved());
-      if (mounted) setState(() {});
-    }
+    final at = DateTime.now();
+    unawaited(EarthlinkResellerService.syncSaved());
+    // لوحة إيرثلنك لا تُرجع المبلغ المخصوم، فالكلفة غير معروفة هنا (0).
+    final sale = await _recordActivationSale(
+      s,
+      payment: payment,
+      sasDeduction: 0,
+      at: at,
+      note: 'تفعيل إيرثلنك',
+    );
+    await AppStore.save();
+    await _recordActivationLedger(s, payment: payment, sale: sale, at: at);
+    if (!mounted) return;
+    setState(() {
+      selected = null;
+      _filteredSubscribers = _buildFilteredSubscribers();
+    });
+    _showFtthMessage(
+      '✅ تم تفعيل إيرثلنك وتسجيل المبلغ',
+      color: Colors.green.shade600,
+    );
   }
 
   /// يبني مشترك فايبر اكس من البيانات المحفوظة لفتح حوار العمليات.
@@ -923,7 +945,11 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       return;
     }
     if (!mounted) return;
-    final done = await showDialog<bool>(
+    // مبلغ الاشتراك واختيار الواصل/الجزئي/الدين قبل التفعيل، كبقية الساسات.
+    // إلغاء هذا الحوار يعني عدم التفعيل ولا خصم من محفظة الوكيل.
+    final payment = await _confirmActivation(s);
+    if (payment == null || !mounted) return;
+    final result = await showDialog<FiberXActionResult>(
       context: context,
       barrierDismissible: false,
       builder: (_) => FiberXActivationDialog(
@@ -935,10 +961,27 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         },
       ),
     );
-    if (done == true) {
-      unawaited(FiberXService.syncSaved());
-      if (mounted) setState(() {});
-    }
+    if (result == null || !result.success || !mounted) return;
+    final at = DateTime.now();
+    unawaited(FiberXService.syncSaved());
+    final sale = await _recordActivationSale(
+      s,
+      payment: payment,
+      sasDeduction: (result.totalCharged ?? 0).toDouble(),
+      at: at,
+      note: 'تفعيل فايبر اكس',
+    );
+    await AppStore.save();
+    await _recordActivationLedger(s, payment: payment, sale: sale, at: at);
+    if (!mounted) return;
+    setState(() {
+      selected = null;
+      _filteredSubscribers = _buildFilteredSubscribers();
+    });
+    _showFtthMessage(
+      '✅ تم تفعيل فايبر اكس وتسجيل المبلغ',
+      color: Colors.green.shade600,
+    );
   }
 
   ({String subscriptionId, String customerId}) _ftthIds(Subscriber s) {

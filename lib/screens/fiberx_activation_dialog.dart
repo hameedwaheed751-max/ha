@@ -102,13 +102,13 @@ class _FiberXActivationDialogState extends State<FiberXActivationDialog> {
         actions: _result != null
             ? [
                 TextButton(
-                  onPressed: () => Navigator.pop(context, _result!.success),
+                  onPressed: () => Navigator.pop(context, _result),
                   child: const Text('تم'),
                 ),
               ]
             : [
                 TextButton(
-                  onPressed: _busy ? null : () => Navigator.pop(context, false),
+                  onPressed: _busy ? null : () => Navigator.pop(context, null),
                   child: const Text('إلغاء'),
                 ),
                 FilledButton(
