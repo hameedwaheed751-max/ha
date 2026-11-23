@@ -1544,20 +1544,14 @@ String moneyText(num amount) {
   return '${rounded < 0 ? '-' : ''}$digits د.ع';
 }
 
-String _dayCountText(int days) {
-  if (days == 1) return 'يوم';
-  if (days == 2) return 'يومان';
-  return days <= 10 ? '$days أيام' : '$days يوم';
-}
-
-/// الوقت المتبقي بالأيام فقط، مثل: 6 أيام. أقل من يوم ⇒ «ينتهي اليوم»،
-/// وبعد الانتهاء ⇒ «منتهي».
+/// عدد الأيام المتبقّية كرقمٍ فقط، كما في الساس: ينتهي اليوم=0، غداً=1،
+/// بعد غد=2، وهكذا. يحسب فرق التقويم (يتجاهل ساعة اليوم)، والسالب يعني
+/// انقضى منذ ذلك العدد من الأيام.
 String remainingTimeText(DateTime end, [DateTime? now]) {
-  final left = end.difference(now ?? DateTime.now());
-  if (left.isNegative) return 'منتهي';
-  final days = left.inDays;
-  if (days == 0) return 'ينتهي اليوم';
-  return _dayCountText(days);
+  final base = now ?? DateTime.now();
+  final today = DateTime(base.year, base.month, base.day);
+  final endDay = DateTime(end.year, end.month, end.day);
+  return '${endDay.difference(today).inDays}';
 }
 
 /// استثناء يحمل رسالة عربية جاهزة لعرضها للمستخدم مباشرةً، فلا تُطمَس خلف

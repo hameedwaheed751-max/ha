@@ -24,40 +24,43 @@ void main() {
   group('remainingTimeText', () {
     final now = DateTime(2026, 11, 2, 10);
 
-    test('shows the full days only, dropping the hours', () {
-      expect(
-        remainingTimeText(now.add(const Duration(days: 6, hours: 5)), now),
-        '6 أيام',
-      );
-      expect(
-        remainingTimeText(now.add(const Duration(days: 1, hours: 2)), now),
-        'يوم',
-      );
-      expect(
-        remainingTimeText(now.add(const Duration(days: 29, hours: 23)), now),
-        '29 يوم',
-      );
-      expect(
-        remainingTimeText(now.add(const Duration(days: 3)), now),
-        '3 أيام',
-      );
-    });
-
-    test('less than a day left shows "ينتهي اليوم"', () {
+    test('writes only the SAS-style calendar day count', () {
+      // اليوم=0، غداً=1، بعد غد=2 ... (فرق التقويم، يتجاهل الساعة).
       expect(
         remainingTimeText(now.add(const Duration(hours: 7)), now),
-        'ينتهي اليوم',
+        '0', // ينتهي اليوم
       );
       expect(
         remainingTimeText(now.add(const Duration(minutes: 20)), now),
-        'ينتهي اليوم',
+        '0',
+      );
+      expect(
+        remainingTimeText(now.add(const Duration(days: 1)), now),
+        '1', // غداً
+      );
+      expect(
+        remainingTimeText(now.add(const Duration(days: 2)), now),
+        '2', // بعد غد
+      );
+      expect(
+        remainingTimeText(now.add(const Duration(days: 6, hours: 5)), now),
+        '6',
+      );
+      expect(
+        remainingTimeText(now.add(const Duration(days: 29)), now),
+        '29',
+      );
+      // ساعات تعبر منتصف الليل تُحسب يوماً تقويمياً إضافياً (ينتهي بعد 30 يوماً).
+      expect(
+        remainingTimeText(now.add(const Duration(days: 29, hours: 23)), now),
+        '30',
       );
     });
 
-    test('already expired shows "منتهي"', () {
+    test('a date already in the past is a negative count', () {
       expect(
-        remainingTimeText(now.subtract(const Duration(hours: 1)), now),
-        'منتهي',
+        remainingTimeText(now.subtract(const Duration(days: 1)), now),
+        '-1',
       );
     });
   });
