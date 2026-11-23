@@ -82,6 +82,7 @@ Future<void> recordPartialPayment(BuildContext context, Subscriber s) async {
     }
     return;
   }
+  if (!context.mounted) return;
   await _savePayment(context, s, amount, DateTime.now(), null);
 }
 
@@ -303,6 +304,7 @@ Future<void> recordCarriedDebtCorrection(
   if (correction == null) return;
   final difference = correction.newAmount - before;
   if (difference.abs() < 0.5) return;
+  if (!context.mounted) return;
 
   final now = DateTime.now();
   final note =

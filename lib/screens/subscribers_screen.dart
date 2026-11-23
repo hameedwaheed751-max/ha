@@ -891,6 +891,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       selected = null;
       _filteredSubscribers = _buildFilteredSubscribers();
     });
+    // رسالة "تم التفعيل" للمشترك عبر واتساب الوكيل، كبقية الساسات.
+    RenderWhatsAppService.dispatchInBackground(
+      _sendActivationWhatsApp(s, paidAmount: sale.collected),
+    );
     _showFtthMessage(
       '✅ تم تفعيل إيرثلنك وتسجيل المبلغ',
       color: Colors.green.shade600,
@@ -978,6 +982,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       selected = null;
       _filteredSubscribers = _buildFilteredSubscribers();
     });
+    // رسالة "تم التفعيل" للمشترك عبر واتساب الوكيل، كبقية الساسات.
+    RenderWhatsAppService.dispatchInBackground(
+      _sendActivationWhatsApp(s, paidAmount: sale.collected),
+    );
     _showFtthMessage(
       '✅ تم تفعيل فايبر اكس وتسجيل المبلغ',
       color: Colors.green.shade600,
@@ -4677,9 +4685,7 @@ class _SubscribersDataSource extends DataTableSource {
                   const SizedBox(width: 6),
                   Flexible(
                     child: Text(
-                      s.remaining > 0.0001
-                          ? '${moneyText(s.remaining)}'
-                          : 'مسدد',
+                      s.remaining > 0.0001 ? moneyText(s.remaining) : 'مسدد',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
