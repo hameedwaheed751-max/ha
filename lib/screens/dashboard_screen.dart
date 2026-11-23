@@ -962,8 +962,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                                                     newPassword: newPassword,
                                                   );
                                               if (!mounted ||
-                                                  !sheetContext.mounted)
+                                                  !sheetContext.mounted) {
                                                 return;
+                                              }
                                               if (mounted) setState(() {});
                                               Navigator.pop(sheetContext);
                                               ScaffoldMessenger.of(
@@ -2591,7 +2592,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   ),
                 ),
               ),
-              if (trailing != null) trailing,
+              ?trailing,
             ],
           ),
           const SizedBox(height: 8),
@@ -3923,7 +3924,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                           child: Icon(Icons.payments_outlined),
                         ),
                         title: Text(
-                          '${moneyText(p.amount)}',
+                          moneyText(p.amount),
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                         subtitle: Text(
@@ -4424,7 +4425,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${moneyText(totalRemaining)}',
+                          moneyText(totalRemaining),
                           style: const TextStyle(
                             color: Color(0xFFFFB4AB),
                             fontSize: 28,
@@ -4618,7 +4619,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                 ),
                 const SizedBox(width: 10),
                 Text(
-                  '${moneyText(subscriber.remaining)}',
+                  moneyText(subscriber.remaining),
                   style: const TextStyle(
                     color: Color(0xFFC2413B),
                     fontWeight: FontWeight.w800,

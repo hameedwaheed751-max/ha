@@ -510,8 +510,9 @@ class _ChatScreenState extends State<ChatScreen> {
                                         fit: BoxFit.cover,
                                         loadingBuilder:
                                             (context, child, progress) {
-                                              if (progress == null)
+                                              if (progress == null) {
                                                 return child;
+                                              }
                                               return const SizedBox(
                                                 height: 120,
                                                 child: Center(

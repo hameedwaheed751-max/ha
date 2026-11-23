@@ -19,12 +19,10 @@ abstract interface class FinanceStore {
 
 class FirebaseFinanceStore implements FinanceStore {
   FirebaseFinanceStore({
-    required int Function() firstReceiptNumber,
+    required this._firstReceiptNumber,
     FirebaseAuth? auth,
-    FirebaseDatabase? database,
-  }) : _firstReceiptNumber = firstReceiptNumber,
-       _uid = (auth ?? FirebaseAuth.instance).currentUser?.uid,
-       _database = database;
+    this._database,
+  }) : _uid = (auth ?? FirebaseAuth.instance).currentUser?.uid;
 
   final int Function() _firstReceiptNumber;
   final String? _uid;

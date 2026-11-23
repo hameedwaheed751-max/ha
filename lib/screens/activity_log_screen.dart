@@ -274,7 +274,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                             trailing: isEdit || event.amount == 0
                                 ? null
                                 : Text(
-                                    '${moneyText(event.amount)}',
+                                    moneyText(event.amount),
                                     style: TextStyle(
                                       color: color,
                                       fontWeight: FontWeight.w800,

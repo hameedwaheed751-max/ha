@@ -39,10 +39,9 @@ class PaymentRecord {
     required this.amount,
     required this.at,
     this.note = '',
-    String billingMonthKey = '',
-    double currentChargeAmount = 0,
-  }) : _billingMonthKey = billingMonthKey,
-       _currentChargeAmount = currentChargeAmount;
+    String this._billingMonthKey = '',
+    double this._currentChargeAmount = 0,
+  });
   double amount;
   DateTime at;
   String note;
@@ -95,8 +94,8 @@ class InvoiceRecord {
     this.paidAmountSnapshot,
     this.remainingAmountSnapshot,
     this.packageSnapshot,
-    bool cancelled = false,
-  }) : _cancelled = cancelled;
+    bool this._cancelled = false,
+  });
 
   bool? _cancelled;
 
@@ -160,10 +159,9 @@ class DailyTaskEvent {
     this.amount = 0,
     this.remainingAfter = 0,
     this.note = '',
-    String category = '',
-    String cancelReason = '',
-  }) : _category = category,
-       _cancelReason = cancelReason;
+    String this._category = '',
+    String this._cancelReason = '',
+  });
 
   String type;
   String subscriberUser;
@@ -800,7 +798,7 @@ class Subscriber {
     this.active = true,
     this.disabled = false,
     this.paid = 0,
-    double carriedDebt = 0,
+    double this._carriedDebt = 0,
     String? billingMonthKey,
     bool billingMonthKeyWasMissing = false,
     this.paymentDate = '',
@@ -814,7 +812,6 @@ class Subscriber {
     List<PaymentRecord>? payments,
     List<InvoiceRecord>? invoices,
   }) : subscriberId = _normalizeSubscriberId(subscriberId),
-       _carriedDebt = carriedDebt,
        payments = payments ?? <PaymentRecord>[],
        invoices = invoices ?? <InvoiceRecord>[],
        sasData = sasData ?? <String, dynamic>{},

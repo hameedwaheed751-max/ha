@@ -48,11 +48,10 @@ class WahaQrCode {
 class WahaNotificationService {
   WahaNotificationService({
     required String gatewayUrl,
-    required Future<String?> Function() getIdToken,
+    required this._getIdToken,
     http.Client? client,
     this.timeout = const Duration(seconds: 20),
   }) : _gatewayUrl = gatewayUrl.trim(),
-       _getIdToken = getIdToken,
        _client = client ?? http.Client();
 
   static const String _configuredGatewayUrl = String.fromEnvironment(

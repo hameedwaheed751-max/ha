@@ -45,14 +45,11 @@ AgentPushTarget? pushTargetFor(Map<String, dynamic> data) =>
 /// لا يرمي أبداً: الإشعار تحسين، وغيابه لا يعطّل شيئاً في التطبيق.
 class AgentPushRegistrar {
   AgentPushRegistrar({
-    required Future<String?> Function() getToken,
-    required Stream<String> tokenRefresh,
-    required Future<void> Function(String token) register,
-    required Future<void> Function(String token) unregister,
-  }) : _getToken = getToken,
-       _tokenRefresh = tokenRefresh,
-       _register = register,
-       _unregister = unregister;
+    required this._getToken,
+    required this._tokenRefresh,
+    required this._register,
+    required this._unregister,
+  });
 
   final Future<String?> Function() _getToken;
   final Stream<String> _tokenRefresh;

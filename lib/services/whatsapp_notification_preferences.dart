@@ -23,10 +23,9 @@ abstract interface class WhatsAppNotificationPreferences {
 class FirebaseWhatsAppNotificationPreferences
     implements WhatsAppNotificationPreferences {
   FirebaseWhatsAppNotificationPreferences({
-    FirebaseAuth? auth,
-    FirebaseDatabase? database,
-  }) : _auth = auth,
-       _database = database;
+    this._auth,
+    this._database,
+  });
 
   static const Set<String> eventTypes = {
     'subscription_activated',

@@ -780,11 +780,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                           try {
                                             await _openRenewSubscriptionFlow();
                                           } finally {
-                                            if (mounted)
+                                            if (mounted) {
                                               setState(
                                                 () =>
                                                     _isRenewActionBusy = false,
                                               );
+                                            }
                                           }
                                         },
                                   style: FilledButton.styleFrom(
@@ -1768,10 +1769,11 @@ class _RenewalRequestStatusScreenState
                                     try {
                                       _openNewRenewalFlow();
                                     } finally {
-                                      if (mounted)
+                                      if (mounted) {
                                         setState(
                                           () => _isSubmittingNew = false,
                                         );
+                                      }
                                     }
                                   },
                             icon: _isSubmittingNew

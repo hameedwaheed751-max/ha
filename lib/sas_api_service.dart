@@ -2810,8 +2810,9 @@ class SasApiService implements VoucherApi {
     if (extraHeaders != null && extraHeaders.isNotEmpty) {
       headers.addAll(extraHeaders);
     }
-    if (authenticated && _token != null)
+    if (authenticated && _token != null) {
       headers['authorization'] = 'Bearer $_token';
+    }
     http.Response res;
     try {
       if (!_proxyFallback) _debugLog('SAS Direct: attempting connection');

@@ -291,7 +291,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
           ),
           const SizedBox(height: 6),
           Text(
-            '${moneyText(amount)}',
+            moneyText(amount),
             style: TextStyle(
               color: color,
               fontSize: 17,
@@ -547,7 +547,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
         ? Colors.red
         : Colors.green;
     TextSpan amountSpan(double amount, Color amountColor) => TextSpan(
-      text: '${moneyText(amount)}',
+      text: moneyText(amount),
       style: TextStyle(
         color: isCancelled ? Colors.blueGrey : amountColor,
         fontWeight: FontWeight.w800,
@@ -602,7 +602,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
             ),
             const SizedBox(width: 8),
             Text(
-              '${moneyText(total)}',
+              moneyText(total),
               style: TextStyle(
                 color: color,
                 fontWeight: FontWeight.w800,
@@ -907,7 +907,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                           if (event.remainingAfter > 0) ...[
                             const TextSpan(text: ' • المتبقي '),
                             TextSpan(
-                              text: '${moneyText(event.remainingAfter)}',
+                              text: moneyText(event.remainingAfter),
                               style: TextStyle(
                                 color: Colors.red.shade700,
                                 fontWeight: FontWeight.w700,
@@ -928,7 +928,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    isDebtEdit ? 'تم التعديل' : '${moneyText(event.amount)}',
+                    isDebtEdit ? 'تم التعديل' : moneyText(event.amount),
                     style: TextStyle(
                       color: event.isCancelled ? Colors.blueGrey : color,
                       fontWeight: FontWeight.w800,
@@ -973,7 +973,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
           ),
           const SizedBox(height: 6),
           Text(
-            '${moneyText(amount)}',
+            moneyText(amount),
             style: TextStyle(
               color: color,
               fontSize: 16,
@@ -1383,7 +1383,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                     '${f(inv.at)}${inv.note.isEmpty ? '' : ' • ${inv.note}'}',
                                   ),
                                   trailing: Text(
-                                    '${moneyText(inv.amount)}',
+                                    moneyText(inv.amount),
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -1493,7 +1493,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                   title: Text(
                                     isCorrection
                                         ? 'تصحيح واصل ${moneyText(p.amount.abs())}'
-                                        : '${moneyText(p.amount)}',
+                                        : moneyText(p.amount),
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       color: isCorrection ? Colors.red : null,
