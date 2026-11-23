@@ -24,33 +24,40 @@ void main() {
   group('remainingTimeText', () {
     final now = DateTime(2026, 11, 2, 10);
 
-    test('shows days and hours', () {
+    test('shows the full days only, dropping the hours', () {
       expect(
         remainingTimeText(now.add(const Duration(days: 6, hours: 5)), now),
-        '6 أيام و5 ساعات',
+        '6 أيام',
       );
       expect(
         remainingTimeText(now.add(const Duration(days: 1, hours: 2)), now),
-        'يوم وساعتان',
+        'يوم',
       );
       expect(
         remainingTimeText(now.add(const Duration(days: 29, hours: 23)), now),
-        '29 يوم و23 ساعة',
+        '29 يوم',
       );
-    });
-
-    test('drops the empty part', () {
       expect(
         remainingTimeText(now.add(const Duration(days: 3)), now),
         '3 أيام',
       );
+    });
+
+    test('less than a day left shows "ينتهي اليوم"', () {
       expect(
         remainingTimeText(now.add(const Duration(hours: 7)), now),
-        '7 ساعات',
+        'ينتهي اليوم',
       );
       expect(
         remainingTimeText(now.add(const Duration(minutes: 20)), now),
-        'أقل من ساعة',
+        'ينتهي اليوم',
+      );
+    });
+
+    test('already expired shows "منتهي"', () {
+      expect(
+        remainingTimeText(now.subtract(const Duration(hours: 1)), now),
+        'منتهي',
       );
     });
   });

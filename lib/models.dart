@@ -1550,21 +1550,14 @@ String _dayCountText(int days) {
   return days <= 10 ? '$days أيام' : '$days يوم';
 }
 
-String _hourCountText(int hours) {
-  if (hours == 1) return 'ساعة';
-  if (hours == 2) return 'ساعتان';
-  return hours <= 10 ? '$hours ساعات' : '$hours ساعة';
-}
-
-/// الوقت المتبقي بالأيام والساعات، مثل: 6 أيام و5 ساعات.
+/// الوقت المتبقي بالأيام فقط، مثل: 6 أيام. أقل من يوم ⇒ «ينتهي اليوم»،
+/// وبعد الانتهاء ⇒ «منتهي».
 String remainingTimeText(DateTime end, [DateTime? now]) {
   final left = end.difference(now ?? DateTime.now());
-  if (left.inHours <= 0) return 'أقل من ساعة';
+  if (left.isNegative) return 'منتهي';
   final days = left.inDays;
-  final hours = left.inHours - days * 24;
-  if (days == 0) return _hourCountText(hours);
-  if (hours == 0) return _dayCountText(days);
-  return '${_dayCountText(days)} و${_hourCountText(hours)}';
+  if (days == 0) return 'ينتهي اليوم';
+  return _dayCountText(days);
 }
 
 /// استثناء يحمل رسالة عربية جاهزة لعرضها للمستخدم مباشرةً، فلا تُطمَس خلف
