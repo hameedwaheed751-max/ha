@@ -1027,12 +1027,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
     if (choice == null || !mounted) return;
 
-    // الدفع بالمحفظة يخصم فوراً، فيُسأل عن الواصل قبل الإرسال كما في SAS.
-    ActivationPayment? payment;
-    if (!choice.method.waitsForPayment) {
-      payment = await _confirmActivation(s);
-      if (payment == null || !mounted) return;
-    }
+    // يُسأل عن المبلغ (واصل/جزئي/دين) قبل الإرسال لكل الطرق كبقية الساسات،
+    // بما فيها البطاقة (قبل فتح صفحة الدفع). إلغاؤه = لا تفعيل ولا دفع.
+    final payment = await _confirmActivation(s);
+    if (payment == null || !mounted) return;
 
     final detail = choice.quote.detail;
     final sentAt = DateTime.now();
@@ -1082,8 +1080,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
 
     if (choice.method.waitsForPayment) {
-      if (await _payFtthInApp(s, service, pending)) return;
-      if (mounted) await _resolveFtthPending(s, service, pending);
+      if (await _payFtthInApp(s, service, pending, payment: payment)) return;
+      if (mounted) {
+        await _resolveFtthPending(s, service, pending, payment: payment);
+      }
       return;
     }
 
@@ -1126,8 +1126,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   Future<void> _resolveFtthPending(
     Subscriber s,
     SasProjectNationalService service,
-    FtthPendingActivation pending,
-  ) async {
+    FtthPendingActivation pending, {
+    ActivationPayment? payment,
+  }) async {
     while (true) {
       if (!mounted) return;
       final action = await showDialog<String>(
@@ -1172,7 +1173,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       );
       if (!mounted || action == null || action == 'close') return;
       if (action == 'open') {
-        if (await _payFtthInApp(s, service, pending)) return;
+        if (await _payFtthInApp(s, service, pending, payment: payment)) return;
         continue;
       }
 
@@ -1181,7 +1182,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         () => _waitForFtthRenewal(service, s, pending, attempts: 1),
       );
       if (renewed != null) {
-        await _finishFtthActivation(s, pending, renewed);
+        await _finishFtthActivation(s, pending, renewed, payment: payment);
         return;
       }
       if (action == 'verify') {
@@ -1292,8 +1293,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
   Future<bool> _payFtthInApp(
     Subscriber s,
     SasProjectNationalService service,
-    FtthPendingActivation pending,
-  ) async {
+    FtthPendingActivation pending, {
+    ActivationPayment? payment,
+  }) async {
     final uri = Uri.tryParse(pending.paymentUrl);
     if (uri == null || !mounted) return false;
     final finished = await FtthPaymentScreen.open(
@@ -1306,7 +1308,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       () => _waitForFtthRenewal(service, s, pending),
     );
     if (renewed == null) return false;
-    await _finishFtthActivation(s, pending, renewed);
+    await _finishFtthActivation(s, pending, renewed, payment: payment);
     return true;
   }
 
