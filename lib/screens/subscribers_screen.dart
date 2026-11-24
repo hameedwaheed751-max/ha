@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../earthlink_change_plan_dialog.dart';
 import '../earthlink_mobile_refill_dialog.dart';
 import '../earthlink_mobile_service.dart';
 import '../earthlink_reseller_service.dart';
@@ -899,6 +900,63 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
   }
 
+  /// تغيير باقة مشترك إيرثلنك عبر `chnageaccounttype` (دون تعبئة/خصم رصيد).
+  Future<void> _changeEarthlinkPlan(
+    Subscriber s, {
+    BuildContext? modalContext,
+  }) async {
+    if (modalContext != null && modalContext.mounted) {
+      Navigator.pop(modalContext);
+    }
+    final settings = await EarthlinkResellerSettings.load();
+    if (!settings.isComplete) {
+      _showFtthMessage('❌ أكمل ربط إيرثلنك أولاً', color: Colors.red);
+      return;
+    }
+    final data = s.sasData;
+    final userId = (data['earthlink_uid'] ?? s.sasId).toString().trim().isEmpty
+        ? s.user
+        : (data['earthlink_uid'] ?? s.sasId).toString().trim();
+    final rawIndex = data['accountIndex'];
+    final currentIndex = rawIndex is int
+        ? rawIndex
+        : int.tryParse('${rawIndex ?? ''}'.trim()) ?? 0;
+    if (!mounted) return;
+    final chosen = await showDialog<EarthlinkMobilePlan>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => EarthlinkChangePlanDialog(
+        subscriberName: s.name,
+        currentPlanName: s.type,
+        currentAccountIndex: currentIndex,
+        userId: userId,
+        serviceFactory: () async {
+          final service = EarthlinkMobileService.fromSettings(settings);
+          await service.login().timeout(const Duration(seconds: 60));
+          return service;
+        },
+      ),
+    );
+    if (chosen == null || !mounted) return;
+    // تحديث محلّي فوري ثم مزامنة لتأكيد الحالة من الخادم.
+    s.type = chosen.name;
+    s.sasData = {
+      ...s.sasData,
+      'accountIndex': chosen.accountIndex,
+      'plan': chosen.name,
+    };
+    await AppStore.save();
+    unawaited(EarthlinkMobileService.syncSaved());
+    if (!mounted) return;
+    setState(() {
+      _filteredSubscribers = _buildFilteredSubscribers();
+    });
+    _showFtthMessage(
+      '✅ تم تغيير الباقة إلى ${chosen.name}',
+      color: Colors.green.shade600,
+    );
+  }
+
   /// يبني مشترك فايبر اكس من البيانات المحفوظة لفتح حوار العمليات.
   FiberXSubscriber _fiberxSubscriberOf(Subscriber s) {
     final data = s.sasData;
@@ -1667,8 +1725,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 ),
                 if (s.source == 'earthlink')
                   _op(Icons.swap_horiz, Colors.purple, 'تغيير الباقة', () {
-                    // تغيير الباقة في إيرثلنك = التعبئة بباقة أخرى.
-                    _openEarthlinkRefill(s, modalContext: ctx);
+                    // تغيير الباقة في إيرثلنك عبر chnageaccounttype (نداء مستقل).
+                    _changeEarthlinkPlan(s, modalContext: ctx);
                   }),
                 if (s.source == 'fiberx')
                   _op(Icons.swap_horiz, Colors.purple, 'تغيير الباقة', () {
@@ -1680,7 +1738,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     Navigator.pop(ctx);
                     _extend(s);
                   }),
-                if (isSas)
+                // «تغيير الباقة» الخاص بـRADIUS فقط؛ إيرثلنك وفايبر اكس لهما
+                // خيارهما أعلاه (تفادي ظهور خيارين لنفس المشترك).
+                if (isSas && s.source != 'earthlink' && s.source != 'fiberx')
                   _op(Icons.swap_horiz, Colors.purple, 'تغيير الباقة', () {
                     Navigator.pop(ctx);
                     _changePackage(s);
