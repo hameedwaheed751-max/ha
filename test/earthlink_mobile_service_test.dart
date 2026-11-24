@@ -118,6 +118,7 @@ void main() {
         'accountExpirationDate': '2027-03-01T08:30:00',
         'manualExpirationDate': '01/03/2027 08:30 AM',
         'mobileNumber': '',
+        'routerIp': '10.20.30.40',
         'canRefill': true,
         'canChangeAccount': true,
         'canExtendUser': false,
@@ -126,11 +127,34 @@ void main() {
       expect(u.active, isFalse);
       expect(u.expiration, DateTime(2027, 3, 1, 8, 30));
       expect(u.canChangeAccount, isTrue);
+      // IP من routerIp في التفاصيل (fake value).
+      expect(u.ip, '10.20.30.40');
+    });
+
+    test('offline subscriber has empty ip (userIP null)', () {
+      final u = EarthlinkMobileUser.fromJson({
+        'userID': '004@zox',
+        'accountName': 'Eco',
+        'userIP': null,
+        'onlineStatus': 'Offline',
+      });
+      expect(u.ip, '');
+    });
+
+    test('list item ip comes from userIP', () {
+      final u = EarthlinkMobileUser.fromJson({
+        'userID': '005@zox',
+        'accountName': 'Turbo',
+        'userIP': '172.16.5.9',
+      });
+      expect(u.ip, '172.16.5.9');
+      expect(u.toSubscriber().ip, '172.16.5.9');
     });
 
     test('toSubscriber maps to an earthlink subscriber', () {
       final u = EarthlinkMobileUser.fromJson({
         'userID': '003@zox',
+        'userIndex': '12345',
         'fullName': 'Fake Three',
         'accountName': 'Eco',
         'accountIndex': 109,
@@ -140,11 +164,14 @@ void main() {
         'mobileNumber': '0771',
         'canRefill': true,
       });
+      expect(u.userIndex, '12345');
       final s = u.toSubscriber();
       expect(s.source, 'earthlink');
       expect(s.sasId, '003@zox');
       expect(s.type, 'Eco');
       expect(s.sasData['accountIndex'], 109);
+      // customerId للتعبئة: نخزّن userIndex الرقمي.
+      expect(s.sasData['earthlink_index'], '12345');
     });
 
     test('action result: success and failure', () {

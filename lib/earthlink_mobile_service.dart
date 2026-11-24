@@ -52,6 +52,7 @@ class EarthlinkCost {
 class EarthlinkMobileUser {
   const EarthlinkMobileUser({
     required this.userId,
+    required this.userIndex,
     required this.name,
     required this.planName,
     required this.accountIndex,
@@ -60,12 +61,16 @@ class EarthlinkMobileUser {
     required this.daysLeft,
     required this.expiration,
     required this.mobile,
+    required this.ip,
     required this.canRefill,
     required this.canChangeAccount,
     required this.canExtend,
   });
 
   final String userId;
+
+  /// المعرّف الرقمي (userIndex) — الفرضية أنه `customerId` في التعبئة.
+  final String userIndex;
   final String name;
   final String planName;
   final int accountIndex;
@@ -74,6 +79,10 @@ class EarthlinkMobileUser {
   final int daysLeft;
   final DateTime? expiration;
   final String mobile;
+
+  /// IP الجلسة الحالية: `userIP` (القائمة) أو `routerIp` (التفاصيل).
+  /// فارغ حين يكون المشترك غير متصل (Offline).
+  final String ip;
   final bool canRefill;
   final bool canChangeAccount;
   final bool canExtend;
@@ -111,6 +120,10 @@ class EarthlinkMobileUser {
     );
     return EarthlinkMobileUser(
       userId: userId,
+      userIndex: _str(
+        json['userIndex'] ??
+            (userObject is Map ? userObject['userIndex'] : null),
+      ),
       name: name,
       planName: _str(json['accountName']),
       accountIndex: _toInt(json['accountIndex']),
@@ -119,6 +132,7 @@ class EarthlinkMobileUser {
       daysLeft: _toInt(json['activeDaysLeft']),
       expiration: _expiry(json),
       mobile: _str(json['mobileNumber'] ?? json['mobileNumber2']),
+      ip: _str(json['userIP'] ?? json['routerIp']),
       canRefill: json['canRefill'] == true,
       canChangeAccount: json['canChangeAccount'] == true,
       canExtend: json['canExtendUser'] == true,
@@ -153,7 +167,7 @@ class EarthlinkMobileUser {
       name: name.isNotEmpty ? name : userId,
       phone: mobile,
       address: '',
-      ip: '',
+      ip: ip,
       type: planName,
       price: 0,
       startDate: end,
@@ -165,6 +179,7 @@ class EarthlinkMobileUser {
       sasData: {
         'provider': 'إيرثلنك',
         'earthlink_uid': userId,
+        'earthlink_index': userIndex,
         'status': status,
         'plan': planName,
         'accountIndex': accountIndex,
@@ -533,6 +548,7 @@ class EarthlinkMobileService {
           ..name = sub.name
           ..phone = sub.phone
           ..type = sub.type
+          ..ip = sub.ip
           ..endDate = sub.endDate
           ..active = sub.active
           ..sasData = sub.sasData;

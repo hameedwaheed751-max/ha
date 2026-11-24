@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../earthlink_mobile_refill_dialog.dart';
 import '../earthlink_mobile_service.dart';
 import '../earthlink_reseller_service.dart';
 import '../fiberx_service.dart';
@@ -838,15 +839,63 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       Navigator.pop(modalContext);
     }
     final settings = await EarthlinkResellerSettings.load();
-    if (settings.username.trim().isEmpty) {
+    if (!settings.isComplete) {
       _showFtthMessage('❌ أكمل ربط إيرثلنك أولاً', color: Colors.red);
       return;
     }
+    final data = s.sasData;
+    final userId = (data['earthlink_uid'] ?? s.sasId).toString().trim().isEmpty
+        ? s.user
+        : (data['earthlink_uid'] ?? s.sasId).toString().trim();
+    // customerId: الفرضية أنه userIndex الرقمي؛ نرجع إلى userId إن غاب.
+    final index = (data['earthlink_index'] ?? '').toString().trim();
+    final customerId = index.isNotEmpty ? index : userId;
+    if (!mounted) return;
+    // مبلغ الاشتراك واختيار الواصل/الجزئي/الدين قبل التفعيل، كبقية الساسات.
+    // إلغاء هذا الحوار يعني عدم التفعيل ولا خصم من رصيد الوكيل.
+    final payment = await _confirmActivation(s);
+    if (payment == null || !mounted) return;
+    final result = await showDialog<EarthlinkMobileResult>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => EarthlinkMobileRefillDialog(
+        subscriberName: s.name,
+        planName: s.type,
+        remainingText: remainingTimeText(s.endDate),
+        userId: userId,
+        customerId: customerId,
+        mobileNumber: s.phone,
+        serviceFactory: () async {
+          final service = EarthlinkMobileService.fromSettings(settings);
+          await service.login().timeout(const Duration(seconds: 60));
+          return service;
+        },
+      ),
+    );
+    if (result == null || !result.success || !mounted) return;
+    final at = DateTime.now();
     unawaited(EarthlinkMobileService.syncSaved());
+    final sale = await _recordActivationSale(
+      s,
+      payment: payment,
+      sasDeduction: 0,
+      at: at,
+      note: 'تفعيل إيرثلنك',
+    );
+    await AppStore.save();
+    await _recordActivationLedger(s, payment: payment, sale: sale, at: at);
+    if (!mounted) return;
+    setState(() {
+      selected = null;
+      _filteredSubscribers = _buildFilteredSubscribers();
+    });
+    // رسالة "تم التفعيل" للمشترك عبر واتساب الوكيل، كبقية الساسات.
+    RenderWhatsAppService.dispatchInBackground(
+      _sendActivationWhatsApp(s, paidAmount: sale.collected),
+    );
     _showFtthMessage(
-      'تفعيل إيرثلنك عبر التطبيق قيد الإكمال — فعّل من تطبيق إيرثلنك مؤقتاً ثم '
-      'اضغط مزامنة. (العرض والمزامنة يعملان بلا VPN)',
-      color: Colors.orange.shade800,
+      '✅ تم تفعيل إيرثلنك وتسجيل المبلغ',
+      color: Colors.green.shade600,
     );
   }
 
