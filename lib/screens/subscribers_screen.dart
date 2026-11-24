@@ -957,6 +957,72 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
   }
 
+  /// تمديد اشتراك مشترك إيرثلنك عبر تطبيق الجوال (`/user/extend`) — مسار
+  /// إيرثلنك لا RADIUS. لا يخصم رصيداً؛ يمدّد فقط حسب سياسة إيرثلنك.
+  Future<void> _extendEarthlink(
+    Subscriber s, {
+    BuildContext? modalContext,
+  }) async {
+    if (modalContext != null && modalContext.mounted) {
+      Navigator.pop(modalContext);
+    }
+    final settings = await EarthlinkResellerSettings.load();
+    if (!settings.isComplete) {
+      _showFtthMessage('❌ أكمل ربط إيرثلنك أولاً', color: Colors.red);
+      return;
+    }
+    final data = s.sasData;
+    final userId = (data['earthlink_uid'] ?? s.sasId).toString().trim().isEmpty
+        ? s.user
+        : (data['earthlink_uid'] ?? s.sasId).toString().trim();
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('تمديد اشتراك إيرثلنك'),
+          content: Text('تمديد اشتراك «${s.name}»؟'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('تمديد'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final service = EarthlinkMobileService.fromSettings(settings);
+    try {
+      await service.login().timeout(const Duration(seconds: 60));
+      final result = await service.extend(userId);
+      if (!mounted) return;
+      if (result.success) {
+        unawaited(EarthlinkMobileService.syncSaved());
+        _showFtthMessage(
+          '✅ ${result.message.trim().isNotEmpty ? result.message : 'تم التمديد'}',
+          color: Colors.green.shade600,
+        );
+      } else {
+        _showFtthMessage(
+          '❌ ${result.message.trim().isNotEmpty ? result.message : 'تعذّر التمديد'}',
+          color: Colors.red,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        _showFtthMessage('❌ تعذّر التمديد: $e', color: Colors.red);
+      }
+    } finally {
+      service.dispose();
+    }
+  }
+
   /// يبني مشترك فايبر اكس من البيانات المحفوظة لفتح حوار العمليات.
   FiberXSubscriber _fiberxSubscriberOf(Subscriber s) {
     final data = s.sasData;
@@ -1733,7 +1799,13 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     // تغيير الباقة في فايبر اكس = التفعيل بباقة أخرى.
                     _openFiberXActivation(s, modalContext: ctx);
                   }),
-                if (isSas)
+                // تمديد إيرثلنك عبر مساره الخاص (`/user/extend`) لا RADIUS.
+                if (s.source == 'earthlink')
+                  _op(Icons.calendar_month, Colors.orange, 'تمديد', () {
+                    _extendEarthlink(s, modalContext: ctx);
+                  }),
+                // تمديد RADIUS فقط؛ فايبر اكس يغطّيه «التجديد» (تفعيل بباقة).
+                if (isSas && s.source != 'earthlink' && s.source != 'fiberx')
                   _op(Icons.calendar_month, Colors.orange, 'تمديد', () {
                     Navigator.pop(ctx);
                     _extend(s);
