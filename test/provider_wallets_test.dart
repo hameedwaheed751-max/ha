@@ -18,12 +18,12 @@ void main() {
     SasWallets? radius,
     ProviderWallet? earthlink,
     ProviderWallet? fiberx,
-    ProviderWallet? ftth,
+    List<ProviderWallet>? ftth,
   }) => ProviderWallets.load(
     radius: () async => radius ?? const SasWallets([]),
     earthlink: () async => earthlink,
     fiberx: () async => fiberx,
-    ftth: () async => ftth,
+    ftth: () async => ftth ?? const [],
   );
 
   test('يرتّب الساسات أولاً ثم إيرثلنك ففايبر اكس فـFTTH', () async {
@@ -42,11 +42,13 @@ void main() {
         company: 'فايبر اكس',
         note: 'غير متاح',
       ),
-      ftth: const ProviderWallet(
-        provider: WalletProvider.ftth,
-        company: 'FTTH',
-        balance: 890000,
-      ),
+      ftth: const [
+        ProviderWallet(
+          provider: WalletProvider.ftth,
+          company: 'FTTH',
+          balance: 890000,
+        ),
+      ],
     );
 
     expect(wallets.items.map((w) => w.provider).toList(), [
@@ -56,6 +58,28 @@ void main() {
       WalletProvider.ftth,
     ]);
     expect(wallets.several, isTrue);
+  });
+
+  test('يُظهر أكثر من محفظة FTTH معاً', () async {
+    final wallets = await load(
+      ftth: const [
+        ProviderWallet(
+          provider: WalletProvider.ftth,
+          company: 'FTTH — وكيل أ',
+          balance: 500000,
+        ),
+        ProviderWallet(
+          provider: WalletProvider.ftth,
+          company: 'FTTH — وكيل ب',
+          balance: 300000,
+        ),
+      ],
+    );
+    final ftth = wallets.items
+        .where((w) => w.provider == WalletProvider.ftth)
+        .toList();
+    expect(ftth.length, 2);
+    expect(ftth.map((w) => w.company), ['FTTH — وكيل أ', 'FTTH — وكيل ب']);
   });
 
   test('يحوّل رصيد الساس (RADIUS) مع النقاط والعنوان', () async {

@@ -18,6 +18,8 @@ class SasProjectNationalSettings {
     this.baseUrl = 'https://admin.ftth.iq',
     this.clientApp = '53d57a7f-3f89-4e9d-873b-3d071bc6dd9f',
     this.userRole = '0',
+    this.accountId = '',
+    this.label = '',
   });
 
   final String username;
@@ -25,6 +27,16 @@ class SasProjectNationalSettings {
   final String baseUrl;
   final String clientApp;
   final String userRole;
+
+  /// فارغ للحساب الأساسي؛ للحسابات الإضافية معرّف ثابت يُحفظ على مشتركيها.
+  final String accountId;
+  final String label;
+
+  bool get isPrimary => accountId.isEmpty;
+
+  String get displayName => label.trim().isNotEmpty
+      ? label.trim()
+      : (isPrimary ? 'المشروع الوطني' : username);
 
   static const _baseUrlKey = 'ftth_sas_base_url';
   static const _usernameKey = 'ftth_sas_username';
@@ -101,6 +113,200 @@ class SasProjectNationalSettings {
       username: prefs.getString(_usernameKey) ?? '',
       password: password,
     );
+  }
+
+  // ---- تعدّد حسابات FTTH: كلها على نفس admin.ftth.iq بتسجيلات دخول مختلفة ----
+  // يحاكي نمط ساسات RADIUS الإضافية. الأساسي يبقى في مفاتيح ftth_sas_* القديمة.
+
+  static const _extrasKey = 'ftth_sas_accounts';
+  static String _extraPassKey(String id) => 'ftth_sas_extra_pass_$id';
+  static String newAccountId() =>
+      'ftth${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+
+  static String? get _uid => FirebaseAuth.instance.currentUser?.uid;
+
+  /// أسماء الحسابات لعرضها على بطاقات المشتركين دون انتظار الشبكة.
+  static final Map<String, String> labels = {};
+  static void _rememberLabels(List<SasProjectNationalSettings> extras) {
+    labels
+      ..removeWhere((key, _) => key.isNotEmpty)
+      ..addEntries(extras.map((a) => MapEntry(a.accountId, a.displayName)));
+  }
+
+  /// الأساسي (إن كان مربوطاً باليوزر) ثم الإضافية. قد يكون بعضها needsPassword
+  /// (مربوط بلا كلمة مرور على هذا الجهاز)؛ المزامنة والرصيد يفلتران isComplete.
+  static Future<List<SasProjectNationalSettings>> loadAll() async {
+    final primary = await load();
+    return [
+      if (primary.username.trim().isNotEmpty) primary,
+      ...await loadExtras(),
+    ];
+  }
+
+  /// إعدادات الحساب الذي يتبعه المشترك (sasData['ftth_account']).
+  static Future<SasProjectNationalSettings> forSubscriber(Subscriber s) =>
+      forAccount('${s.sasData['ftth_account'] ?? ''}'.trim());
+
+  static Future<SasProjectNationalSettings> forAccount(String accountId) async {
+    if (accountId.trim().isEmpty) return load();
+    for (final a in await loadExtras()) {
+      if (a.accountId == accountId) return a;
+    }
+    // الحساب لم يعد مربوطاً: نرجع الأساسي حتى لا ينكسر تفعيل مشترك قديم.
+    return load();
+  }
+
+  static Future<String> _readExtraPassword(
+    SharedPreferences p,
+    String id,
+  ) async {
+    try {
+      final v = await _secureStorage.read(key: _extraPassKey(id));
+      if (v != null && v.isNotEmpty) return v;
+    } catch (_) {}
+    return p.getString(_extraPassKey(id)) ?? '';
+  }
+
+  static Future<void> _writeExtraPassword(
+    SharedPreferences p,
+    String id,
+    String password,
+  ) async {
+    try {
+      await _secureStorage.write(key: _extraPassKey(id), value: password);
+    } catch (_) {
+      await p.setString(_extraPassKey(id), password);
+    }
+  }
+
+  static SasProjectNationalSettings? _extraFrom(
+    String id,
+    dynamic value,
+    String password,
+  ) {
+    if (value is! Map || id.trim().isEmpty) return null;
+    final user = '${value['username'] ?? ''}'.trim();
+    if (user.isEmpty) return null;
+    final baseUrl = '${value['baseUrl'] ?? ''}'.trim();
+    return SasProjectNationalSettings(
+      accountId: id,
+      label: '${value['label'] ?? ''}'.trim(),
+      username: user,
+      password: password,
+      baseUrl: baseUrl.isNotEmpty ? baseUrl : 'https://admin.ftth.iq',
+    );
+  }
+
+  /// الحسابات الإضافية: من Firebase إن أمكن، وإلا نسخة الجهاز.
+  static Future<List<SasProjectNationalSettings>> loadExtras() async {
+    final p = await SharedPreferences.getInstance();
+    Map<String, dynamic> stored = {};
+    try {
+      final raw = p.getString(_extrasKey);
+      if (raw != null) stored = Map<String, dynamic>.from(jsonDecode(raw));
+    } catch (_) {}
+
+    final uid = _uid;
+    if (uid != null) {
+      try {
+        final snapshot = await FirebaseDatabase.instance
+            .ref('agents/$uid/ftth_sas_accounts')
+            .get()
+            .timeout(const Duration(seconds: 5));
+        final value = snapshot.value;
+        if (value is Map) {
+          final remote = <String, dynamic>{};
+          for (final entry in value.entries) {
+            if (entry.value is! Map) continue;
+            final account = Map<String, dynamic>.from(entry.value as Map);
+            final password = '${account.remove('password') ?? ''}';
+            // نسخة السحابة القديمة تملأ الجهاز الجديد فقط، ولا تستبدل كلمة
+            // مرور أدخلها الوكيل هنا.
+            if (password.isNotEmpty &&
+                (await _readExtraPassword(p, '${entry.key}')).isEmpty) {
+              await _writeExtraPassword(p, '${entry.key}', password);
+            }
+            remote['${entry.key}'] = account;
+          }
+          stored = remote;
+          await p.setString(_extrasKey, jsonEncode(stored));
+        }
+      } catch (e) {
+        debugPrint('[FTTH SAS] extras pull failed (using device copy): $e');
+      }
+    }
+
+    final result = <SasProjectNationalSettings>[];
+    for (final entry in stored.entries) {
+      final account = _extraFrom(
+        entry.key,
+        entry.value,
+        await _readExtraPassword(p, entry.key),
+      );
+      if (account != null) result.add(account);
+    }
+    result.sort((a, b) => a.accountId.compareTo(b.accountId));
+    _rememberLabels(result);
+    return result;
+  }
+
+  Map<String, dynamic> _extraJson() => {
+    'label': label.trim(),
+    'username': username.trim(),
+    'baseUrl': baseUrl.trim(),
+  };
+
+  /// يحفظ حساب FTTH إضافياً (كلمة المرور على الجهاز فقط).
+  Future<void> saveExtra() async {
+    if (isPrimary) throw StateError('هذا هو الحساب الأساسي');
+    if (username.trim().isEmpty) throw StateError('أدخل يوزر حساب FTTH');
+    final uid = _uid;
+    if (uid != null) {
+      await FirebaseDatabase.instance
+          .ref('agents/$uid/ftth_sas_accounts/$accountId')
+          .update({
+            'label': label.trim(),
+            'username': username.trim(),
+            'baseUrl': baseUrl.trim(),
+            'updatedAt': ServerValue.timestamp,
+          })
+          .timeout(const Duration(seconds: 8));
+    }
+    final p = await SharedPreferences.getInstance();
+    Map<String, dynamic> stored = {};
+    try {
+      final raw = p.getString(_extrasKey);
+      if (raw != null) stored = Map<String, dynamic>.from(jsonDecode(raw));
+    } catch (_) {}
+    stored[accountId] = _extraJson();
+    await p.setString(_extrasKey, jsonEncode(stored));
+    await _writeExtraPassword(p, accountId, password);
+    labels[accountId] = displayName;
+  }
+
+  static Future<void> removeExtra(String accountId) async {
+    if (accountId.trim().isEmpty) return;
+    final uid = _uid;
+    if (uid != null) {
+      await FirebaseDatabase.instance
+          .ref('agents/$uid/ftth_sas_accounts/$accountId')
+          .remove()
+          .timeout(const Duration(seconds: 8));
+    }
+    final p = await SharedPreferences.getInstance();
+    try {
+      final raw = p.getString(_extrasKey);
+      if (raw != null) {
+        final stored = Map<String, dynamic>.from(jsonDecode(raw))
+          ..remove(accountId);
+        await p.setString(_extrasKey, jsonEncode(stored));
+      }
+    } catch (_) {}
+    try {
+      await _secureStorage.delete(key: _extraPassKey(accountId));
+    } catch (_) {}
+    await p.remove(_extraPassKey(accountId));
+    labels.remove(accountId);
   }
 
   Future<void> save() async {
@@ -648,17 +854,42 @@ class SasProjectNationalService {
 
   /// مزامنة بالإعدادات المحفوظة، تُستدعى عند فتح التطبيق. لا تفعل شيئاً إن
   /// لم تُضبط الإعدادات بعد.
+  /// يزامن كل حسابات FTTH المربوطة (الأساسي + الإضافية). يجمع النتائج؛ وإن
+  /// فشلت كلها يرمي آخر خطأ ليظهر للوكيل، وإلا يتجاوز الحساب الفاشل.
   static Future<SasProjectNationalSyncResult?> syncSaved() async {
-    final settings = await SasProjectNationalSettings.load();
-    if (!settings.isComplete) return null;
-    final service = SasProjectNationalService(settings);
-    try {
-      return await service.syncSubscribers(
-        data: await service.fetchSubscriberData(),
-      );
-    } finally {
-      service.dispose();
+    final usable = (await SasProjectNationalSettings.loadAll())
+        .where((a) => a.isComplete)
+        .toList();
+    if (usable.isEmpty) return null;
+    var read = 0, added = 0, updated = 0;
+    var any = false;
+    Object? lastError;
+    for (final settings in usable) {
+      final service = SasProjectNationalService(settings);
+      try {
+        final result = await service.syncSubscribers(
+          data: await service.fetchSubscriberData(),
+        );
+        read += result.read;
+        added += result.added;
+        updated += result.updated;
+        any = true;
+      } catch (e) {
+        lastError = e;
+        debugPrint('[FTTH SAS] sync account "${settings.accountId}" failed: $e');
+      } finally {
+        service.dispose();
+      }
     }
+    if (!any) {
+      if (lastError != null) throw lastError;
+      return null;
+    }
+    return SasProjectNationalSyncResult(
+      read: read,
+      added: added,
+      updated: updated,
+    );
   }
 
   Future<SasProjectNationalData> fetchSubscriberData({
@@ -741,6 +972,9 @@ class SasProjectNationalService {
 
       final sasData = <String, dynamic>{
         'provider': 'ساس المشروع الوطني',
+        // أي حساب FTTH يتبعه هذا المشترك (فارغ = الأساسي)، لتوجيه التفعيل
+        // والتمديد وقراءة المحفظة لكل حساب على حدة.
+        'ftth_account': settings.accountId,
         'customer_id': customerId,
         'subscription_id': subscriptionId ?? '',
         'status': subscription['status'],

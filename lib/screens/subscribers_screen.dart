@@ -805,7 +805,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     operationBusy = true;
     SasProjectNationalService? service;
     try {
-      final settings = await SasProjectNationalSettings.load();
+      // حساب FTTH الذي يتبعه هذا المشترك (قد يملك الوكيل أكثر من حساب).
+      final settings = await SasProjectNationalSettings.forSubscriber(s);
       if (settings.needsPassword) {
         throw Exception(SasProjectNationalSettings.missingPasswordMessage);
       }

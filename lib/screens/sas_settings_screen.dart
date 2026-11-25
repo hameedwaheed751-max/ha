@@ -78,6 +78,9 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
   bool _earthlinkLinked = false;
   bool _fiberxLinked = false;
 
+  /// حسابات FTTH المربوطة (الأساسي + الإضافية)، بطاقة لكلٍّ.
+  List<SasProjectNationalSettings> _ftthAccounts = const [];
+
   List<SasSettings> get _accounts => [
     if (_primary != null && _primary!.isLinked) _primary!,
     ..._extras,
@@ -103,11 +106,11 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
       final extras = await (widget.loadExtras ?? SasSettings.loadExtras)();
       // المزوّدون الخاصّون: مربوطون إن حُفظ اسم مستخدمهم (كلمة المرور قد تكون
       // على الجهاز فقط). فشل تحميلهم لا يمنع عرض ساسات radius.
-      var ftth = false;
+      var ftthAccounts = <SasProjectNationalSettings>[];
       var earthlink = false;
       var fiberx = false;
       try {
-        ftth = (await SasProjectNationalSettings.load()).username.trim().isNotEmpty;
+        ftthAccounts = await SasProjectNationalSettings.loadAll();
       } catch (_) {}
       try {
         earthlink = (await EarthlinkResellerSettings.load()).username
@@ -121,7 +124,8 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
       setState(() {
         _primary = primary;
         _extras = extras;
-        _ftthLinked = ftth;
+        _ftthAccounts = ftthAccounts;
+        _ftthLinked = ftthAccounts.isNotEmpty;
         _earthlinkLinked = earthlink;
         _fiberxLinked = fiberx;
       });
@@ -226,6 +230,94 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
         (s) => s.source == 'sas' && s.sasPresence.contains(account.accountId),
       )
       .length;
+
+  int _countInFtth(SasProjectNationalSettings account) => AppStore.subscribers
+      .where(
+        (s) =>
+            s.source == 'ftth' &&
+            '${s.sasData['ftth_account'] ?? ''}' == account.accountId,
+      )
+      .length;
+
+  Future<void> _addFtthAccount() =>
+      _openFtthDialog(SasProjectNationalSettings.newAccountId(), '');
+
+  Future<void> _editFtthAccount(SasProjectNationalSettings account) =>
+      _openFtthDialog(
+        account.isPrimary ? null : account.accountId,
+        account.label,
+      );
+
+  /// يفتح حوار ربط/تعديل حساب FTTH: null = الأساسي، معرّف = إضافي.
+  Future<void> _openFtthDialog(String? accountId, String label) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => SasAccountDialog(
+        primary: false,
+        others: _accounts,
+        proxyUrl: _primary?.webProxyUrl.trim().isNotEmpty == true
+            ? _primary!.webProxyUrl
+            : _defaultProxyUrl,
+        initialProvider: 'ftth',
+        ftthAccountId: accountId,
+        ftthLabel: label,
+      ),
+    );
+    if (mounted) await _reload();
+  }
+
+  /// يفصل حساب FTTH واحداً: الأساسي بـclear، والإضافي بـremoveExtra، ويحذف
+  /// مشتركي هذا الحساب فقط (حسب ftth_account).
+  Future<void> _unlinkFtthAccount(SasProjectNationalSettings account) async {
+    final title = _ftthAccounts.length > 1
+        ? 'المشروع الوطني — ${account.displayName}'
+        : 'المشروع الوطني';
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: Text('فصل $title'),
+          content: Text('سيُحذف $title من القائمة ويُزال مشتركوه من التطبيق.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('فصل'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirm != true) return;
+    setState(() => _busyId = '$_ftthBusyId${account.accountId}');
+    try {
+      if (account.isPrimary) {
+        await SasProjectNationalSettings.clear();
+      } else {
+        await SasProjectNationalSettings.removeExtra(account.accountId);
+      }
+      AppStore.subscribers.removeWhere(
+        (s) =>
+            s.source == 'ftth' &&
+            '${s.sasData['ftth_account'] ?? ''}' == account.accountId,
+      );
+      await AppStore.save();
+      if (mounted) _snack('تم فصل $title');
+      await _reload();
+    } catch (e) {
+      if (mounted) _snack('فشل الفصل: $e');
+    } finally {
+      if (mounted) setState(() => _busyId = null);
+    }
+  }
 
   Future<void> _add() async {
     final primaryReady = _primary?.isLinked == true;
@@ -527,26 +619,31 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                             ),
                           },
                         ),
-                      if (_ftthLinked)
+                      for (final ftth in _ftthAccounts)
                         _ProviderCard(
-                          title: 'المشروع الوطني',
+                          key: ValueKey('ftth-${ftth.accountId}'),
+                          title: _ftthAccounts.length > 1
+                              ? 'المشروع الوطني — ${ftth.displayName}'
+                              : 'المشروع الوطني',
                           host: 'admin.ftth.iq',
                           icon: Icons.account_tree_outlined,
-                          count: AppStore.subscribers
-                              .where((s) => s.source == 'ftth')
-                              .length,
-                          busy: _busyId == _ftthBusyId,
+                          count: _countInFtth(ftth),
+                          busy: _busyId == '$_ftthBusyId${ftth.accountId}',
                           enabled: !busy,
                           onSync: () => _syncProvider(
-                            _ftthBusyId,
+                            '$_ftthBusyId${ftth.accountId}',
                             SasProjectNationalService.syncSaved,
                           ),
-                          onEdit: () => _editProvider('ftth'),
-                          onUnlink: () => _unlinkProvider(
-                            title: 'المشروع الوطني',
-                            busyId: _ftthBusyId,
-                            source: 'ftth',
-                            clear: SasProjectNationalSettings.clear,
+                          onEdit: () => _editFtthAccount(ftth),
+                          onUnlink: () => _unlinkFtthAccount(ftth),
+                        ),
+                      if (_ftthLinked)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4, bottom: 4),
+                          child: OutlinedButton.icon(
+                            onPressed: busy ? null : _addFtthAccount,
+                            icon: const Icon(Icons.add, size: 18),
+                            label: const Text('إضافة حساب FTTH آخر'),
                           ),
                         ),
                       if (_earthlinkLinked)
@@ -899,6 +996,8 @@ class SasAccountDialog extends StatefulWidget {
     this.others = const [],
     this.proxyUrl = _defaultProxyUrl,
     this.initialProvider,
+    this.ftthAccountId,
+    this.ftthLabel,
   });
 
   final SasSettings? existing;
@@ -908,6 +1007,11 @@ class SasAccountDialog extends StatefulWidget {
 
   /// 'ftth' أو 'earthlink' أو 'fiberx': يفتح الحوار على شاشة ربط هذا المزوّد.
   final String? initialProvider;
+
+  /// لربط/تعديل حساب FTTH محدّد: null = الحساب الأساسي، '' أو معرّف = إضافي.
+  /// معرّف جديد (newAccountId) يعني إضافة حساب FTTH آخر.
+  final String? ftthAccountId;
+  final String? ftthLabel;
 
   @override
   State<SasAccountDialog> createState() => _SasAccountDialogState();
@@ -985,10 +1089,13 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
   /// «المشروع الوطني» شركة في الدليل لكن بمحرّك ربط FTTH خاص. نفتح نفس
   /// الواجهة (اسم مستخدم + كلمة مرور) ونملأ اليوزر المحفوظ إن وُجد.
   Future<void> _pickNationalProject() async {
+    final id = widget.ftthAccountId;
     setState(() {
       _company.text = 'المشروع الوطني';
       _server.text = 'https://admin.ftth.iq';
-      _label.text = 'المشروع الوطني';
+      _label.text = (widget.ftthLabel ?? '').trim().isNotEmpty
+          ? widget.ftthLabel!.trim()
+          : 'المشروع الوطني';
       _pickedHost = 'admin.ftth.iq';
       _national = true;
       _earthlink = false;
@@ -997,10 +1104,22 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
       _error = null;
     });
     try {
-      final saved = await SasProjectNationalSettings.load();
+      // ملء اليوزر المحفوظ: للأساسي من load، ولحساب إضافي موجود من قائمته.
+      // الحساب الإضافي الجديد (غير موجود بعد) لا يُملأ لئلا يُنسخ يوزر غيره.
+      String savedUser = '';
+      if (id == null) {
+        savedUser = (await SasProjectNationalSettings.load()).username.trim();
+      } else if (id.isNotEmpty) {
+        for (final a in await SasProjectNationalSettings.loadExtras()) {
+          if (a.accountId == id) {
+            savedUser = a.username.trim();
+            break;
+          }
+        }
+      }
       if (!mounted || !_national) return;
-      if (saved.username.trim().isNotEmpty && _user.text.trim().isEmpty) {
-        setState(() => _user.text = saved.username.trim());
+      if (savedUser.isNotEmpty && _user.text.trim().isEmpty) {
+        setState(() => _user.text = savedUser);
       }
     } catch (_) {
       // تعذّر تحميل الإعدادات المحفوظة لا يمنع الإدخال اليدوي.
@@ -1097,14 +1216,23 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
       _saving = true;
       _error = null;
     });
+    // null = الحساب الأساسي؛ معرّف غير فارغ = حساب FTTH إضافي (جديد أو تعديل).
+    final accountId = widget.ftthAccountId;
+    final isExtra = accountId != null && accountId.isNotEmpty;
     final settings = SasProjectNationalSettings(
       username: _user.text.trim(),
       password: _pass.text,
+      accountId: isExtra ? accountId : '',
+      label: isExtra ? _label.text.trim() : '',
     );
     final service = SasProjectNationalService(settings);
     try {
       await service.login().timeout(const Duration(seconds: 45));
-      await settings.save();
+      if (isExtra) {
+        await settings.saveExtra();
+      } else {
+        await settings.save();
+      }
       // مزامنة أولى في الخلفية لتظهر مشتركوه دون انتظار إعادة الدخول.
       unawaited(SasProjectNationalService.syncSaved());
       if (mounted) Navigator.pop(context);
@@ -1868,6 +1996,7 @@ Future<SasSettings?> pickSasAccount(
 /// وعدد مشتركيه وزر مزامنة. إعداداته منفصلة، فلا يملك خيارات بطاقة ساس كاملة.
 class _ProviderCard extends StatelessWidget {
   const _ProviderCard({
+    super.key,
     required this.title,
     required this.host,
     required this.icon,

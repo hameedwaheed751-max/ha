@@ -56,7 +56,7 @@ class ProviderWallets {
     Future<SasWallets> Function()? radius,
     Future<ProviderWallet?> Function()? earthlink,
     Future<ProviderWallet?> Function()? fiberx,
-    Future<ProviderWallet?> Function()? ftth,
+    Future<List<ProviderWallet>> Function()? ftth,
   }) async {
     final radiusFuture = (radius ?? SasWallets.load)();
     final earthlinkFuture = (earthlink ?? _loadEarthlink)();
@@ -72,7 +72,7 @@ class ProviderWallets {
       for (final w in radiusWallets.items) _fromSas(w),
       ?el,
       ?fx,
-      ?ft,
+      ...ft,
     ]);
   }
 
@@ -127,35 +127,47 @@ class ProviderWallets {
     );
   }
 
-  /// رصيد محفظة الوكيل في FTTH (partner wallet).
-  static Future<ProviderWallet?> _loadFtth() async {
-    final settings = await SasProjectNationalSettings.load();
-    if (!settings.isComplete) return null;
-    const company = 'FTTH';
+  /// رصيد محفظة الوكيل في FTTH لكل حساب مربوط (partner wallet). يدعم أكثر
+  /// من حساب FTTH على نفس admin.ftth.iq، فيظهر صف لكل محفظة.
+  static Future<List<ProviderWallet>> _loadFtth() async {
+    final accounts = (await SasProjectNationalSettings.loadAll())
+        .where((a) => a.isComplete)
+        .toList();
+    if (accounts.isEmpty) return const [];
+    final several = accounts.length > 1;
+    String title(SasProjectNationalSettings a) =>
+        several ? 'FTTH — ${a.displayName}' : 'FTTH';
     // المتصفح يمنع الاتصال بموقع FTTH (CORS)؛ يُقرأ من تطبيق أندرويد.
     if (kIsWeb) {
-      return const ProviderWallet(
-        provider: WalletProvider.ftth,
-        company: company,
-        note: 'يُقرأ من تطبيق أندرويد',
-      );
+      return [
+        for (final a in accounts)
+          ProviderWallet(
+            provider: WalletProvider.ftth,
+            company: title(a),
+            note: 'يُقرأ من تطبيق أندرويد',
+          ),
+      ];
     }
-    final service = SasProjectNationalService(settings);
-    try {
-      final balance = await service.fetchOwnPartnerBalance();
-      return ProviderWallet(
-        provider: WalletProvider.ftth,
-        company: company,
-        balance: balance,
-      );
-    } catch (e) {
-      return ProviderWallet(
-        provider: WalletProvider.ftth,
-        company: company,
-        error: '$e',
-      );
-    } finally {
-      service.dispose();
-    }
+    return Future.wait(
+      accounts.map((a) async {
+        final service = SasProjectNationalService(a);
+        try {
+          final balance = await service.fetchOwnPartnerBalance();
+          return ProviderWallet(
+            provider: WalletProvider.ftth,
+            company: title(a),
+            balance: balance,
+          );
+        } catch (e) {
+          return ProviderWallet(
+            provider: WalletProvider.ftth,
+            company: title(a),
+            error: '$e',
+          );
+        } finally {
+          service.dispose();
+        }
+      }),
+    );
   }
 }
