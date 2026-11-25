@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../earthlink_mobile_service.dart';
 import '../earthlink_reseller_service.dart';
 import '../fiberx_service.dart';
+import '../models.dart' show moneyText;
 import '../sas_project_national_service.dart';
 import 'sas_wallets.dart';
 
@@ -116,15 +117,42 @@ class ProviderWallets {
     }
   }
 
-  /// فايبر اكس: لا نقطة التقاط لرصيد محفظة الوكيل بعد، فنعرض «غير متاح».
+  /// رصيد محفظة الوكيل في فايبر اكس (currentBalance)، مع ملاحظة بالقابل
+  /// للصرف عند اختلافه (حجز تأمين). منصّة فايبر اكس ترفض الاتصال من
+  /// المتصفح، فعلى الويب يُقرأ من تطبيق أندرويد.
   static Future<ProviderWallet?> _loadFiberx() async {
     final settings = await FiberXSettings.load();
     if (!settings.isComplete) return null;
-    return const ProviderWallet(
-      provider: WalletProvider.fiberx,
-      company: 'فايبر اكس',
-      note: 'غير متاح — يلزم التقاط نقطة الرصيد',
-    );
+    const company = 'فايبر اكس';
+    if (kIsWeb) {
+      return const ProviderWallet(
+        provider: WalletProvider.fiberx,
+        company: company,
+        note: 'يُقرأ من تطبيق أندرويد',
+      );
+    }
+    final service = FiberXService.fromSettings(settings);
+    try {
+      await service.login();
+      final wallet = await service.fetchBalance();
+      final held = wallet.currentBalance - wallet.spendableBalance;
+      return ProviderWallet(
+        provider: WalletProvider.fiberx,
+        company: company,
+        balance: wallet.currentBalance,
+        note: held > 0.5
+            ? 'القابل للصرف: ${moneyText(wallet.spendableBalance)}'
+            : null,
+      );
+    } catch (e) {
+      return ProviderWallet(
+        provider: WalletProvider.fiberx,
+        company: company,
+        error: '$e',
+      );
+    } finally {
+      service.dispose();
+    }
   }
 
   /// رصيد محفظة الوكيل في FTTH لكل حساب مربوط (partner wallet). يدعم أكثر

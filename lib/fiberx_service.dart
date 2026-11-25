@@ -354,6 +354,38 @@ List<FiberXPlan> parseFiberXPlans(dynamic json) {
   return out;
 }
 
+/// محفظة وكيل فايبر اكس من /api/user-wallets/my-wallets.
+class FiberXWallet {
+  const FiberXWallet({
+    required this.currentBalance,
+    required this.spendableBalance,
+  });
+
+  /// الرصيد الكلي في المحفظة.
+  final double currentBalance;
+
+  /// المبلغ القابل للصرف فعلياً (بعد حجز التأمين/الحد الأدنى).
+  final double spendableBalance;
+}
+
+/// يحلّل رد /api/user-wallets/my-wallets (مصفوفة محافظ) ويجمع الأرصدة.
+/// عادةً محفظة واحدة؛ لو تعدّدت نُجمع الكلي والقابل للصرف.
+FiberXWallet parseFiberXWallet(dynamic json) {
+  final list = json is List
+      ? json
+      : (json is Map && json['data'] is List ? json['data'] as List : const []);
+  double current = 0;
+  double spendable = 0;
+  for (final item in list) {
+    if (item is! Map) continue;
+    current += FiberXSubscriber._dbl(item['currentBalance']);
+    spendable += FiberXSubscriber._dbl(
+      item['spendableBalance'] ?? item['currentBalance'],
+    );
+  }
+  return FiberXWallet(currentBalance: current, spendableBalance: spendable);
+}
+
 /// جسم عملية التفعيل/التجديد/تغيير الباقة إلى POST /api/RadiusActivation.
 /// تغيير الباقة = تمرير billingProfileId/radiusProfileId مختلفين (الخادم
 /// يكتشف التغيير تلقائياً مقارنةً بباقة المشترك الحالية).
@@ -697,6 +729,26 @@ class FiberXService {
       if (byId.length == before) break;
     }
     return byId.values.toList();
+  }
+
+  /// رصيد محفظة الوكيل (الكلي + القابل للصرف) من /api/user-wallets/my-wallets.
+  Future<FiberXWallet> fetchBalance() async {
+    _guardWeb();
+    await _ensureToken();
+    final response = await _client.get(
+      _api('/api/user-wallets/my-wallets'),
+      headers: _apiHeaders(),
+    );
+    if (response.statusCode == 401) {
+      throw const FiberXException('انتهت جلسة فايبر اكس. سجّل الدخول.');
+    }
+    if (response.statusCode != 200) {
+      throw FiberXException(
+        'تعذّر جلب رصيد فايبر اكس',
+        statusCode: response.statusCode,
+      );
+    }
+    return parseFiberXWallet(_decode(response.body));
   }
 
   /// باقات الوكيل.

@@ -876,7 +876,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
     if (result == null || !result.success || !mounted) return;
     final at = DateTime.now();
-    unawaited(EarthlinkMobileService.syncSaved());
+    s.active = true;
+    s.disabled = false;
+    // إيرثلنك لا تُعيد تاريخ الانتهاء الجديد في نتيجة التفعيل، فنجلبه من الخادم
+    // بمزامنة متزامنة (بدل الخلفية) قبل الرسالة، ثم نضبط تاريخ التفعيل = اليوم
+    // بعدها (كي لا تمسح المزامنة علامات التفعيل من sasData). كبقية الساسات،
+    // وإلا ظهرت تواريخ قديمة مجمّدة في رسالة الواتساب.
+    try {
+      await EarthlinkMobileService.syncSaved();
+    } catch (_) {}
+    _setStartDateAsActivationDay(s, at: at);
     final sale = await _recordActivationSale(
       s,
       payment: payment,
@@ -1090,6 +1099,13 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     );
     if (result == null || !result.success || !mounted) return;
     final at = DateTime.now();
+    // حدّث تاريخ التفعيل (اليوم) والانتهاء الجديد قبل رسالة الواتساب، وإلا
+    // ظهرت تواريخ قديمة مجمّدة (startDate يُضبط مرة واحدة عند أول مزامنة،
+    // وsyncSaved في الخلفية لم تكتمل بعد). كبقية الساسات.
+    s.active = true;
+    s.disabled = false;
+    if (result.newExpiration != null) s.endDate = result.newExpiration!;
+    _setStartDateAsActivationDay(s, at: at);
     unawaited(FiberXService.syncSaved());
     final sale = await _recordActivationSale(
       s,

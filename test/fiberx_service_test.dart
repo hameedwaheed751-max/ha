@@ -139,6 +139,37 @@ void main() {
     expect(bad.message, contains('insufficient'));
   });
 
+  test('parses wallet balance and sums multiple wallets', () {
+    // شكل الرد الحقيقي: مصفوفة محافظ بقيم currentBalance/spendableBalance.
+    final one = parseFiberXWallet([
+      {
+        'id': 1,
+        'currentBalance': 156000.00,
+        'spendableBalance': 100000.00,
+        'minimumBalance': 56000.00,
+        'insuranceHeld': 56000.00,
+      },
+    ]);
+    expect(one.currentBalance, 156000.0);
+    expect(one.spendableBalance, 100000.0);
+
+    final many = parseFiberXWallet([
+      {'currentBalance': 10000, 'spendableBalance': 8000},
+      {'currentBalance': 5000, 'spendableBalance': 5000},
+    ]);
+    expect(many.currentBalance, 15000.0);
+    expect(many.spendableBalance, 13000.0);
+
+    // غياب spendableBalance → يُستخدم currentBalance بدلاً منه.
+    final noSpendable = parseFiberXWallet([
+      {'currentBalance': 20000},
+    ]);
+    expect(noSpendable.currentBalance, 20000.0);
+    expect(noSpendable.spendableBalance, 20000.0);
+
+    expect(parseFiberXWallet(const []).currentBalance, 0.0);
+  });
+
   group('service over a fake Keycloak + API', () {
     const user = 'agent@br';
     const pass = 'secret';
