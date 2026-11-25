@@ -59,7 +59,6 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
   bool _ftthConfigured = false;
   double? _ftthBalance;
   bool _loadingFtthBalance = false;
-  String? _ftthBalanceError;
   SasFinancialReportType _reportType = SasFinancialReportType.activations;
   SasFinancialPage? _financialPage;
   bool _loadingFinancialReport = false;
@@ -257,10 +256,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
 
   Future<void> _loadFtthBalance() async {
     if (_loadingFtthBalance) return;
-    setState(() {
-      _loadingFtthBalance = true;
-      _ftthBalanceError = null;
-    });
+    setState(() => _loadingFtthBalance = true);
     try {
       final settings = await SasProjectNationalSettings.load();
       if (!settings.isComplete) {
@@ -271,13 +267,8 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
       final service = SasProjectNationalService(settings);
       final balance = await service.fetchOwnPartnerBalance();
       if (mounted) setState(() => _ftthBalance = balance);
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _ftthBalance = null;
-          _ftthBalanceError = '$error';
-        });
-      }
+    } catch (_) {
+      if (mounted) setState(() => _ftthBalance = null);
     } finally {
       if (mounted) setState(() => _loadingFtthBalance = false);
     }
@@ -630,65 +621,8 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                     ),
                   ],
                 ),
-                _Section(
-                  title: 'الأرصدة',
-                  icon: Icons.account_balance_wallet_outlined,
-                  children: [
-                    _WalletCard(
-                      title: _sasAccounts.length > 1
-                          ? 'رصيد الساسات (${_sasAccounts.length})'
-                          : 'رصيد الساس',
-                      icon: Icons.cloud_outlined,
-                      colors: const [Color(0xFF1B5E20), Color(0xFF43A047)],
-                      value: _loadingSasBalance && _currentSasBalance == null
-                          ? '...'
-                          : _currentSasBalance == null
-                          ? 'غير متاح'
-                          : _money(_currentSasBalance!),
-                      lines: [
-                        if (_sasAccounts.length > 1)
-                          for (final account in _sasAccounts)
-                            (
-                              account.displayName,
-                              _balanceOf(account.accountId) == null
-                                  ? 'غير متاح'
-                                  : _money(_balanceOf(account.accountId)!),
-                            ),
-                        (
-                          'إيداعات $_monthLabel',
-                          _loadingJournalMonth
-                              ? '...'
-                              : _monthDeposits == null
-                              ? 'غير متاح'
-                              : _money(_monthDeposits!),
-                        ),
-                        (
-                          'استقطاعات $_monthLabel',
-                          _loadingJournalMonth
-                              ? '...'
-                              : _monthDeductions == null
-                              ? 'غير متاح'
-                              : _money(_monthDeductions!),
-                        ),
-                      ],
-                    ),
-                    if (_ftthConfigured)
-                      _WalletCard(
-                        title: 'محفظة FTTH (رصيد الوكيل)',
-                        icon: Icons.router_outlined,
-                        colors: const [Color(0xFF0D47A1), Color(0xFF1E88E5)],
-                        value: _loadingFtthBalance
-                            ? '...'
-                            : _ftthBalance == null
-                            ? 'غير متاح'
-                            : _money(_ftthBalance!),
-                        lines: [
-                          if (_ftthBalanceError != null)
-                            ('تعذرت القراءة', 'اضغط تحديث'),
-                        ],
-                      ),
-                  ],
-                ),
+                // أُزيل قسم «الأرصدة» من التقرير: الأرصدة تُعرض الآن في
+                // لوحة «الرصيد» بالداشبورد لكل شركة حسب الربط.
                 if (_journalMonthError != null)
                   _ErrorBand(
                     'تعذر احتساب حركة الشهر من سجل الساس: $_journalMonthError',
@@ -854,12 +788,7 @@ class _Section extends StatelessWidget {
         const SizedBox(height: 10),
         LayoutBuilder(
           builder: (context, constraints) {
-            final wide = children.any((c) => c is _WalletCard);
-            final columns = wide
-                ? (constraints.maxWidth >= 620 ? 2 : 1)
-                : constraints.maxWidth >= 900
-                ? 4
-                : 2;
+            final columns = constraints.maxWidth >= 900 ? 4 : 2;
             const spacing = 10.0;
             final width =
                 (constraints.maxWidth - spacing * (columns - 1)) / columns;
@@ -944,103 +873,6 @@ class _Figure extends StatelessWidget {
           ),
         ],
       ],
-    ),
-  );
-}
-
-/// بطاقة رصيد بخلفية متدرجة: الرصيد الحالي كبيراً وتحته حركة الشهر.
-class _WalletCard extends StatelessWidget {
-  const _WalletCard({
-    required this.title,
-    required this.icon,
-    required this.colors,
-    required this.value,
-    this.lines = const [],
-  });
-
-  final String title;
-  final IconData icon;
-  final List<Color> colors;
-  final String value;
-  final List<(String, String)> lines;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: 150),
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      gradient: LinearGradient(
-        colors: colors,
-        begin: AlignmentDirectional.topStart,
-        end: AlignmentDirectional.bottomEnd,
-      ),
-      borderRadius: BorderRadius.circular(14),
-      boxShadow: [
-        BoxShadow(
-          color: colors.first.withValues(alpha: 0.25),
-          blurRadius: 12,
-          offset: const Offset(0, 4),
-        ),
-      ],
-    ),
-    child: DefaultTextStyle(
-      style: const TextStyle(color: Colors.white),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: Colors.white70, size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: AlignmentDirectional.centerStart,
-            child: Text(
-              value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 28,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          if (lines.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            const Divider(color: Colors.white24, height: 1),
-            const SizedBox(height: 8),
-            for (final (label, amount) in lines)
-              Padding(
-                padding: const EdgeInsets.only(top: 3),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        label,
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                    ),
-                    Text(
-                      amount,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ],
-      ),
     ),
   );
 }

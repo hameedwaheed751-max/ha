@@ -1130,6 +1130,10 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     if (ids.subscriptionId.isEmpty) {
       throw Exception('معرّف اشتراك FTTH غير موجود في بيانات المشترك');
     }
+    // يُسأل عن المبلغ (واصل/جزئي/دين) أولاً كبقية الساسات، قبل اختيار
+    // الباقة/الطريقة. إلغاؤه = لا تفعيل ولا دفع.
+    final payment = await _confirmActivation(s);
+    if (payment == null || !mounted) return;
     final choice = await showDialog<FtthActivationChoice>(
       context: context,
       builder: (_) => FtthActivationDialog(
@@ -1148,11 +1152,6 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       ),
     );
     if (choice == null || !mounted) return;
-
-    // يُسأل عن المبلغ (واصل/جزئي/دين) قبل الإرسال لكل الطرق كبقية الساسات،
-    // بما فيها البطاقة (قبل فتح صفحة الدفع). إلغاؤه = لا تفعيل ولا دفع.
-    final payment = await _confirmActivation(s);
-    if (payment == null || !mounted) return;
 
     final detail = choice.quote.detail;
     final sentAt = DateTime.now();

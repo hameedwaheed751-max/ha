@@ -2842,7 +2842,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     final wallets = providerWallets ?? const ProviderWallets([]);
 
     return _dashboardPanel(
-      title: 'أرصدة الشركات',
+      title: 'الرصيد',
       assetName: _dashboardIcon('balance'),
       trailing: IconButton(
         tooltip: 'تحديث الأرصدة',
