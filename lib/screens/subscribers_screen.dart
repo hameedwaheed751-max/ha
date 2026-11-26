@@ -2687,7 +2687,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
       await AppStore.save();
       if (!mounted) return;
     }
-    final dialogBillingMonthKey = s.billingMonthKey;
+    var dialogBillingMonthKey = s.billingMonthKey;
     final price = TextEditingController(text: s.price.toStringAsFixed(0));
     final paid = TextEditingController(text: s.paid.toStringAsFixed(0));
     await showDialog<void>(
@@ -2777,16 +2777,14 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               FilledButton(
                 onPressed: () async {
                   if (s.billingMonthKey != dialogBillingMonthKey) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'بدأ شهر جديد أثناء التعديل؛ افتح شاشة الدين مجدداً',
-                          ),
-                        ),
-                      );
+                    // بدأ شهر جديد أثناء فتح الحوار: رحّل ثم أكمل على الشهر
+                    // الجديد بدل إسقاط العملية (القيم المُدخلة تنطبق على الشهر
+                    // الحالي). يمنع ضياع التعديل عند تغيّر الشهر أثناء العمل.
+                    if (AppStore.rolloverMonthlyBalances()) {
+                      await AppStore.save();
                     }
-                    return;
+                    s.rolloverToMonth(DateTime.now());
+                    dialogBillingMonthKey = s.billingMonthKey;
                   }
                   final oldPrice = s.price;
                   final oldPaid = s.paid;

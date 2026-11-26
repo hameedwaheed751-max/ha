@@ -1118,4 +1118,21 @@ void main() {
       }
     },
   );
+
+  test('editing subscription amount after month rollover still applies', () {
+    final s = _subscriber(price: 30000, paid: 0);
+    s.billingMonthKey = '2026-10';
+    expect(s.rolloverToMonth(DateTime(2026, 11, 26)), isTrue);
+    expect(s.carriedDebt, 30000);
+    expect(s.price, 0);
+
+    final adj = s.adjustDebtAmounts(
+      subscriptionAmount: 40000,
+      paidAmount: 0,
+      at: DateTime(2026, 11, 26),
+    );
+
+    expect(adj.subscriptionDelta, 40000);
+    expect(s.remaining, 70000); // 30000 مرحّل + 40000 اشتراك الشهر الجديد
+  });
 }
