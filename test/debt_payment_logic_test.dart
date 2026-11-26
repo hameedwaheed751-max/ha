@@ -1135,4 +1135,16 @@ void main() {
     expect(adj.subscriptionDelta, 40000);
     expect(s.remaining, 70000); // 30000 مرحّل + 40000 اشتراك الشهر الجديد
   });
+
+  test('recordLedgerSafe surfaces failure then clears on success', () async {
+    final failed = await AppStore.recordLedgerSafe(
+      () async => throw Exception('net'),
+    );
+    expect(failed, isFalse);
+    expect(AppStore.lastLedgerSyncError, isNotNull);
+
+    final ok = await AppStore.recordLedgerSafe(() async {});
+    expect(ok, isTrue);
+    expect(AppStore.lastLedgerSyncError, isNull);
+  });
 }

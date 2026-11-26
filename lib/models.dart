@@ -1702,10 +1702,28 @@ class AppStore {
   static double balance = 0;
   static int nextReceiptNumber = 1;
   static String? lastSaveSyncError;
+
+  /// آخر خطأ في كتابة السجل المالي (Firebase). يُضبط عند الفشل ويُمسح عند
+  /// النجاح، ليُعرض تحذير بدل ابتلاع الخطأ بصمت.
+  static String? lastLedgerSyncError;
   static DateTime? lastSasSync;
   static int subscribersRevision = 0;
   static int packagesRevision = 0;
   static final List<PackagePlan> packages = [];
+
+  /// يكتب السجل المالي مع التقاط الفشل بدل ابتلاعه: يضبط [lastLedgerSyncError]
+  /// عند الفشل ويمسحه عند النجاح، ويعيد true عند النجاح. الحفظ المحلي مستقل،
+  /// فالفشل هنا يعني «حُفظ محلياً وتعذّر تسجيل السجل» لا ضياع البيانات.
+  static Future<bool> recordLedgerSafe(Future<void> Function() write) async {
+    try {
+      await write();
+      lastLedgerSyncError = null;
+      return true;
+    } catch (error) {
+      lastLedgerSyncError = '$error';
+      return false;
+    }
+  }
 
   static void addPackage(PackagePlan package) {
     final normalizedName = package.name.trim();

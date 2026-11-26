@@ -537,18 +537,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
     required String referenceId,
     required String note,
   }) async {
-    try {
-      await SubscriberFinancialLedger().addTransaction(
+    await AppStore.recordLedgerSafe(
+      () => SubscriberFinancialLedger().addTransaction(
         subscriberId: subscriber.subscriberId,
         date: date,
         type: type,
         amount: amount,
         referenceId: referenceId,
         note: note,
-      );
-    } catch (error) {
-      debugPrint('Financial ledger write failed: $error');
-    }
+      ),
+    );
   }
 
   double _toNum(dynamic value) {
@@ -3015,7 +3013,9 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
 
                   if (mounted) {
                     setState(() {});
-                    final syncWarning = AppStore.lastSaveSyncError == null
+                    final syncWarning = AppStore.lastLedgerSyncError != null
+                        ? ' | حُفظ محلياً وتعذّر تسجيل السجل المالي'
+                        : AppStore.lastSaveSyncError == null
                         ? ''
                         : ' | حُفظ محلياً وتعذرت المزامنة';
                     ScaffoldMessenger.of(context).showSnackBar(

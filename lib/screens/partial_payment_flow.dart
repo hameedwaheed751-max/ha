@@ -144,21 +144,27 @@ Future<double> _savePayment(
   }
   s.paymentDate = _date(now);
   await AppStore.save();
-  try {
-    await SubscriberFinancialLedger().addTransaction(
+  await AppStore.recordLedgerSafe(
+    () => SubscriberFinancialLedger().addTransaction(
       subscriberId: s.subscriberId,
       date: now,
       type: FinancialTransactionType.payment,
       amount: applied,
       referenceId: 'payment-receipt:$receiptNumber',
       note: note ?? (s.remaining <= 0.0001 ? 'تسديد كامل' : 'تسديد جزئي'),
-    );
-  } catch (error) {
-    debugPrint('Financial ledger write failed: $error');
-  }
-  if (context.mounted && AppStore.lastSaveSyncError != null) {
+    ),
+  );
+  if (context.mounted &&
+      (AppStore.lastSaveSyncError != null ||
+          AppStore.lastLedgerSyncError != null)) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تم حفظ الدفعة محلياً، لكن تعذرت المزامنة')),
+      SnackBar(
+        content: Text(
+          AppStore.lastLedgerSyncError != null
+              ? 'تم حفظ الدفعة محلياً، لكن تعذّر تسجيل السجل المالي'
+              : 'تم حفظ الدفعة محلياً، لكن تعذرت المزامنة',
+        ),
+      ),
     );
   }
   // رسالة "استلام دين سابق" عند أي دفعة فعلية خفّضت المتبقي.
