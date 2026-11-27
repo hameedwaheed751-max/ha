@@ -48,3 +48,7 @@ flutter:
   assets:
     - assets/reference/
     - assets/dashboard/
+  fonts:
+    - family: Cairo
+      fonts:
+        - asset: assets/fonts/Cairo-VariableFont.ttf

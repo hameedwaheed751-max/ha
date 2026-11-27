@@ -57,6 +57,7 @@ class MyApp extends StatelessWidget {
           theme: ThemeData(
             useMaterial3: true,
             colorSchemeSeed: const Color(0xFF2E7D32),
+            fontFamily: 'Cairo',
             pageTransitionsTheme: _immediatePageTransitions,
             scaffoldBackgroundColor: const Color(0xfff5f7fb),
             cardTheme: const CardThemeData(
@@ -148,6 +149,7 @@ class MyApp extends StatelessWidget {
           darkTheme: ThemeData(
             useMaterial3: true,
             colorSchemeSeed: const Color(0xFF2E7D32),
+            fontFamily: 'Cairo',
             pageTransitionsTheme: _immediatePageTransitions,
             brightness: Brightness.dark,
             scaffoldBackgroundColor: const Color(0xFF0F172A),
