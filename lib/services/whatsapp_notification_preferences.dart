@@ -20,6 +20,29 @@ abstract interface class WhatsAppNotificationPreferences {
   );
 }
 
+/// Maps a saved-template key (as used by [AppStore.messageTemplates] and the
+/// manual send sheet) to the WhatsApp notification event type whose per-event
+/// preference message overrides it. `'extension'` has no notification event.
+const Map<String, String> manualTemplateEventTypes = {
+  'activation': 'subscription_activated',
+  'nearExpiry': 'expiry_3days',
+  'expired': 'subscription_expired',
+  'debt': 'debt_reminder',
+  'debtPaid': 'debt_paid',
+};
+
+/// Resolves the message a manual send should use: the agent's saved event
+/// preference ([preferenceMessage]) wins, falling back to the local template
+/// ([fallback]) when it is null or blank. Keeps the manual send sheet in sync
+/// with what the agent edited in the WhatsApp events screen.
+String resolveManualTemplateMessage({
+  required String? preferenceMessage,
+  required String fallback,
+}) {
+  final trimmed = preferenceMessage?.trim() ?? '';
+  return trimmed.isEmpty ? fallback : preferenceMessage!;
+}
+
 class FirebaseWhatsAppNotificationPreferences
     implements WhatsAppNotificationPreferences {
   FirebaseWhatsAppNotificationPreferences({

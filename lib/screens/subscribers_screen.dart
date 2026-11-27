@@ -17,6 +17,7 @@ import 'fiberx_activation_dialog.dart';
 import '../services/render_whatsapp_service.dart';
 import '../services/subscriber_financial_ledger.dart';
 import '../services/whatsapp_notification_dispatcher.dart';
+import '../services/whatsapp_notification_preferences.dart';
 import 'activation_payment_dialog.dart';
 import 'add_subscriber_screen.dart';
 import 'ftth_activation_dialog.dart';
@@ -753,20 +754,38 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     'رسائل واتساب',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  subtitle: Text('تستخدم النماذج المحفوظة من قائمة الداشبورد'),
+                  subtitle: Text(
+                    'تُرسَل كما عدّلتها في «أحداث رسائل واتساب»',
+                  ),
                 ),
                 const Divider(height: 1),
                 ...titles.entries.map((entry) {
-                  final template = AppStore.messageTemplates[entry.key] ?? '';
                   return ListTile(
                     leading: const Icon(Icons.send_rounded),
                     title: Text(entry.value),
-                    onTap: () {
+                    onTap: () async {
                       Navigator.pop(ctx);
+                      final fallback =
+                          AppStore.messageTemplates[entry.key] ?? '';
+                      final eventType = manualTemplateEventTypes[entry.key];
+                      var message = fallback;
+                      if (eventType != null) {
+                        try {
+                          final pref =
+                              await FirebaseWhatsAppNotificationPreferences()
+                                  .load(eventType);
+                          message = resolveManualTemplateMessage(
+                            preferenceMessage: pref.message,
+                            fallback: fallback,
+                          );
+                        } catch (_) {
+                          message = fallback;
+                        }
+                      }
                       RenderWhatsAppService.dispatchInBackground(
                         WhatsAppNotificationDispatcher().sendSubscriberMessage(
                           s,
-                          message: template,
+                          message: message,
                           eventType: 'general_message',
                           eventId:
                               'saved_template_${DateTime.now().microsecondsSinceEpoch}',
