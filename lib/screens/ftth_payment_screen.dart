@@ -140,13 +140,13 @@ class _FtthPaymentScreenState extends State<FtthPaymentScreen> {
           title: const Text('الدفع بالماستر'),
           leading: IconButton(
             tooltip: 'إغلاق',
-            icon: const Icon(Icons.close),
+            icon: const Icon(Icons.close_rounded),
             onPressed: () => Navigator.of(context).pop(false),
           ),
           actions: [
             IconButton(
               tooltip: 'إعادة التحميل',
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(Icons.refresh_rounded),
               onPressed: _reload,
             ),
           ],

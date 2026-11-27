@@ -186,7 +186,7 @@ class _EarthlinkChangePlanDialogState extends State<EarthlinkChangePlanDialog> {
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.error_outline, color: Colors.red.shade700),
+                          Icon(Icons.error_rounded, color: Colors.red.shade700),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
@@ -213,7 +213,7 @@ class _EarthlinkChangePlanDialogState extends State<EarthlinkChangePlanDialog> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.swap_horiz),
+                : const Icon(Icons.swap_horiz_rounded),
             label: Text(_busy ? 'جارٍ التغيير…' : 'تغيير'),
           ),
         ],

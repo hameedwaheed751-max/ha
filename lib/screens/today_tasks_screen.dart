@@ -201,7 +201,7 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
           ),
           OutlinedButton.icon(
             onPressed: _pickDate,
-            icon: const Icon(Icons.calendar_month_outlined),
+            icon: const Icon(Icons.calendar_month_rounded),
             label: const Text('تغيير التاريخ'),
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.white,
@@ -218,38 +218,38 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
       (
         'حالات التفعيل',
         summary.activationCases.toString(),
-        Icons.check_circle_outline,
+        Icons.check_circle_rounded,
         Colors.green,
       ),
       (
         'حالات تسديد الديون',
         summary.debtPaymentCases.toString(),
-        Icons.paid_outlined,
+        Icons.paid_rounded,
         Colors.blue,
       ),
       (
         'الواصل من التفعيل',
         _money(summary.activationCollected),
-        Icons.point_of_sale_outlined,
+        Icons.point_of_sale_rounded,
         Colors.teal,
       ),
       (
         'الواصل من التسديد',
         _money(summary.debtPaymentsCollected),
-        Icons.account_balance_wallet_outlined,
+        Icons.account_balance_wallet_rounded,
         Colors.orange,
       ),
       if (summary.otherCollected > 0.0001)
         (
           'واصل آخر',
           _money(summary.otherCollected),
-          Icons.shopping_bag_outlined,
+          Icons.shopping_bag_rounded,
           Colors.indigo,
         ),
       (
         'تخفيض الدين',
         _money(summary.debtReducedTotal),
-        Icons.remove_circle_outline,
+        Icons.remove_circle_rounded,
         Colors.blueGrey,
       ),
     ];
@@ -403,12 +403,12 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
         ? const Color(0xFF1769AA)
         : const Color(0xFFC2413B);
     final icon = isActivation
-        ? Icons.bolt_outlined
+        ? Icons.bolt_rounded
         : isDebtRemoved
-        ? Icons.remove_circle_outline
+        ? Icons.remove_circle_rounded
         : isPayment
-        ? Icons.payments_outlined
-        : Icons.add_card_outlined;
+        ? Icons.payments_rounded
+        : Icons.add_card_rounded;
     final label = isActivation
         ? 'واصل عند التفعيل'
         : isDebtRemoved
@@ -514,7 +514,7 @@ class _TodayTasksScreenState extends State<TodayTasksScreen> {
       ),
       child: const Column(
         children: [
-          Icon(Icons.inbox_outlined, size: 38, color: Color(0xFF94A3B8)),
+          Icon(Icons.inbox_rounded, size: 38, color: Color(0xFF94A3B8)),
           SizedBox(height: 10),
           Text(
             'لا توجد عمليات ضمن هذا التصنيف',

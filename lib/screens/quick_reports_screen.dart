@@ -92,12 +92,12 @@ class QuickReportsScreen extends StatelessWidget {
         body: ListView(
           padding: const EdgeInsets.all(12),
           children: [
-            _statCard(icon: Icons.groups, color: Colors.blue, title: 'إجمالي المشتركين', value: report['total'].toString()),
-            _statCard(icon: Icons.verified_user, color: Colors.green, title: 'المشتركين الفعالين', value: '${report['active']}'),
-            _statCard(icon: Icons.event_busy, color: Colors.orange, title: 'المنتهين', value: '${report['expired']}'),
-            _statCard(icon: Icons.hourglass_top, color: Colors.deepOrange, title: 'ينتهون خلال 3 أيام', value: '${report['expiring3Days']}'),
-            _statCard(icon: Icons.account_balance_wallet, color: Colors.red, title: 'عدد المدينين', value: '${report['debtors']}'),
-            _statCard(icon: Icons.attach_money, color: Colors.teal, title: 'إجمالي المتبقي', value: '${report['totalDebt'].toStringAsFixed(0)}'),
+            _statCard(icon: Icons.groups_rounded, color: Colors.blue, title: 'إجمالي المشتركين', value: report['total'].toString()),
+            _statCard(icon: Icons.verified_user_rounded, color: Colors.green, title: 'المشتركين الفعالين', value: '${report['active']}'),
+            _statCard(icon: Icons.event_busy_rounded, color: Colors.orange, title: 'المنتهين', value: '${report['expired']}'),
+            _statCard(icon: Icons.hourglass_top_rounded, color: Colors.deepOrange, title: 'ينتهون خلال 3 أيام', value: '${report['expiring3Days']}'),
+            _statCard(icon: Icons.account_balance_wallet_rounded, color: Colors.red, title: 'عدد المدينين', value: '${report['debtors']}'),
+            _statCard(icon: Icons.attach_money_rounded, color: Colors.teal, title: 'إجمالي المتبقي', value: '${report['totalDebt'].toStringAsFixed(0)}'),
             const SizedBox(height: 8),
             Card(
               child: Padding(

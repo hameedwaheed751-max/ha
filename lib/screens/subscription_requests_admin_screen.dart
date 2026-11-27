@@ -624,7 +624,7 @@ class _SubscriptionRequestsAdminScreenState
                   tooltip: 'حذف الطلب',
                   onPressed: () => _deleteRequest(request),
                   icon: const Icon(
-                    Icons.delete_outline,
+                    Icons.delete_rounded,
                     color: Color(0xFFC62828),
                   ),
                 )
@@ -716,7 +716,7 @@ class _SubscriptionRequestsAdminScreenState
                     onPressed: () =>
                         _deleteRequest(request, olderCount: agent.older.length),
                     icon: const Icon(
-                      Icons.delete_outline,
+                      Icons.delete_rounded,
                       color: Color(0xFFC62828),
                     ),
                   ),
@@ -792,7 +792,7 @@ class _SubscriptionRequestsAdminScreenState
                       onPressed: _busy || request.uid.isEmpty
                           ? null
                           : () => _approve(request),
-                      icon: const Icon(Icons.check_circle_outline),
+                      icon: const Icon(Icons.check_circle_rounded),
                       label: const Text('قبول'),
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFF2E7D32),
@@ -804,7 +804,7 @@ class _SubscriptionRequestsAdminScreenState
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: _busy ? null : () => _reject(request),
-                      icon: const Icon(Icons.cancel_outlined),
+                      icon: const Icon(Icons.cancel_rounded),
                       label: const Text('رفض'),
                     ),
                   ),
@@ -832,7 +832,7 @@ class _SubscriptionRequestsAdminScreenState
               IconButton(
                 key: const ValueKey('open-agents-broadcast'),
                 tooltip: 'رسالة عامة للوكلاء',
-                icon: const Icon(Icons.campaign_outlined),
+                icon: const Icon(Icons.campaign_rounded),
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const AgentsBroadcastScreen(),
@@ -887,7 +887,7 @@ class _SubscriptionRequestsAdminScreenState
                           setState(() => _searchQuery = value),
                       decoration: InputDecoration(
                         labelText: 'بحث بالاسم أو الهاتف أو البريد أو الباقة',
-                        prefixIcon: const Icon(Icons.search),
+                        prefixIcon: const Icon(Icons.search_rounded),
                         suffixIcon: _searchQuery.isEmpty
                             ? null
                             : IconButton(
@@ -895,7 +895,7 @@ class _SubscriptionRequestsAdminScreenState
                                   _searchController.clear();
                                   setState(() => _searchQuery = '');
                                 },
-                                icon: const Icon(Icons.clear),
+                                icon: const Icon(Icons.clear_rounded),
                               ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -1094,8 +1094,8 @@ class _TrialClaimsDialogState extends State<_TrialClaimsDialog> {
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(
                       entry.kind == TrialGuardService.phonesKind
-                          ? Icons.phone_android
-                          : Icons.dns_outlined,
+                          ? Icons.phone_android_rounded
+                          : Icons.dns_rounded,
                     ),
                     title: Text(
                       entry.label.isEmpty
@@ -1121,7 +1121,7 @@ class _TrialClaimsDialogState extends State<_TrialClaimsDialog> {
                         : IconButton(
                             tooltip: 'حذف البصمة',
                             icon: const Icon(
-                              Icons.delete_outline,
+                              Icons.delete_rounded,
                               color: Colors.red,
                             ),
                             onPressed: () => _delete(entry),
@@ -1158,7 +1158,7 @@ class _ReceiptUnavailable extends StatelessWidget {
     child: const Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.broken_image_outlined, size: 32),
+        Icon(Icons.broken_image_rounded, size: 32),
         SizedBox(height: 6),
         Text('تعذر تحميل صورة الإيصال'),
       ],

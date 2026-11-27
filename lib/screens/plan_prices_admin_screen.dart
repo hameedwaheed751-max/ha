@@ -166,7 +166,7 @@ class _PlanPricesAdminScreenState extends State<PlanPricesAdminScreen> {
                         const SizedBox(height: 12),
                         FilledButton.icon(
                           onPressed: _saving ? null : _save,
-                          icon: const Icon(Icons.save_outlined),
+                          icon: const Icon(Icons.save_rounded),
                           label: Text(_saving ? 'جاري الحفظ...' : 'حفظ'),
                         ),
                       ],

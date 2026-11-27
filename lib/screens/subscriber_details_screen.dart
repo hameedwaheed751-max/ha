@@ -487,7 +487,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.add, color: Colors.blueGrey),
+            const Icon(Icons.add_rounded, color: Colors.blueGrey),
             const SizedBox(width: 4),
             Text(
               'إضافة',
@@ -564,8 +564,8 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
               backgroundColor: color.withValues(alpha: 0.12),
               child: Icon(
                 isPurchase
-                    ? Icons.shopping_bag_outlined
-                    : Icons.add_card_outlined,
+                    ? Icons.shopping_bag_rounded
+                    : Icons.add_card_rounded,
                 color: color,
               ),
             ),
@@ -613,7 +613,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
               IconButton(
                 tooltip: 'إلغاء العملية',
                 onPressed: () => _cancelManualEntry(first),
-                icon: const Icon(Icons.cancel_outlined, size: 20),
+                icon: const Icon(Icons.cancel_rounded, size: 20),
               ),
           ],
         ),
@@ -784,7 +784,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
           label: 'إجمالي الدين على المشترك',
           amount: s.remaining,
           color: s.remaining > 0.0001 ? Colors.red : Colors.green,
-          icon: Icons.account_balance_wallet_outlined,
+          icon: Icons.account_balance_wallet_rounded,
         ),
         const SizedBox(height: 10),
         Row(
@@ -884,12 +884,12 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                   isDebtEdit
                       ? Icons.edit_note_rounded
                       : isDebtAdded
-                      ? Icons.add_card_outlined
+                      ? Icons.add_card_rounded
                       : isDebtRemoved
-                      ? Icons.remove_circle_outline
+                      ? Icons.remove_circle_rounded
                       : isActivation
-                      ? Icons.check_circle_outline
-                      : Icons.payments_outlined,
+                      ? Icons.check_circle_rounded
+                      : Icons.payments_rounded,
                   color: color,
                 ),
               ),
@@ -941,7 +941,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                     IconButton(
                       tooltip: 'إلغاء التسديد',
                       onPressed: () => _cancelPayment(event),
-                      icon: const Icon(Icons.cancel_outlined, size: 20),
+                      icon: const Icon(Icons.cancel_rounded, size: 20),
                     ),
                 ],
               ),
@@ -1121,7 +1121,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                 children: [
                   const CircleAvatar(
                     radius: 34,
-                    child: Icon(Icons.person, size: 40),
+                    child: Icon(Icons.person_rounded, size: 40),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -1212,13 +1212,13 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                   ListView(
                     padding: const EdgeInsets.all(14),
                     children: [
-                      infoRow('اسم الدخول', s.user, Icons.person_outline),
-                      infoRow('رقم الهاتف', s.phone, Icons.phone_outlined),
-                      infoRow('العنوان', s.address, Icons.location_on_outlined),
+                      infoRow('اسم الدخول', s.user, Icons.person_rounded),
+                      infoRow('رقم الهاتف', s.phone, Icons.phone_rounded),
+                      infoRow('العنوان', s.address, Icons.location_on_rounded),
                       infoRow(
                         'IP',
                         s.ip,
-                        Icons.language,
+                        Icons.language_rounded,
                         valueColor: Colors.blue,
                         onTap: () async {
                           final ip = s.ip.trim();
@@ -1241,20 +1241,20 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                       infoRow(
                         'الباقة',
                         s.packageDisplay,
-                        Icons.inventory_2_outlined,
+                        Icons.inventory_2_rounded,
                       ),
                       infoRow(
                         'تاريخ الانتهاء',
                         f(s.endDate),
-                        Icons.event_outlined,
+                        Icons.event_rounded,
                       ),
                       infoRow(
                         'الحالة',
                         _sas(['status', 'state', 'user_status'], status),
-                        Icons.info_outline,
+                        Icons.info_rounded,
                       ),
                       if (isSas)
-                        infoRow('معرف SAS', s.sasId, Icons.fingerprint),
+                        infoRow('معرف SAS', s.sasId, Icons.fingerprint_rounded),
                       if (isSas)
                         infoRow(
                           'تابع إلى',
@@ -1264,7 +1264,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                             'manager_name',
                             'reseller_name',
                           ]),
-                          Icons.account_tree_outlined,
+                          Icons.account_tree_rounded,
                         ),
                       if (isSas)
                         infoRow(
@@ -1274,10 +1274,10 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                             'borrowed_days',
                             'debt_days',
                           ], '0'),
-                          Icons.calendar_month_outlined,
+                          Icons.calendar_month_rounded,
                         ),
                       if (isSas)
-                        infoRow('آخر اتصال', lastConnection, Icons.history),
+                        infoRow('آخر اتصال', lastConnection, Icons.history_rounded),
                     ],
                   ),
                   _debtOperationsTab(),
@@ -1307,18 +1307,18 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                           infoRow(
                             'مبلغ الاشتراك',
                             s.price.toStringAsFixed(0),
-                            Icons.receipt_long_outlined,
+                            Icons.receipt_long_rounded,
                           ),
                           _paidAndDueSummary(context),
                           infoRow(
                             'تاريخ التفعيل',
                             f(s.startDate),
-                            Icons.event_outlined,
+                            Icons.event_rounded,
                           ),
                           infoRow(
                             'تاريخ التسديد',
                             s.paymentDate.isEmpty ? 'غير محدد' : s.paymentDate,
-                            Icons.event_available_outlined,
+                            Icons.event_available_rounded,
                           ),
                           if (isSas)
                             infoRow(
@@ -1326,7 +1326,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                               _formatSasBalance(
                                 _sas(['balance', 'credit', 'user_balance']),
                               ),
-                              Icons.account_balance_wallet_outlined,
+                              Icons.account_balance_wallet_rounded,
                             ),
                           const SizedBox(height: 8),
                           Row(
@@ -1343,7 +1343,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                   invoices,
                                   effectiveFilter,
                                 ),
-                                icon: const Icon(Icons.download_outlined),
+                                icon: const Icon(Icons.download_rounded),
                                 label: const Text('تصدير'),
                               ),
                             ],
@@ -1355,7 +1355,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                             monthFilter: effectiveFilter,
                             amount: invoicesTotal,
                             count: invoices.length,
-                            icon: Icons.receipt_long_outlined,
+                            icon: Icons.receipt_long_rounded,
                           ),
                           const SizedBox(height: 12),
                           const Text(
@@ -1373,7 +1373,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                               (inv) => Card(
                                 child: ListTile(
                                   leading: const CircleAvatar(
-                                    child: Icon(Icons.receipt_long_outlined),
+                                    child: Icon(Icons.receipt_long_rounded),
                                   ),
                                   title: Text(
                                     'وصل رقم ${inv.receiptNumber.toString().padLeft(6, '0')}'
@@ -1425,7 +1425,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                           infoRow(
                             'تاريخ التسديد',
                             s.paymentDate.isEmpty ? 'غير محدد' : s.paymentDate,
-                            Icons.event_available_outlined,
+                            Icons.event_available_rounded,
                           ),
                           if (isSas)
                             infoRow(
@@ -1435,7 +1435,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                 'last_payment_date',
                                 'payment_date',
                               ]),
-                              Icons.payments_outlined,
+                              Icons.payments_rounded,
                             ),
                           const SizedBox(height: 8),
                           Row(
@@ -1452,7 +1452,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                   payments,
                                   effectiveFilter,
                                 ),
-                                icon: const Icon(Icons.download_outlined),
+                                icon: const Icon(Icons.download_rounded),
                                 label: const Text('تصدير'),
                               ),
                             ],
@@ -1464,7 +1464,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                             monthFilter: effectiveFilter,
                             amount: paymentsTotal,
                             count: payments.length,
-                            icon: Icons.payments_outlined,
+                            icon: Icons.payments_rounded,
                           ),
                           const SizedBox(height: 12),
                           const Text(
@@ -1487,7 +1487,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                     child: Icon(
                                       isCorrection
                                           ? Icons.undo_rounded
-                                          : Icons.payments_outlined,
+                                          : Icons.payments_rounded,
                                     ),
                                   ),
                                   title: Text(
@@ -1506,7 +1506,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                                   ),
                                   trailing: invoice == null
                                       ? null
-                                      : const Icon(Icons.receipt_long_outlined),
+                                      : const Icon(Icons.receipt_long_rounded),
                                   onTap: invoice == null
                                       ? null
                                       : () => _openInvoice(invoice),
@@ -1528,7 +1528,7 @@ class _SubscriberDetailsScreenState extends State<SubscriberDetailsScreen>
                         );
                         if (changed == true && mounted) setState(() {});
                       },
-                      icon: const Icon(Icons.edit),
+                      icon: const Icon(Icons.edit_rounded),
                       label: const Text('تعديل بيانات المشترك'),
                     ),
                   ),

@@ -88,14 +88,14 @@ class _MessageTemplatesScreenState extends State<MessageTemplatesScreen> {
             ...items.entries.map(
               (entry) => Card(
                 child: ListTile(
-                  leading: const Icon(Icons.chat_outlined, color: Colors.green),
+                  leading: const Icon(Icons.chat_rounded, color: Colors.green),
                   title: Text(entry.value),
                   subtitle: Text(
                     AppStore.messageTemplates[entry.key] ?? '',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  trailing: const Icon(Icons.edit_outlined),
+                  trailing: const Icon(Icons.edit_rounded),
                   onTap: () => edit(entry.key, entry.value),
                 ),
               ),

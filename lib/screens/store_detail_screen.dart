@@ -321,7 +321,7 @@ class _StoreHeader extends StatelessWidget {
                     builder: (_) => StoreWebViewScreen(store: store),
                   ),
                 ),
-                icon: const Icon(Icons.public, size: 18),
+                icon: const Icon(Icons.public_rounded, size: 18),
                 label: const Text('زيارة الموقع'),
               ),
           ],
@@ -554,7 +554,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             if (widget.canManage) ...[
               IconButton(
                 tooltip: 'تعديل',
-                icon: const Icon(Icons.edit),
+                icon: const Icon(Icons.edit_rounded),
                 onPressed: () {
                   Navigator.of(context).pop();
                   widget.onEdit();
@@ -562,7 +562,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               ),
               IconButton(
                 tooltip: 'حذف',
-                icon: const Icon(Icons.delete_outline),
+                icon: const Icon(Icons.delete_rounded),
                 onPressed: _delete,
               ),
             ],
@@ -652,7 +652,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           backgroundColor: const Color(0xFF25D366),
                         ),
                         onPressed: _whatsapp,
-                        icon: const Icon(Icons.chat),
+                        icon: const Icon(Icons.chat_rounded),
                         label: const Text('اطلب عبر واتساب'),
                       ),
                     ),
@@ -853,7 +853,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                         child: const Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.add_a_photo_outlined),
+                            Icon(Icons.add_a_photo_rounded),
                             Text('صورة', style: TextStyle(fontSize: 11)),
                           ],
                         ),
@@ -957,7 +957,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.save),
+                    : const Icon(Icons.save_rounded),
                 label: Text(_saving ? 'جارٍ الحفظ...' : 'حفظ'),
               ),
             ],
@@ -981,7 +981,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               child: const CircleAvatar(
                 radius: 11,
                 backgroundColor: Colors.black54,
-                child: Icon(Icons.close, size: 14, color: Colors.white),
+                child: Icon(Icons.close_rounded, size: 14, color: Colors.white),
               ),
             ),
           ),

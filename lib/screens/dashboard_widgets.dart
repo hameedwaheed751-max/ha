@@ -29,7 +29,7 @@ class DebtOperationsMenu extends StatelessWidget {
       tooltip: 'العمليات',
       icon: showLabel
           ? null
-          : const Icon(Icons.more_vert, color: Colors.blueGrey),
+          : const Icon(Icons.more_vert_rounded, color: Colors.blueGrey),
       child: showLabel
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -41,7 +41,7 @@ class DebtOperationsMenu extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.more_vert, color: Colors.blueGrey),
+                  const Icon(Icons.more_vert_rounded, color: Colors.blueGrey),
                   const SizedBox(width: 4),
                   Text(
                     'العمليات',
@@ -91,7 +91,7 @@ class DebtOperationsMenu extends StatelessWidget {
             value: 'edit',
             child: ListTile(
               dense: true,
-              leading: Icon(Icons.edit_outlined),
+              leading: Icon(Icons.edit_rounded),
               title: Text('تعديل المبالغ'),
             ),
           ),
@@ -100,7 +100,7 @@ class DebtOperationsMenu extends StatelessWidget {
             value: 'add_amount',
             child: ListTile(
               dense: true,
-              leading: Icon(Icons.add_card_outlined),
+              leading: Icon(Icons.add_card_rounded),
               title: Text('إضافة مبلغ'),
             ),
           ),
@@ -109,7 +109,7 @@ class DebtOperationsMenu extends StatelessWidget {
             value: 'partial_payment',
             child: ListTile(
               dense: true,
-              leading: Icon(Icons.payments_outlined),
+              leading: Icon(Icons.payments_rounded),
               title: Text('تسديد جزء من المبلغ'),
             ),
           ),
@@ -118,7 +118,7 @@ class DebtOperationsMenu extends StatelessWidget {
             value: 'correct_carried',
             child: ListTile(
               dense: true,
-              leading: Icon(Icons.rule_rounded),
+              leading: Icon(Icons.fact_check_rounded),
               title: Text('تصحيح الدين المرحّل'),
             ),
           ),

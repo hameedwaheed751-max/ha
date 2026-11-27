@@ -213,7 +213,7 @@ class _SubscriberPortalRequestsScreenState
       body = ListView(
         children: [
           const SizedBox(height: 120),
-          Icon(Icons.cloud_off, size: 48, color: Theme.of(context).colorScheme.outline),
+          Icon(Icons.cloud_off_rounded, size: 48, color: Theme.of(context).colorScheme.outline),
           const SizedBox(height: 12),
           Text(_error!, textAlign: TextAlign.center),
           const SizedBox(height: 8),
@@ -269,7 +269,7 @@ class _SubscriberPortalRequestsScreenState
             actions: [
               IconButton(
                 tooltip: 'إعلان للمشتركين',
-                icon: const Icon(Icons.campaign_outlined),
+                icon: const Icon(Icons.campaign_rounded),
                 onPressed: _announce,
               ),
             ],

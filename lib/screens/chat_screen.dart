@@ -238,7 +238,7 @@ class _ChatScreenState extends State<ChatScreen> {
             tooltip: 'إغلاق الإشعار',
             onPressed: _dismissNotification,
             icon: Icon(
-              Icons.close,
+              Icons.close_rounded,
               size: 19,
               color: isDark ? Colors.white70 : const Color(0xFF315B40),
             ),
@@ -297,7 +297,7 @@ class _ChatScreenState extends State<ChatScreen> {
             tooltip: 'رجوع',
             onPressed: () => Navigator.maybePop(context),
             icon: Icon(
-              Icons.arrow_forward,
+              Icons.arrow_forward_rounded,
               color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1F2937),
             ),
           ),
@@ -344,7 +344,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       );
                     }
                   },
-                  icon: Icon(Icons.delete_forever, color: Colors.red),
+                  icon: Icon(Icons.delete_forever_rounded, color: Colors.red),
                 );
               },
             ),
@@ -526,7 +526,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                         errorBuilder:
                                             (context, error, stackTrace) =>
                                                 const Icon(
-                                                  Icons.broken_image,
+                                                  Icons.broken_image_rounded,
                                                   size: 48,
                                                 ),
                                       ),
@@ -572,7 +572,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: Row(
                   children: [
                     Icon(
-                      Icons.reply,
+                      Icons.reply_rounded,
                       size: 20,
                       color: isDark
                           ? const Color(0xFFA5B4FC)
@@ -590,7 +590,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     IconButton(
                       tooltip: 'إلغاء الرد',
                       onPressed: _cancelReply,
-                      icon: const Icon(Icons.close, size: 20),
+                      icon: const Icon(Icons.close_rounded, size: 20),
                     ),
                   ],
                 ),
@@ -648,7 +648,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   IconButton(
                     onPressed: _sending ? null : _pickAndSendImage,
                     icon: Icon(
-                      Icons.image_outlined,
+                      Icons.image_rounded,
                       color: isDark
                           ? const Color(0xFFA5B4FC)
                           : Colors.blue.shade700,
@@ -727,7 +727,7 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             if (!isDeleted)
               ListTile(
-                leading: const Icon(Icons.reply),
+                leading: const Icon(Icons.reply_rounded),
                 title: const Text('رد'),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -736,7 +736,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             if (!isDeleted && (isMe || isAdminUser)) ...[
               ListTile(
-                leading: const Icon(Icons.delete),
+                leading: const Icon(Icons.delete_rounded),
                 title: const Text('حذف'),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -746,7 +746,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ],
             if (!isDeleted && isMe && msg.text.isNotEmpty) ...[
               ListTile(
-                leading: const Icon(Icons.edit),
+                leading: const Icon(Icons.edit_rounded),
                 title: const Text('تعديل'),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -755,7 +755,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ],
             ListTile(
-              leading: const Icon(Icons.close),
+              leading: const Icon(Icons.close_rounded),
               title: const Text('إلغاء'),
               onTap: () => Navigator.pop(ctx),
             ),
@@ -909,7 +909,7 @@ class _SwipeToReplyState extends State<SwipeToReply> {
                   radius: 15,
                   backgroundColor: Colors.blue.withValues(alpha: 0.15),
                   child: Icon(
-                    Icons.reply,
+                    Icons.reply_rounded,
                     size: 18,
                     color: Colors.blue.shade700,
                   ),
@@ -1048,7 +1048,7 @@ class AdminBadge extends StatelessWidget {
       child: const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.verified, size: 12, color: Colors.white),
+          Icon(Icons.verified_rounded, size: 12, color: Colors.white),
           SizedBox(width: 3),
           Text(
             'الإدارة',

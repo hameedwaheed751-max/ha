@@ -130,7 +130,7 @@ class _SasOnboardingScreenState extends State<SasOnboardingScreen> {
           actions: [
             TextButton.icon(
               onPressed: _logout,
-              icon: const Icon(Icons.logout),
+              icon: const Icon(Icons.logout_rounded),
               label: const Text('تسجيل الخروج'),
             ),
           ],
@@ -141,7 +141,7 @@ class _SasOnboardingScreenState extends State<SasOnboardingScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.link, size: 56, color: Colors.indigo),
+                const Icon(Icons.link_rounded, size: 56, color: Colors.indigo),
                 const SizedBox(height: 12),
                 const Text(
                   'لاستخدام التطبيق، اربط حساب الساس الخاص بك وزامن مشتركيك أولاً.',
@@ -169,7 +169,7 @@ class _SasOnboardingScreenState extends State<SasOnboardingScreen> {
                 OutlinedButton.icon(
                   key: const Key('onboarding-link-btn'),
                   onPressed: _syncing ? null : _openSasSettings,
-                  icon: const Icon(Icons.settings),
+                  icon: const Icon(Icons.settings_rounded),
                   label: Text(linked ? 'تعديل ربط الساس' : 'ربط الساس الآن'),
                 ),
                 const SizedBox(height: 10),
@@ -182,7 +182,7 @@ class _SasOnboardingScreenState extends State<SasOnboardingScreen> {
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.sync),
+                      : const Icon(Icons.sync_rounded),
                   label: Text(_syncing ? 'جارٍ المزامنة…' : 'مزامنة الآن'),
                 ),
                 if (!linked) ...[
@@ -208,7 +208,7 @@ class _SasOnboardingScreenState extends State<SasOnboardingScreen> {
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.error_outline, color: Colors.red.shade700),
+                        Icon(Icons.error_rounded, color: Colors.red.shade700),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -239,7 +239,7 @@ class _SasOnboardingScreenState extends State<SasOnboardingScreen> {
       child: Row(
         children: [
           Icon(
-            done ? Icons.check_circle : Icons.radio_button_unchecked,
+            done ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
             color: done ? Colors.green : Colors.grey,
           ),
           const SizedBox(width: 10),

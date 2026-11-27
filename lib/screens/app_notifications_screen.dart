@@ -78,11 +78,11 @@ class _AppNotificationsScreenState extends State<AppNotificationsScreen> {
   Widget _tile(AppNotification item) {
     final (icon, color) = switch (item.type) {
       AppNotificationType.activated => (
-        Icons.check_circle_outline,
+        Icons.check_circle_rounded,
         const Color(0xFF2E7D32),
       ),
       AppNotificationType.expired => (
-        Icons.event_busy_outlined,
+        Icons.event_busy_rounded,
         const Color(0xFFC62828),
       ),
       AppNotificationType.expiresToday => (

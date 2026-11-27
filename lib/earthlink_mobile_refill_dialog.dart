@@ -123,7 +123,7 @@ class _EarthlinkMobileRefillDialogState
                 labelText: 'كلمة التفعيل',
                 hintText: 'كلمة التفعيل التي يزوّدك بها إيرثلنك',
                 border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.vpn_key),
+                prefixIcon: Icon(Icons.vpn_key_rounded),
               ),
               onSubmitted: _busy ? null : (_) => _submit(),
             ),
@@ -143,7 +143,7 @@ class _EarthlinkMobileRefillDialogState
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.error_outline, color: Colors.red.shade700),
+                    Icon(Icons.error_rounded, color: Colors.red.shade700),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -170,7 +170,7 @@ class _EarthlinkMobileRefillDialogState
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.bolt),
+                : const Icon(Icons.bolt_rounded),
             label: Text(_busy ? 'جارٍ التفعيل…' : 'تفعيل'),
           ),
         ],

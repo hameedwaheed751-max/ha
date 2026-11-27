@@ -540,7 +540,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                 const SizedBox(height: 12),
                 _Section(
                   title: 'مبيعات الساس والربح',
-                  icon: Icons.point_of_sale_outlined,
+                  icon: Icons.point_of_sale_rounded,
                   children: [
                     _Figure(
                       'عدد التفعيلات',
@@ -565,7 +565,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                 ),
                 _Section(
                   title: 'النقد المستلم',
-                  icon: Icons.payments_outlined,
+                  icon: Icons.payments_rounded,
                   children: [
                     _Figure(
                       'واصل عند التفعيل',
@@ -594,7 +594,7 @@ class _AccountingReportsScreenState extends State<AccountingReportsScreen> {
                 ),
                 _Section(
                   title: 'الديون',
-                  icon: Icons.account_balance_outlined,
+                  icon: Icons.account_balance_rounded,
                   children: [
                     _Figure(
                       'أُضيفت هذا الشهر',
@@ -1074,7 +1074,7 @@ class _EmptyBox extends StatelessWidget {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.receipt_long_outlined, size: 32),
+        const Icon(Icons.receipt_long_rounded, size: 32),
         const SizedBox(height: 8),
         Text(message),
       ],
@@ -1262,7 +1262,7 @@ class _SasFinancialReports extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SectionTitle(
-          icon: Icons.cloud_sync_outlined,
+          icon: Icons.cloud_sync_rounded,
           title: 'سجلات الساس المباشرة',
           action: IconButton(
             onPressed: loading ? null : onRefresh,

@@ -132,7 +132,7 @@ class _FiberXActivationDialogState extends State<FiberXActivationDialog> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(
-          ok ? Icons.check_circle : Icons.error,
+          ok ? Icons.check_circle_rounded : Icons.error_rounded,
           color: ok ? Colors.green : Colors.red,
           size: 48,
         ),

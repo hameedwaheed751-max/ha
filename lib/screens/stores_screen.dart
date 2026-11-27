@@ -193,7 +193,7 @@ class _StoresScreenState extends State<StoresScreen> {
                   children: [
                     TextField(
                       decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.search),
+                        prefixIcon: Icon(Icons.search_rounded),
                         hintText: 'ابحث عن متجر',
                         border: OutlineInputBorder(),
                       ),
@@ -320,7 +320,7 @@ class StoreCard extends StatelessWidget {
                         visualDensity: VisualDensity.compact,
                         tooltip: 'اعتماد',
                         icon: const Icon(
-                          Icons.check_circle,
+                          Icons.check_circle_rounded,
                           color: Colors.green,
                           size: 20,
                         ),
@@ -330,14 +330,14 @@ class StoreCard extends StatelessWidget {
                       IconButton(
                         visualDensity: VisualDensity.compact,
                         tooltip: 'تعديل',
-                        icon: const Icon(Icons.edit, size: 18),
+                        icon: const Icon(Icons.edit_rounded, size: 18),
                         onPressed: onEdit,
                       ),
                     if (onDelete != null)
                       IconButton(
                         visualDensity: VisualDensity.compact,
                         tooltip: 'حذف',
-                        icon: const Icon(Icons.delete_outline, size: 18),
+                        icon: const Icon(Icons.delete_rounded, size: 18),
                         onPressed: onDelete,
                       ),
                   ],
@@ -538,13 +538,13 @@ class _StoreWebViewScreenState extends State<StoreWebViewScreen> {
           actions: [
             IconButton(
               tooltip: 'فتح في المتصفح',
-              icon: const Icon(Icons.open_in_browser),
+              icon: const Icon(Icons.open_in_browser_rounded),
               onPressed: _openExternal,
             ),
             if (!kIsWeb)
               IconButton(
                 tooltip: 'إعادة التحميل',
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(Icons.refresh_rounded),
                 onPressed: () {
                   _error.value = null;
                   _controller?.reload();

@@ -339,7 +339,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             height: 52,
             child: FilledButton.icon(
               onPressed: receiptNumber == null ? null : printReceipt,
-              icon: const Icon(Icons.print),
+              icon: const Icon(Icons.print_rounded),
               label: const Text('طباعة الوصل / حفظ PDF'),
             ),
           ),
@@ -348,7 +348,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             height: 52,
             child: OutlinedButton.icon(
               onPressed: receiptNumber == null ? null : shareReceipt,
-              icon: const Icon(Icons.share),
+              icon: const Icon(Icons.share_rounded),
               label: const Text('مشاركة الوصل'),
             ),
           ),

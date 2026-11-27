@@ -217,7 +217,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _sectionTitle('هوية المكتب', Icons.business_outlined),
+          _sectionTitle('هوية المكتب', Icons.business_rounded),
           Center(
             child: InkWell(
               borderRadius: BorderRadius.circular(60),
@@ -229,7 +229,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ? MemoryImage(base64Decode(AppStore.officeLogoBase64))
                     : null,
                 child: AppStore.officeLogoBase64.isEmpty
-                    ? const Icon(Icons.add_photo_alternate_outlined, size: 38)
+                    ? const Icon(Icons.add_photo_alternate_rounded, size: 38)
                     : null,
               ),
             ),
@@ -239,13 +239,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (AppStore.officeLogoBase64.isNotEmpty)
             TextButton.icon(
               onPressed: () => setState(() => AppStore.officeLogoBase64 = ''),
-              icon: const Icon(Icons.delete_outline),
+              icon: const Icon(Icons.delete_rounded),
               label: const Text('حذف الشعار'),
             ),
           const SizedBox(height: 14),
           TextField(controller: name, decoration: dec('اسم المكتب')),
           const SizedBox(height: 22),
-          _sectionTitle('بيانات التواصل', Icons.contact_phone_outlined),
+          _sectionTitle('بيانات التواصل', Icons.contact_phone_rounded),
           const SizedBox(height: 12),
           TextField(
             controller: phone,
@@ -265,7 +265,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 22),
-          _sectionTitle('تفاصيل الإيصال', Icons.receipt_long_outlined),
+          _sectionTitle('تفاصيل الإيصال', Icons.receipt_long_rounded),
           const SizedBox(height: 12),
           TextField(
             controller: footer,
@@ -273,7 +273,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             decoration: dec('ملاحظة أسفل الوصل'),
           ),
           const SizedBox(height: 22),
-          _sectionTitle('النسخ الاحتياطي والاستعادة', Icons.backup_outlined),
+          _sectionTitle('النسخ الاحتياطي والاستعادة', Icons.backup_rounded),
           const Padding(
             padding: EdgeInsets.only(bottom: 10),
             child: Text(
@@ -284,7 +284,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             height: 48,
             child: OutlinedButton.icon(
               onPressed: _isBackupBusy ? null : _exportBackup,
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(Icons.download_rounded),
               label: const Text('إنشاء نسخة احتياطية'),
             ),
           ),
@@ -299,7 +299,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.restore_page_outlined),
+                  : const Icon(Icons.restore_page_rounded),
               label: Text(
                 _isBackupBusy ? 'جارٍ تنفيذ العملية' : 'استعادة نسخة احتياطية',
               ),
@@ -316,7 +316,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.save),
+                  : const Icon(Icons.save_rounded),
               label: Text(_isSaving ? 'جارٍ الحفظ' : 'حفظ الإعدادات'),
             ),
           ),
@@ -339,8 +339,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Icon(
                     _saveFailed!
-                        ? Icons.error_outline
-                        : Icons.check_circle_outline,
+                        ? Icons.error_rounded
+                        : Icons.check_circle_rounded,
                     color: _saveFailed! ? Colors.red : Colors.green,
                   ),
                   const SizedBox(width: 8),

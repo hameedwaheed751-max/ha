@@ -29,5 +29,5 @@ Widget buildStoreImageFill(String imageUrl) => Image.network(
               ),
             ),
       errorBuilder: (_, _, _) =>
-          const Center(child: Icon(Icons.broken_image_outlined, size: 48)),
+          const Center(child: Icon(Icons.broken_image_rounded, size: 48)),
     );

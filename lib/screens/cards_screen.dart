@@ -243,7 +243,7 @@ class _CardsScreenState extends State<CardsScreen> {
     ),
     child: Row(
       children: [
-        const Icon(Icons.error_outline, color: Colors.red),
+        const Icon(Icons.error_rounded, color: Colors.red),
         const SizedBox(width: 8),
         Expanded(child: Text(message)),
       ],
@@ -485,7 +485,7 @@ class _SeriesCardsScreenState extends State<SeriesCardsScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ListTile(
         leading: Icon(
-          used ? Icons.check_circle : Icons.credit_card_rounded,
+          used ? Icons.check_circle_rounded : Icons.credit_card_rounded,
           color: used ? Colors.grey : Colors.green.shade700,
         ),
         title: Text(

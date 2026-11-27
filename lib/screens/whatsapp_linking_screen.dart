@@ -246,7 +246,7 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _sectionTitle('ربط واتساب للحساب', Icons.qr_code_2),
+        _sectionTitle('ربط واتساب للحساب', Icons.qr_code_2_rounded),
         const Text(
           'اربط حساب واتساب الخاص بك لمسح رمز QR. ستُرسل إشعاراتك من جلستك الخاصة.',
         ),
@@ -286,12 +286,12 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
               onPressed: _busy || _status != 'NOT_CREATED'
                   ? null
                   : _startSession,
-              icon: const Icon(Icons.link),
+              icon: const Icon(Icons.link_rounded),
               label: const Text('ربط واتساب'),
             ),
             OutlinedButton.icon(
               onPressed: _busy ? null : _refreshSession,
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(Icons.refresh_rounded),
               label: const Text('تحديث الحالة'),
             ),
             OutlinedButton.icon(
@@ -303,19 +303,19 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
                       _status == 'STARTING'
                   ? null
                   : _reconnectSession,
-              icon: const Icon(Icons.sync),
+              icon: const Icon(Icons.sync_rounded),
               label: const Text('إعادة الربط'),
             ),
             if (_status == 'SCAN_QR_CODE')
               OutlinedButton.icon(
                 onPressed: _busy || _qrLoading ? null : _loadQr,
-                icon: const Icon(Icons.qr_code_2),
+                icon: const Icon(Icons.qr_code_2_rounded),
                 label: const Text('تحديث رمز QR'),
               ),
             if (_status != 'NOT_CREATED')
               OutlinedButton.icon(
                 onPressed: _busy ? null : _disconnectSession,
-                icon: const Icon(Icons.link_off),
+                icon: const Icon(Icons.link_off_rounded),
                 label: const Text('فصل الحساب'),
               ),
           ],
@@ -341,12 +341,12 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
           const SizedBox(height: 12),
           Card(
             child: ListTile(
-              leading: const Icon(Icons.campaign_outlined),
+              leading: const Icon(Icons.campaign_rounded),
               title: const Text('إرسال رسائل للمشتركين'),
               subtitle: const Text(
                 'قرب الانتهاء، التفعيل، الديون، ورسالة عامة',
               ),
-              trailing: const Icon(Icons.chevron_left),
+              trailing: const Icon(Icons.chevron_left_rounded),
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const AlertsScreen()),
@@ -356,10 +356,10 @@ class _WhatsAppLinkingScreenState extends State<WhatsAppLinkingScreen> {
           const SizedBox(height: 8),
           Card(
             child: ListTile(
-              leading: const Icon(Icons.chat_outlined),
+              leading: const Icon(Icons.chat_rounded),
               title: const Text('قوالب رسائل أخرى'),
               subtitle: const Text('رسالة التمديد واستلام الدين'),
-              trailing: const Icon(Icons.chevron_left),
+              trailing: const Icon(Icons.chevron_left_rounded),
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(

@@ -115,12 +115,12 @@ class _SubscriberPortalInviteActionState
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.send_to_mobile),
+                leading: const Icon(Icons.send_to_mobile_rounded),
                 title: const Text('إرسال دعوة لمشترك نت'),
                 onTap: () => Navigator.pop(context, 'invite'),
               ),
               ListTile(
-                leading: const Icon(Icons.link_off),
+                leading: const Icon(Icons.link_off_rounded),
                 title: const Text('إلغاء ربط مشترك نت'),
                 subtitle: const Text('يتوقف وصول المشترك لاشتراكه في التطبيق'),
                 onTap: () => Navigator.pop(context, 'unlink'),
@@ -247,7 +247,7 @@ class PortalInviteButton extends StatelessWidget {
                     dimension: 24,
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                   )
-                : const Icon(Icons.phone_iphone, color: Colors.white, size: 24),
+                : const Icon(Icons.phone_iphone_rounded, color: Colors.white, size: 24),
             const SizedBox(height: 4),
             const Text(
               'دعوة',
@@ -324,7 +324,7 @@ class _InvitationDialog extends StatelessWidget {
                 Uri.parse('https://wa.me/$number?text=${Uri.encodeComponent(_message)}'),
                 mode: LaunchMode.externalApplication,
               ),
-              icon: const Icon(Icons.send),
+              icon: const Icon(Icons.send_rounded),
               label: const Text('إرسال واتساب'),
             ),
         ],

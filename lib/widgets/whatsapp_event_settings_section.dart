@@ -162,7 +162,7 @@ class _WhatsAppEventSettingsSectionState
         child: Row(
           children: [
             Icon(
-              Icons.notifications_active_outlined,
+              Icons.notifications_active_rounded,
               color: Theme.of(context).colorScheme.primary,
             ),
             const SizedBox(width: 8),
@@ -187,7 +187,7 @@ class _WhatsAppEventSettingsSectionState
             Text(_loadError!, style: const TextStyle(color: Colors.red)),
             TextButton.icon(
               onPressed: _loadPreferences,
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(Icons.refresh_rounded),
               label: const Text('إعادة المحاولة'),
             ),
           ],

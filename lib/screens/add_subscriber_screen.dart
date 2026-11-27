@@ -376,13 +376,13 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
             TextField(
               controller: user,
               textAlign: TextAlign.right,
-              decoration: dec('اليوزر', Icons.person_outline),
+              decoration: dec('اليوزر', Icons.person_rounded),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: name,
               textAlign: TextAlign.right,
-              decoration: dec('اسم المشترك', Icons.badge_outlined),
+              decoration: dec('اسم المشترك', Icons.badge_rounded),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -391,34 +391,34 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
               textAlign: TextAlign.right,
               decoration: dec(
                 'رقم الهاتف المرتبط بواتساب',
-                Icons.phone_outlined,
+                Icons.phone_rounded,
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: address,
               textAlign: TextAlign.right,
-              decoration: dec('العنوان', Icons.location_on_outlined),
+              decoration: dec('العنوان', Icons.location_on_rounded),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: ip,
               textAlign: TextAlign.right,
-              decoration: dec('IP', Icons.language),
+              decoration: dec('IP', Icons.language_rounded),
             ),
             const SizedBox(height: 12),
             AppStore.packages.isEmpty
                 ? TextField(
                     controller: type,
                     textAlign: TextAlign.right,
-                    decoration: dec('نوع الاشتراك', Icons.inventory_2_outlined),
+                    decoration: dec('نوع الاشتراك', Icons.inventory_2_rounded),
                   )
                 : DropdownButtonFormField<String>(
                     initialValue:
                         AppStore.packages.any((p) => p.name == type.text)
                         ? type.text
                         : null,
-                    decoration: dec('اختر الباقة', Icons.inventory_2_outlined),
+                    decoration: dec('اختر الباقة', Icons.inventory_2_rounded),
                     dropdownColor: Theme.of(
                       context,
                     ).colorScheme.surfaceContainer,
@@ -457,7 +457,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                       controller: price,
                       keyboardType: TextInputType.number,
                       textAlign: TextAlign.right,
-                      decoration: dec('مبلغ الاشتراك', Icons.payments_outlined),
+                      decoration: dec('مبلغ الاشتراك', Icons.payments_rounded),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -470,7 +470,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                         widget.subscriber == null
                             ? 'المبلغ المدفوع عند التسجيل'
                             : 'واصل الشهر الحالي',
-                        Icons.price_check_outlined,
+                        Icons.price_check_rounded,
                       ),
                     ),
                   ),
@@ -493,7 +493,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                 textAlign: TextAlign.right,
                 decoration: dec(
                   'تاريخ التسديد',
-                  Icons.event_available_outlined,
+                  Icons.event_available_rounded,
                 ),
               ),
             ],
@@ -512,7 +512,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                 DropdownButtonFormField<String>(
                   key: const ValueKey('sas-account-picker'),
                   initialValue: _sasAccount,
-                  decoration: dec('الساس', Icons.dns_outlined),
+                  decoration: dec('الساس', Icons.dns_rounded),
                   items: [
                     const DropdownMenuItem(
                       value: '',
@@ -532,7 +532,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                 controller: sasPassword,
                 obscureText: true,
                 textAlign: TextAlign.right,
-                decoration: dec('كلمة مرور SAS', Icons.lock_outline),
+                decoration: dec('كلمة مرور SAS', Icons.lock_rounded),
               ),
               const SizedBox(height: 12),
               if (loadingSasLists)
@@ -543,7 +543,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
               else ...[
                 DropdownButtonFormField<int>(
                   initialValue: selectedProfileId,
-                  decoration: dec('اختر باقة SAS', Icons.inventory_2_outlined),
+                  decoration: dec('اختر باقة SAS', Icons.inventory_2_rounded),
                   dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
                   iconEnabledColor: Theme.of(context).colorScheme.primary,
                   style: TextStyle(
@@ -563,7 +563,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
                   initialValue: selectedParentId,
-                  decoration: dec('اختر Parent', Icons.account_tree_outlined),
+                  decoration: dec('اختر Parent', Icons.account_tree_rounded),
                   dropdownColor: Theme.of(context).colorScheme.surfaceContainer,
                   iconEnabledColor: Theme.of(context).colorScheme.primary,
                   style: TextStyle(
@@ -589,7 +589,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                 ),
                 TextButton.icon(
                   onPressed: loadSasLists,
-                  icon: const Icon(Icons.refresh),
+                  icon: const Icon(Icons.refresh_rounded),
                   label: const Text('إعادة المحاولة'),
                 ),
               ],
@@ -608,7 +608,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                 onTap: () => pick(true),
                 decoration: dec(
                   'تاريخ بداية الاشتراك',
-                  Icons.calendar_today_outlined,
+                  Icons.calendar_today_rounded,
                 ),
               ),
               const SizedBox(height: 12),
@@ -616,7 +616,7 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
                 controller: end,
                 readOnly: true,
                 onTap: () => pick(false),
-                decoration: dec('تاريخ انتهاء الاشتراك', Icons.event_outlined),
+                decoration: dec('تاريخ انتهاء الاشتراك', Icons.event_rounded),
               ),
             ],
             const SizedBox(height: 12),
@@ -624,14 +624,14 @@ class _AddSubscriberScreenState extends State<AddSubscriberScreen> {
               controller: notes,
               maxLines: 3,
               textAlign: TextAlign.right,
-              decoration: dec('ملاحظات', Icons.notes),
+              decoration: dec('ملاحظات', Icons.notes_rounded),
             ),
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
               height: 52,
               child: FilledButton.icon(
-                icon: const Icon(Icons.save),
+                icon: const Icon(Icons.save_rounded),
                 label: const Text('حفظ المشترك'),
                 onPressed: () async {
                   if (user.text.trim().isEmpty ||

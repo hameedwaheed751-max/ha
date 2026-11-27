@@ -559,7 +559,7 @@ class _SpeedTestScreenState extends State<SpeedTestScreen> {
           ),
           Container(width: 1, height: 42, color: const Color(0xFF263451)),
           Expanded(
-            child: _networkItem(Icons.dns_outlined, 'خادم القياس', _server),
+            child: _networkItem(Icons.dns_rounded, 'خادم القياس', _server),
           ),
           Container(width: 1, height: 42, color: const Color(0xFF263451)),
           Expanded(

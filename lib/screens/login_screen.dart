@@ -590,7 +590,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 borderRadius: BorderRadius.circular(28),
                               ),
                               child: Icon(
-                                Icons.router_outlined,
+                                Icons.router_rounded,
                                 size: 40,
                                 color: const Color(0xFF2E7D32),
                               ),
@@ -619,7 +619,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 labelText: 'اسم المستخدم',
                                 hintText: 'أدخل اسم المستخدم',
                                 prefixIcon: const Icon(
-                                  Icons.person_outline,
+                                  Icons.person_rounded,
                                   color: Color(0xFF2E7D32),
                                 ),
                                 filled: true,
@@ -659,7 +659,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 labelText: 'كلمة المرور',
                                 hintText: 'أدخل كلمة المرور',
                                 prefixIcon: const Icon(
-                                  Icons.lock_outline,
+                                  Icons.lock_rounded,
                                   color: Color(0xFF2E7D32),
                                 ),
                                 suffixIcon: IconButton(
@@ -668,8 +668,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                   icon: Icon(
                                     _obscurePassword
-                                        ? Icons.visibility_outlined
-                                        : Icons.visibility_off_outlined,
+                                        ? Icons.visibility_rounded
+                                        : Icons.visibility_off_rounded,
                                     color: const Color(0xFF2E7D32),
                                   ),
                                 ),
@@ -804,7 +804,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                             color: Colors.white,
                                           ),
                                         )
-                                      : const Icon(Icons.restart_alt),
+                                      : const Icon(Icons.restart_alt_rounded),
                                   label: Text(
                                     _isRenewActionBusy
                                         ? 'يرجى الانتظار...'
@@ -1166,13 +1166,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     const SizedBox(height: 18),
                     _sectionCard(
                       title: 'المعلومات الشخصية',
-                      icon: Icons.person_outline,
+                      icon: Icons.person_rounded,
                       child: Column(
                         children: [
                           _styledField(
                             controller: _fullNameController,
                             label: 'الاسم الكامل',
-                            icon: Icons.person,
+                            icon: Icons.person_rounded,
                           ),
                           const SizedBox(height: 12),
                           _styledField(
@@ -1185,21 +1185,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           _styledField(
                             controller: _emailController,
                             label: 'البريد الإلكتروني',
-                            icon: Icons.email_outlined,
+                            icon: Icons.email_rounded,
                             keyboardType: TextInputType.emailAddress,
                           ),
                           const SizedBox(height: 12),
                           _styledField(
                             controller: _passwordController,
                             label: 'كلمة المرور',
-                            icon: Icons.lock_outline,
+                            icon: Icons.lock_rounded,
                             obscureText: true,
                           ),
                           const SizedBox(height: 12),
                           _styledField(
                             controller: _confirmPasswordController,
                             label: 'تأكيد كلمة المرور',
-                            icon: Icons.lock_reset_outlined,
+                            icon: Icons.lock_reset_rounded,
                             obscureText: true,
                           ),
                         ],
@@ -1262,7 +1262,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   color: Colors.white,
                                 ),
                               )
-                            : const Icon(Icons.send_outlined),
+                            : const Icon(Icons.send_rounded),
                         label: Text(
                           _isLoading ? 'جاري الإرسال...' : 'إرسال طلب الاشتراك',
                           style: const TextStyle(
@@ -1701,7 +1701,7 @@ class _RenewalRequestStatusScreenState
                                 ? Icons.hourglass_top_rounded
                                 : (isRejected
                                       ? Icons.cancel_rounded
-                                      : Icons.info_outline),
+                                      : Icons.info_rounded),
                             size: 58,
                             color: isPending
                                 ? const Color(0xFF1565C0)
@@ -1785,7 +1785,7 @@ class _RenewalRequestStatusScreenState
                                       color: Colors.white,
                                     ),
                                   )
-                                : const Icon(Icons.restart_alt),
+                                : const Icon(Icons.restart_alt_rounded),
                             label: Text(
                               isPending ? 'بانتظار الموافقة' : 'إرسال طلب جديد',
                             ),
@@ -1958,7 +1958,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                 color: accent.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: Icon(Icons.workspace_premium_outlined, color: accent),
+              child: Icon(Icons.workspace_premium_rounded, color: accent),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -2244,7 +2244,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                                   borderRadius: BorderRadius.circular(15),
                                 ),
                                 child: const Icon(
-                                  Icons.account_balance_wallet_outlined,
+                                  Icons.account_balance_wallet_rounded,
                                   color: Colors.white,
                                   size: 25,
                                 ),
@@ -2290,7 +2290,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                             child: Row(
                               children: [
                                 const Icon(
-                                  Icons.security_outlined,
+                                  Icons.security_rounded,
                                   color: Colors.white,
                                   size: 18,
                                 ),
@@ -2425,7 +2425,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                             child: Row(
                               children: [
                                 const Icon(
-                                  Icons.info_outline,
+                                  Icons.info_rounded,
                                   color: Color(0xFF2E7D32),
                                   size: 18,
                                 ),
@@ -2472,7 +2472,7 @@ class _MasterAccountScreenState extends State<MasterAccountScreen> {
                               labelText: 'رقم التحويل',
                               border: OutlineInputBorder(),
                               prefixIcon: Icon(
-                                Icons.account_balance_wallet_outlined,
+                                Icons.account_balance_wallet_rounded,
                               ),
                             ),
                           ),

@@ -286,7 +286,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         builder: (ctx) => Directionality(
           textDirection: TextDirection.rtl,
           child: AlertDialog(
-            icon: const Icon(Icons.sync, color: Colors.indigo),
+            icon: const Icon(Icons.sync_rounded, color: Colors.indigo),
             title: const Text('اربط ساسك وزامن مشتركيك'),
             content: const Text(
               'لتحصل على كل مزايا التطبيق، اربط حساب الساس وزامن مشتركيك من '
@@ -682,7 +682,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             const SizedBox(height: 16),
                             _profileSectionTitle(
                               'البيانات الشخصية',
-                              Icons.badge_outlined,
+                              Icons.badge_rounded,
                               isDark,
                             ),
                             AnimatedSwitcher(
@@ -742,7 +742,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             const SizedBox(height: 16),
                             _profileSectionTitle(
                               'أمان الحساب',
-                              Icons.security_outlined,
+                              Icons.security_rounded,
                               isDark,
                             ),
                             AnimatedSwitcher(
@@ -1382,7 +1382,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           const SizedBox(height: 2),
           Row(
             children: [
-              Icon(Icons.circle, size: 8, color: statusColor),
+              Icon(Icons.circle_rounded, size: 8, color: statusColor),
               const SizedBox(width: 6),
               Text(
                 statusText,
@@ -1586,7 +1586,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   onTap: () => Navigator.pop(context),
                 ),
                 _drawerTile(
-                  icon: Icons.person_outline,
+                  icon: Icons.person_rounded,
                   title: 'الملف الشخصي',
                   onTap: () {
                     Navigator.pop(context);
@@ -1601,7 +1601,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   ),
                 ExpansionTile(
                   leading: Icon(
-                    Icons.groups,
+                    Icons.groups_rounded,
                     color: Theme.of(context).brightness == Brightness.dark
                         ? const Color(0xFFA5B4FC)
                         : Colors.blueGrey.shade700,
@@ -1697,7 +1697,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   ],
                 ),
                 _drawerTile(
-                  icon: Icons.calculate_outlined,
+                  icon: Icons.calculate_rounded,
                   title: 'التقارير الحسابية',
                   onTap: () {
                     Navigator.pop(context);
@@ -1786,7 +1786,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   ],
                 ),
                 _drawerTile(
-                  icon: Icons.cloud_sync_outlined,
+                  icon: Icons.cloud_sync_rounded,
                   title: 'ربط SAS Radius',
                   onTap: () {
                     Navigator.pop(context);
@@ -1800,7 +1800,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 if (!widget.isAgentMode)
                   _drawerTile(
-                    icon: Icons.assignment_turned_in_outlined,
+                    icon: Icons.assignment_turned_in_rounded,
                     title: 'طلبات الاشتراك',
                     onTap: () {
                       Navigator.pop(context);
@@ -1817,7 +1817,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ValueListenableBuilder<int>(
                   valueListenable: SubscriberPortalSync.instance.openRequests,
                   builder: (context, open, _) => _drawerTile(
-                    icon: Icons.phone_iphone,
+                    icon: Icons.phone_iphone_rounded,
                     title: 'طلبات مشترك نت',
                     trailing: open > 0 ? Badge(label: Text('$open')) : null,
                     onTap: () {
@@ -1834,7 +1834,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 if (!widget.isAgentMode)
                   _drawerTile(
-                    icon: Icons.sell_outlined,
+                    icon: Icons.sell_rounded,
                     title: 'الأسعار وبيانات الدفع',
                     onTap: () {
                       Navigator.pop(context);
@@ -1847,7 +1847,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     },
                   ),
                 _drawerTile(
-                  icon: Icons.speed_outlined,
+                  icon: Icons.speed_rounded,
                   title: 'بيانات SAS المباشرة',
                   onTap: () async {
                     Navigator.pop(context);
@@ -1961,7 +1961,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   },
                 ),
                 _drawerTile(
-                  icon: Icons.insights_outlined,
+                  icon: Icons.insights_rounded,
                   title: 'تقارير سريعة',
                   onTap: () {
                     Navigator.pop(context);
@@ -1983,7 +1983,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   },
                 ),
                 _drawerTile(
-                  icon: Icons.info_outline,
+                  icon: Icons.info_rounded,
                   title: 'حول التطبيق',
                   onTap: () async {
                     Navigator.pop(context);
@@ -2000,7 +2000,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                           textDirection: TextDirection.rtl,
                           child: Row(
                             children: [
-                              Icon(Icons.call, size: 18),
+                              Icon(Icons.call_rounded, size: 18),
                               SizedBox(width: 8),
                               Expanded(
                                 child: SelectableText(
@@ -2015,7 +2015,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   },
                 ),
                 _drawerTile(
-                  icon: Icons.logout,
+                  icon: Icons.logout_rounded,
                   title: 'تسجيل الخروج',
                   onTap: () async {
                     await AgentPush.instance.stop();
@@ -2870,7 +2870,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Row(
         children: [
           Icon(
-            enabled ? Icons.check_circle_rounded : Icons.remove_circle_outline,
+            enabled ? Icons.check_circle_rounded : Icons.remove_circle_rounded,
             color: color,
             size: 20,
           ),
@@ -2911,7 +2911,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         Row(
           children: [
             Expanded(
-              child: _sectionTitle('آخر المشتركين', Icons.group_outlined),
+              child: _sectionTitle('آخر المشتركين', Icons.group_rounded),
             ),
             TextButton.icon(
               onPressed: () => _pushDashboard(const SubscribersScreen()),
@@ -3015,7 +3015,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                         subscriber.ip.trim().isEmpty ? '—' : subscriber.ip,
                       ),
                       _subscriberMeta(
-                        Icons.event_outlined,
+                        Icons.event_rounded,
                         _dashboardDateText(subscriber.endDate),
                       ),
                     ],
@@ -3212,7 +3212,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                           setLocal(() {});
                                           if (mounted) setState(() {});
                                         },
-                                  icon: const Icon(Icons.redeem, size: 18),
+                                  icon: const Icon(Icons.redeem_rounded, size: 18),
                                   label: const Text('تمديد يوم'),
                                 ),
                               ),
@@ -3443,7 +3443,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                   ),
                   title: const Text('تاريخ التفعيل'),
                   subtitle: Text(_date(activationDate)),
-                  trailing: const Icon(Icons.event),
+                  trailing: const Icon(Icons.event_rounded),
                   onTap: () async {
                     final d = await showDatePicker(
                       context: ctx,
@@ -3464,7 +3464,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                   subtitle: Text(
                     paymentDate.isEmpty ? 'غير مسدد' : paymentDate,
                   ),
-                  trailing: const Icon(Icons.event_available),
+                  trailing: const Icon(Icons.event_available_rounded),
                 ),
                 const SizedBox(height: 12),
                 FilledButton.icon(
@@ -3871,7 +3871,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                           '${_date(d)}  ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
                       return ListTile(
                         leading: const CircleAvatar(
-                          child: Icon(Icons.payments_outlined),
+                          child: Icon(Icons.payments_rounded),
                         ),
                         title: Text(
                           moneyText(p.amount),
@@ -4324,12 +4324,12 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
             if (_isAdmin) ...[
               IconButton(
                 tooltip: 'استيراد Excel',
-                icon: const Icon(Icons.upload_file),
+                icon: const Icon(Icons.upload_file_rounded),
                 onPressed: () => _importDebtExcel(sortedDebts),
               ),
               IconButton(
                 tooltip: 'تصدير Excel',
-                icon: const Icon(Icons.download),
+                icon: const Icon(Icons.download_rounded),
                 onPressed: () => _exportDebtExcel(sortedDebts),
               ),
             ],
@@ -4414,7 +4414,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                   onChanged: (v) => setState(() => _debtQuery = v),
                   decoration: InputDecoration(
                     hintText: 'بحث بالاسم أو اليوزر أو الهاتف أو الباقة...',
-                    prefixIcon: Icon(Icons.search, color: green),
+                    prefixIcon: Icon(Icons.search_rounded, color: green),
                     suffixIcon: _debtQuery.isEmpty
                         ? null
                         : IconButton(
@@ -4422,7 +4422,7 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
                               _debtSearchC.clear();
                               setState(() => _debtQuery = '');
                             },
-                            icon: Icon(Icons.close, color: green),
+                            icon: Icon(Icons.close_rounded, color: green),
                           ),
                     filled: true,
                     fillColor: Colors.white,
@@ -4586,23 +4586,23 @@ class _DebtsTableScreenState extends State<DebtsTableScreen> {
               children: [
                 FilledButton.tonalIcon(
                   onPressed: () => _partialPayment(subscriber),
-                  icon: const Icon(Icons.payments_outlined, size: 18),
+                  icon: const Icon(Icons.payments_rounded, size: 18),
                   label: const Text('تسديد'),
                 ),
                 FilledButton.tonalIcon(
                   onPressed: () => _addManualEntry(subscriber),
-                  icon: const Icon(Icons.add, size: 18),
+                  icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('إضافة'),
                 ),
                 OutlinedButton.icon(
                   onPressed: () => _sendReminder(subscriber),
-                  icon: const Icon(Icons.notifications_active, size: 18),
+                  icon: const Icon(Icons.notifications_active_rounded, size: 18),
                   label: const Text('تذكير'),
                 ),
                 IconButton(
                   tooltip: 'وصل',
                   onPressed: () => _openReceipt(subscriber),
-                  icon: const Icon(Icons.print, color: Colors.blue),
+                  icon: const Icon(Icons.print_rounded, color: Colors.blue),
                 ),
                 DebtOperationsMenu(
                   subscriber: subscriber,

@@ -319,8 +319,8 @@ class _FtthActivationDialogState extends State<FtthActivationDialog> {
                             enabled: ready && quote.canUse(method),
                             leading: Icon(
                               _method == method
-                                  ? Icons.radio_button_checked
-                                  : Icons.radio_button_unchecked,
+                                  ? Icons.radio_button_checked_rounded
+                                  : Icons.radio_button_unchecked_rounded,
                             ),
                             title: Text(method.label),
                             subtitle: Text(_subtitle(quote, method)),
@@ -339,7 +339,7 @@ class _FtthActivationDialogState extends State<FtthActivationDialog> {
                                     strokeWidth: 2,
                                   ),
                                 )
-                              : const Icon(Icons.credit_card),
+                              : const Icon(Icons.credit_card_rounded),
                           label: const Text('تعبئة رصيد المشترك بكارت'),
                         ),
                         if (_topUpMessage != null)

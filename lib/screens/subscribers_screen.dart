@@ -748,7 +748,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const ListTile(
-                  leading: Icon(Icons.chat, color: Colors.green),
+                  leading: Icon(Icons.chat_rounded, color: Colors.green),
                   title: Text(
                     'رسائل واتساب',
                     style: TextStyle(fontWeight: FontWeight.bold),
@@ -759,7 +759,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 ...titles.entries.map((entry) {
                   final template = AppStore.messageTemplates[entry.key] ?? '';
                   return ListTile(
-                    leading: const Icon(Icons.send_outlined),
+                    leading: const Icon(Icons.send_rounded),
                     title: Text(entry.value),
                     onTap: () {
                       Navigator.pop(ctx);
@@ -1734,7 +1734,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                   child: Row(
                     children: [
-                      const CircleAvatar(child: Icon(Icons.person)),
+                      const CircleAvatar(child: Icon(Icons.person_rounded)),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
@@ -1759,7 +1759,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 ),
                 const Divider(),
                 _op(
-                  Icons.badge_outlined,
+                  Icons.badge_rounded,
                   Colors.indigo,
                   'تعديل بيانات المشترك',
                   () async {
@@ -1774,16 +1774,16 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   },
                 ),
                 if (s.inSeveralSas)
-                  _op(Icons.alt_route, Colors.indigo, 'الساس المرجع', () {
+                  _op(Icons.alt_route_rounded, Colors.indigo, 'الساس المرجع', () {
                     Navigator.pop(ctx);
                     _pickReferenceSas(s);
                   }),
-                _op(Icons.person_add, Colors.teal, 'إضافة مشترك جديد', () {
+                _op(Icons.person_add_rounded, Colors.teal, 'إضافة مشترك جديد', () {
                   Navigator.pop(ctx);
                   add();
                 }),
                 _op(
-                  Icons.check_circle,
+                  Icons.check_circle_rounded,
                   Colors.green,
                   (s.source == 'ftth' ||
                               s.source == 'earthlink' ||
@@ -1804,35 +1804,35 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   },
                 ),
                 if (s.source == 'earthlink')
-                  _op(Icons.swap_horiz, Colors.purple, 'تغيير الباقة', () {
+                  _op(Icons.swap_horiz_rounded, Colors.purple, 'تغيير الباقة', () {
                     // تغيير الباقة في إيرثلنك عبر chnageaccounttype (نداء مستقل).
                     _changeEarthlinkPlan(s, modalContext: ctx);
                   }),
                 if (s.source == 'fiberx')
-                  _op(Icons.swap_horiz, Colors.purple, 'تغيير الباقة', () {
+                  _op(Icons.swap_horiz_rounded, Colors.purple, 'تغيير الباقة', () {
                     // تغيير الباقة في فايبر اكس = التفعيل بباقة أخرى.
                     _openFiberXActivation(s, modalContext: ctx);
                   }),
                 // تمديد إيرثلنك عبر مساره الخاص (`/user/extend`) لا RADIUS.
                 if (s.source == 'earthlink')
-                  _op(Icons.calendar_month, Colors.orange, 'تمديد', () {
+                  _op(Icons.calendar_month_rounded, Colors.orange, 'تمديد', () {
                     _extendEarthlink(s, modalContext: ctx);
                   }),
                 // تمديد RADIUS فقط؛ فايبر اكس يغطّيه «التجديد» (تفعيل بباقة).
                 if (isSas && s.source != 'earthlink' && s.source != 'fiberx')
-                  _op(Icons.calendar_month, Colors.orange, 'تمديد', () {
+                  _op(Icons.calendar_month_rounded, Colors.orange, 'تمديد', () {
                     Navigator.pop(ctx);
                     _extend(s);
                   }),
                 // «تغيير الباقة» الخاص بـRADIUS فقط؛ إيرثلنك وفايبر اكس لهما
                 // خيارهما أعلاه (تفادي ظهور خيارين لنفس المشترك).
                 if (isSas && s.source != 'earthlink' && s.source != 'fiberx')
-                  _op(Icons.swap_horiz, Colors.purple, 'تغيير الباقة', () {
+                  _op(Icons.swap_horiz_rounded, Colors.purple, 'تغيير الباقة', () {
                     Navigator.pop(ctx);
                     _changePackage(s);
                   }),
                 if (isSas)
-                  _op(Icons.block, Colors.red, 'تعطيل', () async {
+                  _op(Icons.block_rounded, Colors.red, 'تعطيل', () async {
                     // لا نغيّر الحالة محلياً إلا بعد نجاح التعطيل الحقيقي في SAS.
                     final rawId = s.sasId.trim().isNotEmpty
                         ? s.sasId.trim()
@@ -1918,7 +1918,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     }
                   }),
                 if (isSas)
-                  _op(Icons.lock_open, Colors.green, 'إلغاء التعطيل', () async {
+                  _op(Icons.lock_open_rounded, Colors.green, 'إلغاء التعطيل', () async {
                     // لا نغيّر الحالة محلياً إلا بعد نجاح إلغاء التعطيل الحقيقي في SAS.
                     final rawId = s.sasId.trim().isNotEmpty
                         ? s.sasId.trim()
@@ -2006,7 +2006,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     }
                   }),
                 _op(
-                  Icons.account_balance_wallet,
+                  Icons.account_balance_wallet_rounded,
                   Colors.brown,
                   'الديون',
                   () async {
@@ -2014,15 +2014,15 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     await _debt(s);
                   },
                 ),
-                _op(Icons.phone, Colors.blue, 'اتصال مباشر', () {
+                _op(Icons.phone_rounded, Colors.blue, 'اتصال مباشر', () {
                   Navigator.pop(ctx);
                   phoneCall(s);
                 }),
-                _op(Icons.chat, const Color(0xFF2E7D32), 'رسائل واتساب', () {
+                _op(Icons.chat_rounded, const Color(0xFF2E7D32), 'رسائل واتساب', () {
                   Navigator.pop(ctx);
                   messageTemplates(s);
                 }),
-                _op(Icons.receipt_long, Colors.blue, 'طباعة الوصل', () {
+                _op(Icons.receipt_long_rounded, Colors.blue, 'طباعة الوصل', () {
                   Navigator.pop(ctx);
                   Navigator.push(
                     context,
@@ -2031,7 +2031,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                     ),
                   );
                 }),
-                _op(Icons.delete_outline, Colors.red, 'حذف المشترك', () {
+                _op(Icons.delete_rounded, Colors.red, 'حذف المشترك', () {
                   Navigator.pop(ctx);
                   _delete(s);
                 }),
@@ -2143,8 +2143,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 ListTile(
                   leading: Icon(
                     account == s.sasAccount
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_off,
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_off_rounded,
                     color: Colors.indigo,
                   ),
                   title: Text(SasSettings.labelFor(account)),
@@ -2263,7 +2263,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                             });
                             loadProfiles();
                           },
-                          icon: const Icon(Icons.refresh),
+                          icon: const Icon(Icons.refresh_rounded),
                           label: const Text('إعادة المحاولة'),
                         ),
                       ],
@@ -2275,7 +2275,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                           initialValue: selectedProfileId,
                           decoration: _greenDropdownDecoration(
                             'اختر الباقة',
-                            Icons.inventory_2_outlined,
+                            Icons.inventory_2_rounded,
                           ),
                           dropdownColor: Theme.of(
                             context,
@@ -2304,7 +2304,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                           initialValue: selectedMethod,
                           decoration: _greenDropdownDecoration(
                             'نوع التمديد',
-                            Icons.autorenew,
+                            Icons.autorenew_rounded,
                           ),
                           dropdownColor: Theme.of(
                             context,
@@ -2495,7 +2495,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 itemBuilder: (_, i) {
                   final p = usable[i];
                   return ListTile(
-                    leading: const Icon(Icons.speed_outlined),
+                    leading: const Icon(Icons.speed_rounded),
                     title: Text(nameOf(p)),
                     subtitle: Text('ID: ${idOf(p)}'),
                     onTap: () => Navigator.pop(ctx, p),
@@ -3045,7 +3045,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
         child: AlertDialog(
           title: const Row(
             children: [
-              Icon(Icons.view_column_outlined),
+              Icon(Icons.view_column_rounded),
               SizedBox(width: 8),
               Text('إظهار/إخفاء الأعمدة'),
             ],
@@ -3180,7 +3180,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
           child: AlertDialog(
             title: const Row(
               children: [
-                Icon(Icons.filter_alt_outlined),
+                Icon(Icons.filter_alt_rounded),
                 SizedBox(width: 8),
                 Text('البحث المتقدم'),
               ],
@@ -3195,7 +3195,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       initialValue: status,
                       decoration: _greenDropdownDecoration(
                         'الحالة',
-                        Icons.info_outline,
+                        Icons.info_rounded,
                       ),
                       dropdownColor: Theme.of(
                         context,
@@ -3227,7 +3227,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       initialValue: connection,
                       decoration: _greenDropdownDecoration(
                         'الاتصال',
-                        Icons.wifi_outlined,
+                        Icons.wifi_rounded,
                       ),
                       dropdownColor: Theme.of(
                         context,
@@ -3250,7 +3250,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       initialValue: package,
                       decoration: _greenDropdownDecoration(
                         'الباقة',
-                        Icons.inventory_2_outlined,
+                        Icons.inventory_2_rounded,
                       ),
                       dropdownColor: Theme.of(
                         context,
@@ -3272,7 +3272,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       initialValue: parent,
                       decoration: _greenDropdownDecoration(
                         'تابع إلى',
-                        Icons.person_outline,
+                        Icons.person_rounded,
                       ),
                       dropdownColor: Theme.of(
                         context,
@@ -3304,7 +3304,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       decoration: InputDecoration(
                         labelText: 'MAC Address',
                         border: const OutlineInputBorder(),
-                        prefixIcon: const Icon(Icons.router_outlined),
+                        prefixIcon: const Icon(Icons.router_rounded),
                       ),
                     ),
                   ],
@@ -3342,7 +3342,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                   });
                   Navigator.pop(ctx);
                 },
-                icon: const Icon(Icons.search),
+                icon: const Icon(Icons.search_rounded),
                 label: const Text('بحث'),
               ),
             ],
@@ -3602,7 +3602,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 tooltip: 'تصفية متقدمة',
                 visualDensity: VisualDensity.compact,
                 onPressed: _showAdvancedSearch,
-                icon: const Icon(Icons.filter_alt_outlined, size: 20),
+                icon: const Icon(Icons.filter_alt_rounded, size: 20),
               ),
             ],
           ),
@@ -3671,14 +3671,14 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: selected == null ? null : operations,
-                    icon: const Icon(Icons.settings_outlined, size: 18),
+                    icon: const Icon(Icons.settings_rounded, size: 18),
                     label: const Text('عمليات سريعة'),
                   ),
                 ),
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
                   onPressed: _showColumnSelector,
-                  icon: const Icon(Icons.view_column_outlined, size: 18),
+                  icon: const Icon(Icons.view_column_rounded, size: 18),
                   label: const Text('المزيد'),
                 ),
               ],
@@ -3917,7 +3917,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.sync),
+                  : const Icon(Icons.sync_rounded),
             ),
           ],
         ),
@@ -3937,7 +3937,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(
-                          Icons.people_outline,
+                          Icons.people_rounded,
                           size: 64,
                           color: Colors.grey.shade300,
                         ),
@@ -4043,7 +4043,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.center,
                                   textDirection: TextDirection.rtl,
                                   children: [
-                                    const Icon(Icons.info_outline, size: 18),
+                                    const Icon(Icons.info_rounded, size: 18),
                                     const SizedBox(width: 8),
                                     const Text(
                                       'الحالة',
@@ -4054,8 +4054,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                     if (_sortBy == 'status')
                                       Icon(
                                         _sortAsc
-                                            ? Icons.arrow_upward
-                                            : Icons.arrow_downward,
+                                            ? Icons.arrow_upward_rounded
+                                            : Icons.arrow_downward_rounded,
                                         size: 14,
                                       ),
                                   ],
@@ -4069,7 +4069,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.center,
                                   textDirection: TextDirection.rtl,
                                   children: [
-                                    const Icon(Icons.person_outline, size: 18),
+                                    const Icon(Icons.person_rounded, size: 18),
                                     const SizedBox(width: 6),
                                     const Text(
                                       'اسم المشترك',
@@ -4080,8 +4080,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                     if (_sortBy == 'name')
                                       Icon(
                                         _sortAsc
-                                            ? Icons.arrow_upward
-                                            : Icons.arrow_downward,
+                                            ? Icons.arrow_upward_rounded
+                                            : Icons.arrow_downward_rounded,
                                         size: 14,
                                       ),
                                   ],
@@ -4096,7 +4096,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                   textDirection: TextDirection.rtl,
                                   children: [
                                     const Icon(
-                                      Icons.account_circle_outlined,
+                                      Icons.account_circle_rounded,
                                       size: 18,
                                     ),
                                     const SizedBox(width: 8),
@@ -4109,8 +4109,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                     if (_sortBy == 'user')
                                       Icon(
                                         _sortAsc
-                                            ? Icons.arrow_upward
-                                            : Icons.arrow_downward,
+                                            ? Icons.arrow_upward_rounded
+                                            : Icons.arrow_downward_rounded,
                                         size: 14,
                                       ),
                                   ],
@@ -4125,7 +4125,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                   textDirection: TextDirection.rtl,
                                   children: [
                                     const Icon(
-                                      Icons.inventory_2_outlined,
+                                      Icons.inventory_2_rounded,
                                       size: 18,
                                     ),
                                     const SizedBox(width: 8),
@@ -4138,8 +4138,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                     if (_sortBy == 'package')
                                       Icon(
                                         _sortAsc
-                                            ? Icons.arrow_upward
-                                            : Icons.arrow_downward,
+                                            ? Icons.arrow_upward_rounded
+                                            : Icons.arrow_downward_rounded,
                                         size: 14,
                                       ),
                                   ],
@@ -4153,7 +4153,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.center,
                                   textDirection: TextDirection.rtl,
                                   children: [
-                                    const Icon(Icons.event_outlined, size: 18),
+                                    const Icon(Icons.event_rounded, size: 18),
                                     const SizedBox(width: 8),
                                     const Text(
                                       'تاريخ الانتهاء',
@@ -4164,8 +4164,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                     if (_sortBy == 'date')
                                       Icon(
                                         _sortAsc
-                                            ? Icons.arrow_upward
-                                            : Icons.arrow_downward,
+                                            ? Icons.arrow_upward_rounded
+                                            : Icons.arrow_downward_rounded,
                                         size: 14,
                                       ),
                                   ],
@@ -4181,7 +4181,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                   textDirection: TextDirection.rtl,
                                   children: [
                                     const Icon(
-                                      Icons.account_balance_wallet_outlined,
+                                      Icons.account_balance_wallet_rounded,
                                       size: 18,
                                     ),
                                     const SizedBox(width: 8),
@@ -4194,8 +4194,8 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                     if (_sortBy == 'debt')
                                       Icon(
                                         _sortAsc
-                                            ? Icons.arrow_upward
-                                            : Icons.arrow_downward,
+                                            ? Icons.arrow_upward_rounded
+                                            : Icons.arrow_downward_rounded,
                                         size: 14,
                                       ),
                                   ],
@@ -4209,7 +4209,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.center,
                                   textDirection: TextDirection.rtl,
                                   children: [
-                                    const Icon(Icons.language, size: 18),
+                                    const Icon(Icons.language_rounded, size: 18),
                                     const SizedBox(width: 8),
                                     const Text(
                                       'IP',
@@ -4227,7 +4227,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                                   textDirection: TextDirection.rtl,
                                   children: [
                                     const Icon(
-                                      Icons.schedule_outlined,
+                                      Icons.schedule_rounded,
                                       size: 18,
                                     ),
                                     const SizedBox(width: 8),
@@ -4693,7 +4693,7 @@ class _SubscribersDataSource extends DataTableSource {
 
   static IconData _statusIcon(Subscriber s) {
     if (s.disabled) return Icons.pause_circle_outline_rounded;
-    if (s.expired) return Icons.event_busy_outlined;
+    if (s.expired) return Icons.event_busy_rounded;
     if (s.isOnline) return Icons.wifi_rounded;
     if (s.isActive) return Icons.check_circle_outline_rounded;
     return Icons.radio_button_unchecked_rounded;
@@ -4821,7 +4821,7 @@ class _SubscribersDataSource extends DataTableSource {
                 children: [
                   Icon(
                     s.remaining > 0.0001
-                        ? Icons.payments_outlined
+                        ? Icons.payments_rounded
                         : Icons.check_circle_outline_rounded,
                     size: 16,
                     color: s.remaining > 0.0001

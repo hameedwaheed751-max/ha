@@ -265,7 +265,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.table_chart_outlined),
+                leading: const Icon(Icons.table_chart_rounded),
                 title: const Text('تصدير CSV'),
                 subtitle: const Text('ملف جدول يحتوي على جميع المشتركين'),
                 onTap: () {
@@ -274,7 +274,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.table_view_outlined),
+                leading: const Icon(Icons.table_view_rounded),
                 title: const Text('تصدير Excel'),
                 subtitle: const Text('ملف تنسيق جدول مناسب لبرنامج Excel'),
                 onTap: () {
@@ -452,7 +452,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                       final log = _logs[i];
                       return ListTile(
                         leading: Icon(
-                          log.ok ? Icons.check_circle : Icons.error_outline,
+                          log.ok ? Icons.check_circle_rounded : Icons.error_rounded,
                           color: log.ok ? Colors.green : Colors.red,
                         ),
                         title: Text(
@@ -530,7 +530,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
         ),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text('$subtitle • $count مشترك'),
-        trailing: const Icon(Icons.chevron_left),
+        trailing: const Icon(Icons.chevron_left_rounded),
         onTap: _sendingAutomatic ? null : () => _composeCampaign(type, title),
       ),
     );
@@ -550,18 +550,18 @@ class _AlertsScreenState extends State<AlertsScreen> {
                 onPressed: _stopRequested
                     ? null
                     : () => setState(() => _stopRequested = true),
-                icon: const Icon(Icons.stop_circle_outlined),
+                icon: const Icon(Icons.stop_circle_rounded),
                 label: Text('إيقاف $_sendProgress/$_sendTotal'),
               ),
             IconButton(
               tooltip: 'سجل الإرسال',
               onPressed: _showLogs,
-              icon: const Icon(Icons.history_outlined),
+              icon: const Icon(Icons.history_rounded),
             ),
             IconButton(
               tooltip: 'التصدير والإشعارات',
               onPressed: _showExportMenu,
-              icon: const Icon(Icons.download_outlined),
+              icon: const Icon(Icons.download_rounded),
             ),
           ],
         ),
@@ -573,7 +573,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                 padding: EdgeInsets.all(14),
                 child: Row(
                   children: [
-                    Icon(Icons.campaign, size: 32),
+                    Icon(Icons.campaign_rounded, size: 32),
                     SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -586,28 +586,28 @@ class _AlertsScreenState extends State<AlertsScreen> {
             ),
             const SizedBox(height: 8),
             _campaignCard(
-              icon: Icons.notifications_active,
+              icon: Icons.notifications_active_rounded,
               color: Colors.deepOrange,
               title: 'ينتهي اشتراكهم خلال 3 أيام',
               subtitle: 'تنبيه للمشتركين قبل انتهاء الاشتراك',
               type: 'threeDays',
             ),
             _campaignCard(
-              icon: Icons.check_circle_outline,
+              icon: Icons.check_circle_rounded,
               color: Colors.green,
               title: 'رسائل التفعيل وتاريخ الانتهاء',
               subtitle: 'رسالة التفعيل والباقة وتاريخ انتهاء الاشتراك',
               type: 'activated',
             ),
             _campaignCard(
-              icon: Icons.money_off,
+              icon: Icons.money_off_rounded,
               color: Colors.red,
               title: 'رسائل المديونين',
               subtitle: 'رسالة للمشتركين الذين لديهم مبلغ متبقي',
               type: 'debt',
             ),
             _campaignCard(
-              icon: Icons.groups,
+              icon: Icons.groups_rounded,
               color: Colors.blue,
               title: 'رسالة عامة',
               subtitle: 'إعلان أو تنبيه عام لكل المشتركين',

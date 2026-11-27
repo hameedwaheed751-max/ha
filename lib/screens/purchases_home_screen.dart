@@ -235,7 +235,7 @@ class _PurchasesHomeScreenState extends State<PurchasesHomeScreen> {
                 child: TextField(
                   key: const Key('devices-search'),
                   decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
+                    prefixIcon: Icon(Icons.search_rounded),
                     hintText: 'ابحث عن جهاز',
                     border: OutlineInputBorder(),
                     isDense: true,

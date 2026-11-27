@@ -146,7 +146,7 @@ class _EarthlinkRefillDialogState extends State<EarthlinkRefillDialog> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(
-          ok ? Icons.check_circle : Icons.error,
+          ok ? Icons.check_circle_rounded : Icons.error_rounded,
           color: ok ? Colors.green : Colors.red,
           size: 48,
         ),
@@ -170,12 +170,12 @@ class _EarthlinkRefillDialogState extends State<EarthlinkRefillDialog> {
               ButtonSegment(
                 value: _Mode.card,
                 label: Text('بطاقة'),
-                icon: Icon(Icons.credit_card),
+                icon: Icon(Icons.credit_card_rounded),
               ),
               ButtonSegment(
                 value: _Mode.balance,
                 label: Text('رصيد'),
-                icon: Icon(Icons.account_balance_wallet),
+                icon: Icon(Icons.account_balance_wallet_rounded),
               ),
             ],
             selected: {_mode},

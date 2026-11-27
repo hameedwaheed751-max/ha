@@ -177,7 +177,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
             if (!package.fromSas)
               IconButton(
                 tooltip: 'حذف',
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                icon: const Icon(Icons.delete_rounded, color: Colors.red),
                 onPressed: () => _delete(package),
               )
             else
@@ -219,14 +219,14 @@ class _PackagesScreenState extends State<PackagesScreen> {
                         height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.sync),
+                    : const Icon(Icons.sync_rounded),
               ),
             ],
           ),
           floatingActionButton: _dirty
               ? FloatingActionButton.extended(
                   onPressed: _saving ? null : _save,
-                  icon: const Icon(Icons.save),
+                  icon: const Icon(Icons.save_rounded),
                   label: const Text('حفظ الأسعار'),
                 )
               : null,

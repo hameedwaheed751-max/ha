@@ -331,7 +331,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
           builder: (context) => Directionality(
             textDirection: TextDirection.rtl,
             child: AlertDialog(
-              icon: const Icon(Icons.workspace_premium_outlined),
+              icon: const Icon(Icons.workspace_premium_rounded),
               title: const Text('تحتاج إلى خطة مدفوعة'),
               content: const Text(SasSettingsScreen.paidPlanMessage),
               actions: [
@@ -527,7 +527,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
           automaticallyImplyLeading: false,
           leading: IconButton(
             tooltip: 'رجوع',
-            icon: const Icon(Icons.arrow_back),
+            icon: const Icon(Icons.arrow_back_rounded),
             onPressed: () => Navigator.of(context).maybePop(),
           ),
         ),
@@ -563,7 +563,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                                         strokeWidth: 2,
                                       ),
                                     )
-                                  : const Icon(Icons.sync),
+                                  : const Icon(Icons.sync_rounded),
                               label: const Text('مزامنة الكل'),
                             ),
                         ],
@@ -582,7 +582,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                             child: Column(
                               children: [
                                 Icon(
-                                  Icons.dns_outlined,
+                                  Icons.dns_rounded,
                                   size: 40,
                                   color: colors.primary,
                                 ),
@@ -626,7 +626,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                               ? 'المشروع الوطني — ${ftth.displayName}'
                               : 'المشروع الوطني',
                           host: 'admin.ftth.iq',
-                          icon: Icons.account_tree_outlined,
+                          icon: Icons.account_tree_rounded,
                           count: _countInFtth(ftth),
                           busy: _busyId == '$_ftthBusyId${ftth.accountId}',
                           enabled: !busy,
@@ -642,7 +642,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                           padding: const EdgeInsets.only(top: 4, bottom: 4),
                           child: OutlinedButton.icon(
                             onPressed: busy ? null : _addFtthAccount,
-                            icon: const Icon(Icons.add, size: 18),
+                            icon: const Icon(Icons.add_rounded, size: 18),
                             label: const Text('إضافة حساب FTTH آخر'),
                           ),
                         ),
@@ -650,7 +650,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                         _ProviderCard(
                           title: 'إيرثلنك',
                           host: 'admin.earthlink.iq',
-                          icon: Icons.router_outlined,
+                          icon: Icons.router_rounded,
                           count: AppStore.subscribers
                               .where((s) => s.source == 'earthlink')
                               .length,
@@ -672,7 +672,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                         _ProviderCard(
                           title: 'فايبر اكس',
                           host: 'agentportal.fiberx-systems.net',
-                          icon: Icons.wifi_tethering,
+                          icon: Icons.wifi_tethering_rounded,
                           count: AppStore.subscribers
                               .where((s) => s.source == 'fiberx')
                               .length,
@@ -695,7 +695,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                         height: 50,
                         child: FilledButton.icon(
                           onPressed: busy ? null : _add,
-                          icon: const Icon(Icons.add_link),
+                          icon: const Icon(Icons.add_link_rounded),
                           label: Text(
                             accounts.isEmpty ? 'ربط ساس' : 'إضافة ساس آخر',
                           ),
@@ -729,7 +729,7 @@ class _SasSettingsScreenState extends State<SasSettingsScreen> {
                                   foregroundColor: colors.error,
                                 ),
                                 onPressed: busy ? null : _deleteAll,
-                                icon: const Icon(Icons.delete_forever),
+                                icon: const Icon(Icons.delete_forever_rounded),
                                 label: const Text('حذف جميع المشتركين'),
                               ),
                             ],
@@ -761,7 +761,7 @@ class _AgentHeader extends StatelessWidget {
           children: [
             CircleAvatar(
               backgroundColor: colors.primary,
-              child: const Icon(Icons.person, color: Colors.white),
+              child: const Icon(Icons.person_rounded, color: Colors.white),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -900,7 +900,7 @@ class SasAccountCard extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
-                              Icons.lock_outline,
+                              Icons.lock_rounded,
                               size: 16,
                               color: colors.onErrorContainer,
                             ),
@@ -949,28 +949,28 @@ class SasAccountCard extends StatelessWidget {
                   PopupMenuItem(
                     value: SasCardAction.sync,
                     child: ListTile(
-                      leading: Icon(Icons.sync),
+                      leading: Icon(Icons.sync_rounded),
                       title: Text('مزامنة'),
                     ),
                   ),
                   PopupMenuItem(
                     value: SasCardAction.edit,
                     child: ListTile(
-                      leading: Icon(Icons.edit_outlined),
+                      leading: Icon(Icons.edit_rounded),
                       title: Text('تعديل'),
                     ),
                   ),
                   PopupMenuItem(
                     value: SasCardAction.deleteSubscribers,
                     child: ListTile(
-                      leading: Icon(Icons.person_remove_outlined),
+                      leading: Icon(Icons.person_remove_rounded),
                       title: Text('حذف مشتركي هذا الساس'),
                     ),
                   ),
                   PopupMenuItem(
                     value: SasCardAction.unlink,
                     child: ListTile(
-                      leading: Icon(Icons.link_off, color: Colors.red),
+                      leading: Icon(Icons.link_off_rounded, color: Colors.red),
                       title: Text(
                         'حذف الساس',
                         style: TextStyle(color: Colors.red),
@@ -1455,37 +1455,37 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
                 const SizedBox(height: 10),
                 TextField(
                   controller: _company,
-                  decoration: _dec('اسم الشركة', Icons.business_outlined),
+                  decoration: _dec('اسم الشركة', Icons.business_rounded),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: _label,
                   decoration: _dec(
                     'اسم الساس (مثلاً: ساس الكرادة)',
-                    Icons.label_outline,
+                    Icons.label_rounded,
                   ),
                 ),
                 const SizedBox(height: 10),
                 TextField(
                   controller: _server,
                   keyboardType: TextInputType.url,
-                  decoration: _dec('رابط SAS', Icons.dns_outlined),
+                  decoration: _dec('رابط SAS', Icons.dns_rounded),
                 ),
                 const SizedBox(height: 10),
               ],
               TextField(
                 controller: _user,
-                decoration: _dec('اسم المستخدم', Icons.person_outline),
+                decoration: _dec('اسم المستخدم', Icons.person_rounded),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: _pass,
                 obscureText: _hide,
-                decoration: _dec('كلمة المرور', Icons.lock_outline).copyWith(
+                decoration: _dec('كلمة المرور', Icons.lock_rounded).copyWith(
                   helperText: 'تُحفظ على هذا الجهاز فقط',
                   suffixIcon: IconButton(
                     onPressed: () => setState(() => _hide = !_hide),
-                    icon: Icon(_hide ? Icons.visibility : Icons.visibility_off),
+                    icon: Icon(_hide ? Icons.visibility_rounded : Icons.visibility_off_rounded),
                   ),
                 ),
               ),
@@ -1509,7 +1509,7 @@ class _SasAccountDialogState extends State<SasAccountDialog> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.cable),
+                : const Icon(Icons.cable_rounded),
             label: const Text('اتصال وحفظ'),
           ),
         ],
@@ -1544,7 +1544,7 @@ class _PickedCompanyHeader extends StatelessWidget {
         child: Row(
           children: [
             Icon(
-              national ? Icons.account_tree_outlined : Icons.verified_outlined,
+              national ? Icons.account_tree_rounded : Icons.verified_rounded,
               color: colors.onSecondaryContainer,
             ),
             const SizedBox(width: 10),
@@ -1637,7 +1637,7 @@ class _CompanyPickerButton extends StatelessWidget {
           child: OutlinedButton.icon(
             key: const ValueKey('pick-company-directory'),
             onPressed: () => _open(context, all),
-            icon: const Icon(Icons.apartment_outlined),
+            icon: const Icon(Icons.apartment_rounded),
             label: const Text('اختر من دليل الشركات'),
           ),
         );
@@ -1715,10 +1715,10 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
         key: const ValueKey('directory-national-project'),
         leading: CircleAvatar(
           backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-          child: const Icon(Icons.account_tree_outlined),
+          child: const Icon(Icons.account_tree_rounded),
         ),
         title: const Text('المشروع الوطني'),
-        trailing: const Icon(Icons.verified, size: 18),
+        trailing: const Icon(Icons.verified_rounded, size: 18),
         onTap: () => Navigator.pop(context, _nationalProjectPick),
       ),
     if (_showEarthlink)
@@ -1726,10 +1726,10 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
         key: const ValueKey('directory-earthlink'),
         leading: CircleAvatar(
           backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-          child: const Icon(Icons.router_outlined),
+          child: const Icon(Icons.router_rounded),
         ),
         title: const Text('إيرثلنك'),
-        trailing: const Icon(Icons.verified, size: 18),
+        trailing: const Icon(Icons.verified_rounded, size: 18),
         onTap: () => Navigator.pop(context, _earthlinkPick),
       ),
     if (_showFiberX)
@@ -1737,10 +1737,10 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
         key: const ValueKey('directory-fiberx'),
         leading: CircleAvatar(
           backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-          child: const Icon(Icons.wifi_tethering),
+          child: const Icon(Icons.wifi_tethering_rounded),
         ),
         title: const Text('فايبر اكس'),
-        trailing: const Icon(Icons.verified, size: 18),
+        trailing: const Icon(Icons.verified_rounded, size: 18),
         onTap: () => Navigator.pop(context, _fiberxPick),
       ),
   ];
@@ -1778,7 +1778,7 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
                       onChanged: (_) => setState(() {}),
                       decoration: const InputDecoration(
                         hintText: 'ابحث باسم الشركة أو الرابط',
-                        prefixIcon: Icon(Icons.search),
+                        prefixIcon: Icon(Icons.search_rounded),
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -1813,7 +1813,7 @@ class _CompanyPickerSheetState extends State<_CompanyPickerSheet> {
                               overflow: TextOverflow.ellipsis,
                             ),
                             trailing: c.seed
-                                ? const Icon(Icons.verified, size: 18)
+                                ? const Icon(Icons.verified_rounded, size: 18)
                                 : null,
                             onTap: () => Navigator.pop(context, c),
                           );
@@ -1888,7 +1888,7 @@ class DeleteSubscribersDialog extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.info_outline, size: 18, color: colors.primary),
+                  Icon(Icons.info_rounded, size: 18, color: colors.primary),
                   const SizedBox(width: 6),
                   Expanded(child: Text(note)),
                 ],
@@ -2040,7 +2040,7 @@ class _ProviderCard extends StatelessWidget {
               )
             : PopupMenuButton<String>(
                 enabled: enabled,
-                icon: const Icon(Icons.more_vert),
+                icon: const Icon(Icons.more_vert_rounded),
                 onSelected: (v) => switch (v) {
                   'sync' => onSync(),
                   'edit' => onEdit(),
@@ -2052,7 +2052,7 @@ class _ProviderCard extends StatelessWidget {
                     value: 'sync',
                     child: Row(
                       children: [
-                        Icon(Icons.sync, size: 20),
+                        Icon(Icons.sync_rounded, size: 20),
                         SizedBox(width: 8),
                         Text('مزامنة'),
                       ],
@@ -2062,7 +2062,7 @@ class _ProviderCard extends StatelessWidget {
                     value: 'edit',
                     child: Row(
                       children: [
-                        Icon(Icons.edit_outlined, size: 20),
+                        Icon(Icons.edit_rounded, size: 20),
                         SizedBox(width: 8),
                         Text('تعديل'),
                       ],
@@ -2072,7 +2072,7 @@ class _ProviderCard extends StatelessWidget {
                     value: 'unlink',
                     child: Row(
                       children: [
-                        Icon(Icons.link_off, color: colors.error, size: 20),
+                        Icon(Icons.link_off_rounded, color: colors.error, size: 20),
                         const SizedBox(width: 8),
                         const Text('فصل'),
                       ],

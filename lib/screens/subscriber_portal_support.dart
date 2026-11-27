@@ -261,7 +261,7 @@ class _PortalTicketScreenState extends State<PortalTicketScreen> {
                                 dimension: 20,
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
-                            : const Icon(Icons.send),
+                            : const Icon(Icons.send_rounded),
                       ),
                     ],
                   ),

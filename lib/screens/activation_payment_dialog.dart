@@ -285,7 +285,7 @@ class _ActivationPaymentDialogState extends State<ActivationPaymentDialog> {
                           ? 'اضغط لاختيار كارت غير مستخدم'
                           : 'أدخل الرقم المطبوع على بطاقة الشحن',
                       suffixIcon: _hasCardPicker
-                          ? const Icon(Icons.arrow_drop_down)
+                          ? const Icon(Icons.arrow_drop_down_rounded)
                           : null,
                     ),
                     validator: (_) {
@@ -365,7 +365,7 @@ class _UnusedCardsSheetState extends State<_UnusedCardsSheet> {
                 padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
                 child: Row(
                   children: [
-                    Icon(Icons.credit_card, color: Colors.indigo),
+                    Icon(Icons.credit_card_rounded, color: Colors.indigo),
                     SizedBox(width: 8),
                     Text(
                       'اختر كارتاً غير مستخدم',
@@ -387,7 +387,7 @@ class _UnusedCardsSheetState extends State<_UnusedCardsSheet> {
                     }
                     if (snap.hasError) {
                       return _message(
-                        icon: Icons.error_outline,
+                        icon: Icons.error_rounded,
                         color: Colors.red.shade700,
                         text: 'تعذّر جلب الكروت. تحقق من الاتصال.',
                         showRetry: true,
@@ -396,7 +396,7 @@ class _UnusedCardsSheetState extends State<_UnusedCardsSheet> {
                     final cards = snap.data ?? const <CardPin>[];
                     if (cards.isEmpty) {
                       return _message(
-                        icon: Icons.inbox_outlined,
+                        icon: Icons.inbox_rounded,
                         color: Colors.grey.shade600,
                         text: 'لا توجد كروت غير مستخدمة. اشترِ كروتاً أولاً.',
                       );
@@ -409,7 +409,7 @@ class _UnusedCardsSheetState extends State<_UnusedCardsSheet> {
                         final c = cards[i];
                         return ListTile(
                           key: Key('unused-card-${c.pin}'),
-                          leading: const Icon(Icons.confirmation_number_outlined),
+                          leading: const Icon(Icons.confirmation_number_rounded),
                           title: Text(
                             c.pin,
                             style: const TextStyle(
@@ -434,7 +434,7 @@ class _UnusedCardsSheetState extends State<_UnusedCardsSheet> {
                 child: TextButton.icon(
                   onPressed: () =>
                       Navigator.pop(context, _manualEntrySignal),
-                  icon: const Icon(Icons.keyboard),
+                  icon: const Icon(Icons.keyboard_rounded),
                   label: const Text('إدخال رقم الكارت يدوياً'),
                 ),
               ),
@@ -463,7 +463,7 @@ class _UnusedCardsSheetState extends State<_UnusedCardsSheet> {
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: _retry,
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(Icons.refresh_rounded),
               label: const Text('إعادة المحاولة'),
             ),
           ],

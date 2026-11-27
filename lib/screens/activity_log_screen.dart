@@ -114,26 +114,26 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
   IconData _eventIcon(DailyTaskEvent event) {
     switch (event.type) {
       case 'debt_added':
-        return Icons.add_card_outlined;
+        return Icons.add_card_rounded;
       case DailyTaskEvent.debtRemovedType:
-        return Icons.remove_circle_outline;
+        return Icons.remove_circle_rounded;
       case 'debt_payment':
       case DailyTaskEvent.debtEntryCollectionType:
-        return Icons.payments_outlined;
+        return Icons.payments_rounded;
       case 'activation':
         return Icons.check_circle_outline_rounded;
       case DailyTaskEvent.debtEditType:
         return Icons.edit_note_rounded;
       case DailyTaskEvent.subscriberCreatedType:
-        return Icons.person_add_alt_1_outlined;
+        return Icons.person_add_alt_1_rounded;
       case DailyTaskEvent.subscriberUpdatedType:
-        return Icons.manage_accounts_outlined;
+        return Icons.manage_accounts_rounded;
       case DailyTaskEvent.subscriberDeletedType:
-        return Icons.person_remove_outlined;
+        return Icons.person_remove_rounded;
       case DailyTaskEvent.subscriberPackageChangedType:
         return Icons.swap_horiz_rounded;
       case DailyTaskEvent.subscriberDisabledType:
-        return Icons.person_off_outlined;
+        return Icons.person_off_rounded;
       case DailyTaskEvent.subscriberEnabledType:
         return Icons.person_outline_rounded;
       case DailyTaskEvent.subscriberExtendedType:
@@ -141,9 +141,9 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
       case DailyTaskEvent.activationRequestedType:
         return Icons.play_circle_outline_rounded;
       case 'payment_approved':
-        return Icons.verified_outlined;
+        return Icons.verified_rounded;
       case 'payment_rejected':
-        return Icons.cancel_outlined;
+        return Icons.cancel_rounded;
       default:
         return Icons.history_rounded;
     }
@@ -212,7 +212,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                       const SizedBox(width: 8),
                       OutlinedButton.icon(
                         onPressed: _selectDate,
-                        icon: const Icon(Icons.calendar_month_outlined),
+                        icon: const Icon(Icons.calendar_month_rounded),
                         label: Text(
                           _dateFilter == null
                               ? 'كل التواريخ'
@@ -225,7 +225,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                         IconButton(
                           tooltip: 'إلغاء فلتر التاريخ',
                           onPressed: () => setState(() => _dateFilter = null),
-                          icon: const Icon(Icons.filter_alt_off_outlined),
+                          icon: const Icon(Icons.filter_alt_off_rounded),
                         ),
                     ],
                   ),
